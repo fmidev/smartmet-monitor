@@ -30,46 +30,74 @@ class ActivePanel(Panel):
 
     def draw(self, win, store):
         h, w = win.getmaxyx()
-        snap = store.activerequests
-        age = f"{time.time() - snap.fetched_at:.1f}s ago" if snap.fetched_at else "never"
-        hdr_attr = theme.attr(theme.P_TAB_ACTIVE) if snap.ok else theme.attr(theme.P_BAD, curses.A_BOLD)
-        safe_addstr(win, 0, 0,
-                    f" Active — {'OK' if snap.ok else 'ERROR'}  fetched {age}".ljust(w - 1),
-                    hdr_attr)
-        if not snap.ok:
-            safe_addstr(win, 2, 2, f"error: {snap.error}", theme.attr(theme.P_BAD))
-            return
-        rows = snap.rows or []
-        if not rows:
-            safe_addstr(win, 2, 2, "no active requests", theme.attr(theme.P_DIM))
+        hosts = store.admin_hosts
+        if not hosts:
+            safe_addstr(win, 0, 0, " Active — no admin URLs configured".ljust(w - 1),
+                        theme.attr(theme.P_DIM))
             return
 
-        # sort by descending duration (long-running first)
         def dur(r):
             try:
                 return float(r.get("Duration") or r.get("duration") or 0)
             except (ValueError, TypeError):
                 return 0.0
 
-        rows = sorted(rows, key=dur, reverse=True)
-        safe_addstr(win, 2, 0,
-                    f"{'id':>6} {'dur_s':>7} {'client':<20} {'apikey':<20}  request",
+        flat: list = []
+        ok_count = 0
+        err_msg = None
+        for host in hosts:
+            snap = store.activerequests.get(host)
+            if snap is None:
+                continue
+            if snap.ok:
+                ok_count += 1
+                for r in snap.rows or []:
+                    flat.append((host, r))
+            elif err_msg is None:
+                err_msg = f"{host}: {snap.error}"
+
+        multi = len(hosts) > 1
+        hdr_state = f"{ok_count}/{len(hosts)} hosts OK" if multi else (
+            "OK" if ok_count == len(hosts) else "ERROR"
+        )
+        hdr_attr = (theme.attr(theme.P_TAB_ACTIVE) if ok_count == len(hosts)
+                    else theme.attr(theme.P_BAD, curses.A_BOLD))
+        safe_addstr(win, 0, 0, f" Active — {hdr_state}".ljust(w - 1), hdr_attr)
+
+        if err_msg and ok_count == 0:
+            safe_addstr(win, 2, 2, f"error: {err_msg}", theme.attr(theme.P_BAD))
+            return
+        if not flat:
+            safe_addstr(win, 2, 2, "no active requests", theme.attr(theme.P_DIM))
+            return
+
+        flat.sort(key=lambda it: dur(it[1]), reverse=True)
+        host_col = 18 if multi else 0
+        hdr_line = (
+            (f"{'host':<{host_col}} " if multi else "")
+            + f"{'id':>6} {'dur_s':>7} {'client':<20} {'apikey':<20}  request"
+        )
+        safe_addstr(win, 2, 0, hdr_line,
                     theme.attr(theme.P_HEADER, curses.A_BOLD))
         safe_addstr(win, 3, 0, "─" * (w - 1), theme.attr(theme.P_DIM))
 
         body_top = 4
         body_h = h - body_top - 1
-        if self.scroll >= len(rows):
-            self.scroll = max(0, len(rows) - 1)
+        if self.scroll >= len(flat):
+            self.scroll = max(0, len(flat) - 1)
 
-        for i, r in enumerate(rows[self.scroll : self.scroll + body_h]):
+        for i, (host, r) in enumerate(flat[self.scroll : self.scroll + body_h]):
             rid = str(r.get("Id") or r.get("id") or "?")
             d = dur(r)
             cip = str(r.get("ClientIP") or r.get("clientip") or "?")
             ak = str(r.get("Apikey") or r.get("apikey") or "-")
             req = str(r.get("RequestString") or r.get("requeststring") or "")
             dur_attr = theme.duration_color(d)
-            cells = [
+            cells = []
+            if multi:
+                cells.append((f"{host[:host_col-1]:<{host_col}} ",
+                              theme.attr(theme.P_ACCENT)))
+            cells += [
                 (f"{rid:>6} ", 0),
                 (f"{d:>7.1f} ", dur_attr),
                 (f"{cip[:20]:<20} ", 0),

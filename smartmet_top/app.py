@@ -18,7 +18,7 @@ from .panels.logs import LogsPanel
 from .panels.overview import OverviewPanel
 from .panels.services import ServicesPanel
 from .panels.urls import UrlsPanel
-from .sources.adminapi import poll_admin
+from .sources.adminapi import poll_all
 from .sources.logtail import bulk_load, tail_many
 from .state.store import Store
 
@@ -28,11 +28,14 @@ KEY_POLL = 0.02   # seconds between key polls
 
 
 class App:
-    def __init__(self, log_paths: List[str], admin_url: Optional[str],
+    def __init__(self, log_paths: List[str],
+                 admin_urls: List[tuple],  # [(host_label, base_url), ...]
                  admin_interval: float, replay: bool) -> None:
         self.store = Store()
+        for host, _ in admin_urls:
+            self.store.register_admin_host(host)
         self.log_paths = log_paths
-        self.admin_url = admin_url
+        self.admin_urls = admin_urls
         self.admin_interval = admin_interval
         self.replay = replay
         self.panels: List[Panel] = [
@@ -62,8 +65,9 @@ class App:
         src = []
         if self.log_paths:
             src.append(f"logs:{self.store.logtail_status}")
-        if self.admin_url:
-            src.append(f"admin:{self.store.admin_status}")
+        for host in self.store.admin_hosts:
+            s = self.store.admin_status.get(host, "?")
+            src.append(f"{host}:{s}")
         status = "  ".join(src)
         safe_addstr(stdscr, 0, 0, (title + status).ljust(w - 1),
                     theme.attr(theme.P_TITLE, curses.A_BOLD))
@@ -160,10 +164,10 @@ class App:
             await bulk_load(self.log_paths, self.store)
         if self.log_paths:
             tasks.append(asyncio.create_task(tail_many(self.log_paths, self.store)))
-        if self.admin_url:
+        if self.admin_urls:
             tasks.append(
                 asyncio.create_task(
-                    poll_admin(self.admin_url, self.store, self.admin_interval)
+                    poll_all(self.admin_urls, self.store, self.admin_interval)
                 )
             )
 
@@ -200,9 +204,9 @@ class App:
                     pass
 
 
-def run_app(log_paths: List[str], admin_url: Optional[str],
+def run_app(log_paths: List[str], admin_urls: List[tuple],
             admin_interval: float, replay: bool) -> None:
-    app = App(log_paths, admin_url, admin_interval, replay)
+    app = App(log_paths, admin_urls, admin_interval, replay)
 
     def _curses_main(stdscr):
         # asyncio.run inside the curses wrapper keeps teardown correct

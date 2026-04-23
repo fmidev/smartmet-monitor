@@ -25,9 +25,11 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
              f"Default if omitted: {DEFAULT_LOG_GLOB}",
     )
     p.add_argument(
-        "-u", "--admin-url", default=None, metavar="URL",
-        help="Admin plugin base URL, e.g. http://localhost:8080/admin. "
-             "If omitted, admin-only panels will be empty.",
+        "-u", "--admin-url", action="append", default=[], metavar="URL",
+        help="Admin-plugin base URL, e.g. http://localhost:8080/admin. "
+             "May be given multiple times, or as a comma-separated list, "
+             "to monitor multiple hosts. Each URL can be prefixed with a "
+             "label via LABEL=URL (otherwise the hostname is used).",
     )
     p.add_argument(
         "-n", "--admin-interval", type=float, default=2.0, metavar="SEC",
@@ -60,7 +62,9 @@ def main(argv=None) -> int:
                     seen.add(ap)
                     log_paths.append(ap)
 
-    if not log_paths and not args.admin_url:
+    admin_urls = _parse_admin_urls(args.admin_url)
+
+    if not log_paths and not admin_urls:
         sys.stderr.write(
             "smartmet-top: no data sources. Pass -l LOG_FILE or -u ADMIN_URL.\n"
         )
@@ -69,13 +73,47 @@ def main(argv=None) -> int:
     try:
         run_app(
             log_paths=log_paths,
-            admin_url=args.admin_url,
+            admin_urls=admin_urls,
             admin_interval=args.admin_interval,
             replay=args.replay,
         )
     except KeyboardInterrupt:
         pass
     return 0
+
+
+def _parse_admin_urls(raw: List[str]) -> List[tuple]:
+    """Expand comma-separated lists and derive a short host label per URL.
+
+    Returns a list of (label, url) tuples, label guaranteed unique.
+    """
+    from urllib.parse import urlparse
+
+    out: List[tuple] = []
+    used = set()
+    for item in raw:
+        for piece in item.split(","):
+            piece = piece.strip()
+            if not piece:
+                continue
+            # optional LABEL=URL form
+            if "=" in piece and not piece.startswith(("http://", "https://")):
+                label, _, url = piece.partition("=")
+                label = label.strip()
+                url = url.strip()
+            else:
+                url = piece
+                host = urlparse(url).hostname or url
+                label = host
+            # dedupe labels
+            base = label
+            n = 2
+            while label in used:
+                label = f"{base}#{n}"
+                n += 1
+            used.add(label)
+            out.append((label, url))
+    return out
 
 
 if __name__ == "__main__":

@@ -46,8 +46,14 @@ class HelpPanel(Panel):
                     theme.attr(theme.P_HEADER, curses.A_BOLD))
         row += 1
         safe_addstr(win, row, 2, f"  log tail: {store.logtail_status}")
-        row += 1
-        safe_addstr(win, row, 2, f"  admin:    {store.admin_status}")
+        for host in store.admin_hosts:
+            row += 1
+            s = store.admin_status.get(host, "?")
+            safe_addstr(win, row, 2, f"  admin[{host}]: {s}")
+        if not store.admin_hosts:
+            row += 1
+            safe_addstr(win, row, 2, "  admin:    (no hosts configured)",
+                        theme.attr(theme.P_DIM))
         row += 2
         safe_addstr(win, row, 2, "Press ? again to return to the previous panel.",
                     theme.attr(theme.P_DIM))

@@ -41,14 +41,14 @@ async def _run(loop, executor, fn, *args):
     return await loop.run_in_executor(executor, fn, *args)
 
 
-async def poll_admin(base_url: str, store, interval: float = 2.0) -> None:
-    """Poll admin endpoints forever and push snapshots into `store`.
-
-    Also feeds lastrequests results into store.record_request so the URLs
-    panel has data even when log files are not readable locally.
-    """
+async def poll_admin(base_url: str, host: str, store,
+                     interval: float = 2.0, executor=None) -> None:
+    """Poll admin endpoints forever and push snapshots into store[host]."""
     loop = asyncio.get_event_loop()
-    executor = ThreadPoolExecutor(max_workers=4)
+    owned_executor = executor is None
+    if executor is None:
+        executor = ThreadPoolExecutor(max_workers=4)
+    store.register_admin_host(host)
 
     endpoints = [
         ("cachestats", f"{base_url}?what=cachestats&format=json"),
@@ -57,44 +57,68 @@ async def poll_admin(base_url: str, store, interval: float = 2.0) -> None:
         ("lastrequests", f"{base_url}?what=lastrequests&format=json&minutes=1"),
     ]
 
-    seen_requests: set = set()  # dedupe lastrequests so we don't double-count
-    store.admin_status = f"polling {base_url}"
+    seen_requests: set = set()
+    store.admin_status[host] = f"polling {base_url}"
 
-    while True:
-        start = time.time()
-        any_ok = False
-        errors = []
-        for name, url in endpoints:
-            try:
-                rows = await _run(loop, executor, _fetch, url)
-                snap = getattr(store, name)
-                snap.fetched_at = time.time()
-                snap.ok = True
-                snap.error = ""
-                snap.rows = rows
-                any_ok = True
+    try:
+        while True:
+            start = time.time()
+            any_ok = False
+            errors = []
+            for name, url in endpoints:
+                snap_dict = getattr(store, name)  # Dict[host, AdminSnapshot]
+                snap = snap_dict[host]
+                try:
+                    rows = await _run(loop, executor, _fetch, url)
+                    snap.fetched_at = time.time()
+                    snap.ok = True
+                    snap.error = ""
+                    snap.rows = rows
+                    any_ok = True
 
-                if name == "lastrequests":
-                    _ingest_lastrequests(store, rows, seen_requests)
-                elif name == "cachestats":
-                    _update_cache_history(store, rows, snap.fetched_at)
-                elif name == "servicestats":
-                    _update_service_history(store, rows, snap.fetched_at)
-            except Exception as e:
-                snap = getattr(store, name)
-                snap.ok = False
-                snap.error = f"{type(e).__name__}: {e}"
-                snap.fetched_at = time.time()
-                errors.append(f"{name}: {e}")
+                    if name == "lastrequests":
+                        _ingest_lastrequests(store, rows, seen_requests)
+                    elif name == "cachestats":
+                        _update_cache_history(
+                            store.cache_history[host], rows, snap.fetched_at
+                        )
+                    elif name == "servicestats":
+                        _update_service_history(
+                            store.service_history[host], rows, snap.fetched_at
+                        )
+                except Exception as e:
+                    snap.ok = False
+                    snap.error = f"{type(e).__name__}: {e}"
+                    snap.fetched_at = time.time()
+                    errors.append(f"{name}: {e}")
 
-        store.admin_status = (
-            f"ok {base_url}" if any_ok and not errors
-            else f"partial {base_url}: {'; '.join(errors[:2])}" if any_ok
-            else f"failing {base_url}: {errors[0] if errors else 'unknown'}"
-        )
+            store.admin_status[host] = (
+                f"ok" if any_ok and not errors
+                else f"partial: {'; '.join(errors[:2])}" if any_ok
+                else f"failing: {errors[0] if errors else 'unknown'}"
+            )
 
-        elapsed = time.time() - start
-        await asyncio.sleep(max(0.0, interval - elapsed))
+            elapsed = time.time() - start
+            await asyncio.sleep(max(0.0, interval - elapsed))
+    finally:
+        if owned_executor:
+            executor.shutdown(wait=False)
+
+
+async def poll_all(urls, store, interval: float = 2.0) -> None:
+    """Run poll_admin concurrently for each (host, url) pair."""
+    executor = ThreadPoolExecutor(max_workers=4 * max(1, len(urls)))
+    tasks = []
+    for host, base_url in urls:
+        tasks.append(asyncio.create_task(
+            poll_admin(base_url, host, store, interval, executor)
+        ))
+    try:
+        await asyncio.gather(*tasks)
+    finally:
+        for t in tasks:
+            t.cancel()
+        executor.shutdown(wait=False)
 
 
 def _to_float(v, default: float = 0.0) -> float:
@@ -104,12 +128,12 @@ def _to_float(v, default: float = 0.0) -> float:
         return default
 
 
-def _update_cache_history(store, rows, ts: float) -> None:
+def _update_cache_history(history, rows, ts: float) -> None:
     names = set()
     for r in rows:
         name = str(r.get("cache_name") or r.get("name") or "?")
         names.add(name)
-        store.cache_history.append(
+        history.append(
             name,
             ts,
             {
@@ -122,15 +146,15 @@ def _update_cache_history(store, rows, ts: float) -> None:
                 "hitrate": _to_float(r.get("hitrate")),
             },
         )
-    store.cache_history.prune(names)
+    history.prune(names)
 
 
-def _update_service_history(store, rows, ts: float) -> None:
+def _update_service_history(history, rows, ts: float) -> None:
     names = set()
     for r in rows:
         name = str(r.get("Handler") or r.get("handler") or "?")
         names.add(name)
-        store.service_history.append(
+        history.append(
             name,
             ts,
             {
@@ -140,7 +164,7 @@ def _update_service_history(store, rows, ts: float) -> None:
                 "avg_ms": _to_float(r.get("AverageDuration")),
             },
         )
-    store.service_history.prune(names)
+    history.prune(names)
 
 
 def _ingest_lastrequests(store, rows, seen: set, keep_last: int = 20_000) -> None:

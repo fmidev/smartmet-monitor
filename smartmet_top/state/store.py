@@ -169,19 +169,35 @@ class Store:
         self.total_errors: int = 0
         # per-minute global metrics (for overview sparklines)
         self._global_minutes: Dict[int, MinuteBucket] = {}
-        # admin snapshots
-        self.cachestats = AdminSnapshot()
-        self.servicestats = AdminSnapshot()
-        self.activerequests = AdminSnapshot()
-        self.lastrequests = AdminSnapshot()
-        # per-entity historical series (for sparklines)
-        self.cache_history = HistorySeries()
-        self.service_history = HistorySeries()
+        # admin snapshots keyed by host label (so the UI can show all hosts).
+        # The "default" / single-host case still works — it just lives at
+        # host=<the one label>.
+        self.admin_hosts: List[str] = []
+        self.cachestats: Dict[str, AdminSnapshot] = {}
+        self.servicestats: Dict[str, AdminSnapshot] = {}
+        self.activerequests: Dict[str, AdminSnapshot] = {}
+        self.lastrequests: Dict[str, AdminSnapshot] = {}
+        # per-entity historical series (for sparklines), per host
+        self.cache_history: Dict[str, HistorySeries] = {}
+        self.service_history: Dict[str, HistorySeries] = {}
         # recent log lines (raw) for the Logs panel
         self.recent_lines: Deque[str] = deque(maxlen=2000)
         # status: data source health
         self.logtail_status: str = "(starting)"
-        self.admin_status: str = "(starting)"
+        self.admin_status: Dict[str, str] = {}
+
+    def register_admin_host(self, host: str) -> None:
+        with self._lock:
+            if host in self.admin_hosts:
+                return
+            self.admin_hosts.append(host)
+            self.cachestats.setdefault(host, AdminSnapshot())
+            self.servicestats.setdefault(host, AdminSnapshot())
+            self.activerequests.setdefault(host, AdminSnapshot())
+            self.lastrequests.setdefault(host, AdminSnapshot())
+            self.cache_history.setdefault(host, HistorySeries())
+            self.service_history.setdefault(host, HistorySeries())
+            self.admin_status.setdefault(host, "(starting)")
 
     # -- log updates --------------------------------------------------------
 
