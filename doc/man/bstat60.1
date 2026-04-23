@@ -1,0 +1,33 @@
+.TH BSTAT60 1 "2026-04-23" "smartmet-monitor" "SmartMet Server"
+.SH NAME
+bstat60 \- compatibility alias for \fBbstat -i 1h\fR (one-hour buckets)
+.SH SYNOPSIS
+.B bstat60
+.RI [ \-w\  WIDTH ]
+.RI [ \-\-ascii ]
+.RI [ LOG-FILE ]
+.SH DESCRIPTION
+.B bstat60
+is a compatibility alias kept for operators used to the original
+set of per-interval bstat functions. It calls
+.B bstat
+with
+.B -i 1h
+and forwards all remaining arguments. New scripts and
+documentation should prefer
+.BR "bstat -i 1h" .
+.PP
+Pass
+.B --ascii
+to render bars with the original
+.B =
+character instead of Unicode eighth blocks (useful for
+scripts that parsed the old output or for terminals without
+UTF-8 support).
+.SH SEE ALSO
+.BR bstat (1),
+.BR bchart (1),
+.BR burls (1),
+.BR bstatus (1),
+.BR bkeys (1),
+.BR smtop (1)

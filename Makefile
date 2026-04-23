@@ -17,7 +17,9 @@ all:
 	@echo "smartmet-monitor is a no-build package. Use 'make install' or 'make rpm'."
 
 BTOOLS = bstat bchart burls bstatus bkeys
-MANPAGES = smtop.1 bstat.1 bchart.1 burls.1 bstatus.1 bkeys.1
+LEGACY = bstat1s bstat10s bstat1 bstat10 bstat60 bstat24
+MANPAGES = smtop.1 bstat.1 bchart.1 burls.1 bstatus.1 bkeys.1 \
+           bstat1s.1 bstat10s.1 bstat1.1 bstat10.1 bstat60.1 bstat24.1
 
 install:
 	install -d $(BINDIR) $(SHAREDIR) $(MANDIR) $(DOCDIR)
@@ -25,6 +27,8 @@ install:
 	# smtop plus bstat-family command wrappers
 	install -m 0755 smtop $(BINDIR)/smtop
 	$(foreach t,$(BTOOLS),install -m 0755 bin/$(t) $(BINDIR)/$(t); )
+	# legacy compatibility aliases: bstat1s/10s/1/10/60/24
+	$(foreach t,$(LEGACY),install -m 0755 bin/$(t) $(BINDIR)/$(t); )
 	# shared library that all bstat-family wrappers source
 	install -m 0644 share/smartmet/bstat.sh $(SHAREDIR)/bstat.sh
 	# python package
@@ -43,6 +47,7 @@ install:
 uninstall:
 	rm -f $(BINDIR)/smtop $(BINDIR)/smartmet-top
 	$(foreach t,$(BTOOLS),rm -f $(BINDIR)/$(t); )
+	$(foreach t,$(LEGACY),rm -f $(BINDIR)/$(t); )
 	rm -f $(SHAREDIR)/bstat.sh
 	$(foreach m,$(MANPAGES),rm -f $(MANDIR)/$(m); )
 	rm -rf $(DOCDIR)
@@ -52,10 +57,10 @@ check:
 	python3 -c 'import sys; sys.path.insert(0, "."); import smartmet_top, smartmet_top.app'
 	python3 -m py_compile smartmet_top/*.py smartmet_top/*/*.py
 	bash -n share/smartmet/bstat.sh
-	for t in $(BTOOLS); do bash -n bin/$$t; done
+	for t in $(BTOOLS) $(LEGACY); do bash -n bin/$$t; done
 	# End-to-end: each wrapper must load the library and print at least
 	# its --help section without crashing.
-	for t in $(BTOOLS); do \
+	for t in $(BTOOLS) $(LEGACY); do \
 	    SMARTMET_MONITOR_LIB=$(CURDIR)/share/smartmet/bstat.sh \
 	        bin/$$t --help >/dev/null || exit 1; \
 	done

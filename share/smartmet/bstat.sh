@@ -39,11 +39,13 @@ _bstat_prec() {
 _bstat_parse() {
     BSTAT_INTERVAL=1h
     BSTAT_WIDTH=20
+    BSTAT_ASCII=0
     BSTAT_ARGS=()
     while (( $# )); do
         case "$1" in
             -i) BSTAT_INTERVAL="$2"; shift 2 ;;
             -w) BSTAT_WIDTH="$2"; shift 2 ;;
+            --ascii) BSTAT_ASCII=1; shift ;;
             -h|--help) BSTAT_INTERVAL=_help; shift ;;
             *)  BSTAT_ARGS+=("$1"); shift ;;
         esac
@@ -63,10 +65,13 @@ bstat() {
     _bstat_parse "$@"
     if [ "$BSTAT_INTERVAL" = _help ]; then
         cat <<EOF
-Usage: bstat [-i INTERVAL] [-w WIDTH] [LOG-FILE]
+Usage: bstat [-i INTERVAL] [-w WIDTH] [--ascii] [LOG-FILE]
 
   -i INTERVAL   bucket width: 1s, 10s, 1m, 10m, 1h, 1d  (default: 1h)
   -w WIDTH      horizontal bar width in columns         (default: 20)
+  --ascii       use = bars instead of Unicode eighth-blocks, and
+                skip the sparkline footer. For scripts that grep
+                the output or terminals without UTF-8 support.
 
 Reads stdin if no file is given.
 EOF
@@ -79,14 +84,21 @@ EOF
         return 1
     fi
 
-    gawk -v PREC="$prec" -v BW="$BSTAT_WIDTH" '
+    gawk -v PREC="$prec" -v BW="$BSTAT_WIDTH" -v ASCII="$BSTAT_ASCII" '
     BEGIN {
-        # partial-block chars (1/8 .. 7/8 of a full block)
-        p8[1]="▏"; p8[2]="▎"; p8[3]="▍"; p8[4]="▌"
-        p8[5]="▋"; p8[6]="▊"; p8[7]="▉"
-        # spark blocks (height 0..8)
-        sp[0]=" "; sp[1]="▁"; sp[2]="▂"; sp[3]="▃"; sp[4]="▄"
-        sp[5]="▅"; sp[6]="▆"; sp[7]="▇"; sp[8]="█"
+        if (ASCII) {
+            FULL = "="
+            p8[1]="="; p8[2]="="; p8[3]="="; p8[4]="="
+            p8[5]="="; p8[6]="="; p8[7]="="
+            sp[0]=" "; sp[1]="."; sp[2]="."; sp[3]=":"; sp[4]=":"
+            sp[5]="|"; sp[6]="|"; sp[7]="#"; sp[8]="#"
+        } else {
+            FULL = "█"
+            p8[1]="▏"; p8[2]="▎"; p8[3]="▍"; p8[4]="▌"
+            p8[5]="▋"; p8[6]="▊"; p8[7]="▉"
+            sp[0]=" "; sp[1]="▁"; sp[2]="▂"; sp[3]="▃"; sp[4]="▄"
+            sp[5]="▅"; sp[6]="▆"; sp[7]="▇"; sp[8]="█"
+        }
     }
     {
         # $9 is "[2026-04-23T07:00:00.125]" — strip the leading [.
@@ -206,6 +218,7 @@ EOF
     }
 
     # Horizontal bar 0..width columns wide using eighth-block partials.
+    # In ASCII mode FULL is "=" and p8[*] is also "=" (no partials).
     function vbar(val, maxval, width,   full, p, s, i, eighths, visual) {
         if (maxval <= 0) {
             s = ""
@@ -219,7 +232,7 @@ EOF
         full = int(eighths / 8)
         p = eighths - full * 8
         s = ""
-        for (i=0; i<full; i++) s = s "█"
+        for (i=0; i<full; i++) s = s FULL
         visual = full
         if (p > 0 && visual < width) { s = s p8[p]; visual++ }
         while (visual < width) { s = s " "; visual++ }

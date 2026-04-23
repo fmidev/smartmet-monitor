@@ -1,0 +1,20 @@
+#!/bin/bash
+# bstat60 — compatibility alias for: bstat -i 1h "$@"
+# Preserved for existing operator muscle memory and older documentation.
+# Accepts every flag `bstat` accepts (including --ascii); use `bstat`
+# directly for new scripts.
+set -o pipefail
+
+LIB="${SMARTMET_MONITOR_LIB:-/usr/share/smartmet/bstat.sh}"
+if [ ! -r "$LIB" ]; then
+    here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+    if [ -r "$here/../share/smartmet/bstat.sh" ]; then
+        LIB="$here/../share/smartmet/bstat.sh"
+    fi
+fi
+if [ ! -r "$LIB" ]; then
+    echo "bstat60: library not found at $LIB" >&2
+    exit 1
+fi
+. "$LIB"
+bstat -i 1h "$@"

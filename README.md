@@ -26,15 +26,41 @@ Each tool accepts a log file path (or reads stdin) and writes a
 Unicode-block summary to the terminal.
 
 ```sh
-bstat    [-i 1s|10s|1m|10m|1h|1d] [-w WIDTH] [LOG]   # per-bucket summary + sparklines
-bchart   [-i INTERVAL] [-m reqs|ms|kb|mb|err] [LOG]  # btop-style vertical chart
-burls    [-n N] [-s reqs|ms|kb|mb] [LOG]             # top URLs
-bstatus                                   [LOG]      # HTTP status distribution
-bkeys    [-n N] [-s reqs|ms|mb]           [LOG]      # top API keys
+bstat    [-i 1s|10s|1m|10m|1h|1d] [-w WIDTH] [--ascii] [LOG]
+bchart   [-i INTERVAL] [-m reqs|ms|kb|mb|err] [LOG]
+burls    [-n N] [-s reqs|ms|kb|mb] [LOG]
+bstatus                                   [LOG]
+bkeys    [-n N] [-s reqs|ms|mb]           [LOG]
 ```
 
 Default log path: anything matching `/var/log/smartmet/*-access-log` if
 you omit the argument on a SmartMet host.
+
+### Legacy compatibility aliases
+
+The package also installs six compatibility commands that pin the
+bucket size. These exist so operator muscle memory and older scripts
+continue to work during a gradual rollout:
+
+| Alias       | Equivalent        |
+|-------------|-------------------|
+| `bstat1s`   | `bstat -i 1s`     |
+| `bstat10s`  | `bstat -i 10s`    |
+| `bstat1`    | `bstat -i 1m`     |
+| `bstat10`   | `bstat -i 10m`    |
+| `bstat60`   | `bstat -i 1h`     |
+| `bstat24`   | `bstat -i 1d`     |
+
+All six forward their arguments to `bstat`, so you can still pass
+`--ascii` / `-w` / a log file path. New scripts should prefer the
+`bstat -i X` form directly.
+
+### `--ascii` mode
+
+Pass `--ascii` to any `bstat*` invocation to render bars with `=`
+instead of Unicode eighth-blocks, and skip the sparkline footer.
+Useful for scripts that grep the output, or for terminals without
+reliable UTF-8 support.
 
 The tools parse the SmartMet access-log format produced by
 `spine/AccessLogger.cpp`:

@@ -53,6 +53,15 @@ make install \
 %{_bindir}/burls
 %{_bindir}/bstatus
 %{_bindir}/bkeys
+# Legacy compatibility aliases. These all call `bstat -i <X>` and
+# remain supported so existing operator workflows and documentation
+# do not break during gradual rollouts.
+%{_bindir}/bstat1s
+%{_bindir}/bstat10s
+%{_bindir}/bstat1
+%{_bindir}/bstat10
+%{_bindir}/bstat60
+%{_bindir}/bstat24
 %{_datadir}/smartmet/bstat.sh
 %{_mandir}/man1/smtop.1*
 %{_mandir}/man1/bstat.1*
@@ -60,6 +69,12 @@ make install \
 %{_mandir}/man1/burls.1*
 %{_mandir}/man1/bstatus.1*
 %{_mandir}/man1/bkeys.1*
+%{_mandir}/man1/bstat1s.1*
+%{_mandir}/man1/bstat10s.1*
+%{_mandir}/man1/bstat1.1*
+%{_mandir}/man1/bstat10.1*
+%{_mandir}/man1/bstat60.1*
+%{_mandir}/man1/bstat24.1*
 %doc %{_docdir}/smartmet-monitor/README.md
 %{_python3_sitelib}/smartmet_top/
 %{_python3_sitelib}/smartmet_top/*/
