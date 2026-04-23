@@ -13,6 +13,7 @@ from .panels.active import ActivePanel
 from .panels.base import Panel, safe_addstr
 from .panels.caches import CachesPanel
 from .panels.help import HelpPanel
+from .panels.keys import KeysPanel
 from .panels.logs import LogsPanel
 from .panels.overview import OverviewPanel
 from .panels.services import ServicesPanel
@@ -41,6 +42,7 @@ class App:
             ServicesPanel(),
             ActivePanel(),
             LogsPanel(),
+            KeysPanel(),
         ]
         self.help_panel = HelpPanel()
         self.panel_idx = 1  # default: URLs (primary)

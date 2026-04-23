@@ -161,6 +161,9 @@ class Store:
     def __init__(self) -> None:
         self._lock = RLock()
         self.urls: Dict[str, UrlStats] = {}
+        # per API key — UrlStats whose .url is the key. apikey_counts on
+        # the per-key object stores url→count (the drill-in view uses it).
+        self.keys: Dict[str, UrlStats] = {}
         self.total_requests: int = 0
         self.total_bytes: int = 0
         self.total_errors: int = 0
@@ -197,6 +200,17 @@ class Store:
                 u = UrlStats(url=url)
                 self.urls[url] = u
             u.record(ts, dur_ms, nbytes, status, apikey)
+
+            # per-API-key aggregate reuses UrlStats with the key name as
+            # the identifier and counts the URLs that key hit.
+            ak = apikey or "-"
+            k = self.keys.get(ak)
+            if k is None:
+                k = UrlStats(url=ak)
+                self.keys[ak] = k
+            k.record(ts, dur_ms, nbytes, status, apikey)
+            # accumulate URLs-per-key for the drill-in view
+            k.apikey_counts[url] = k.apikey_counts.get(url, 0) + 1
 
             self.total_requests += 1
             self.total_bytes += nbytes
@@ -281,3 +295,16 @@ class Store:
     def url_detail(self, url: str) -> Optional[UrlStats]:
         with self._lock:
             return self.urls.get(url)
+
+    def snapshot_keys(self, window_min: int) -> List[Tuple[str, MinuteBucket]]:
+        with self._lock:
+            out = []
+            for k, ks in self.keys.items():
+                w = ks.window(window_min)
+                if w.count > 0:
+                    out.append((k, w))
+            return out
+
+    def key_detail(self, apikey: str) -> Optional[UrlStats]:
+        with self._lock:
+            return self.keys.get(apikey)
