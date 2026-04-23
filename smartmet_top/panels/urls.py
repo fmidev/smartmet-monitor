@@ -7,6 +7,7 @@ import curses
 import time
 from typing import List, Optional, Tuple
 
+from .. import theme
 from ..state.store import MinuteBucket
 from ..widgets.bars import (
     hbar,
@@ -15,7 +16,7 @@ from ..widgets.bars import (
     human_count,
     human_ms,
 )
-from .base import Panel, safe_addstr
+from .base import Panel, safe_addstr, write_row
 
 # window sizes (minutes) the user can cycle through with [ / ]
 WINDOWS = (1, 5, 15, 60)
@@ -164,15 +165,17 @@ class UrlsPanel(Panel):
             f"  urls:{len(urls)}  filter:{self.filter or '<none>'}"
             f"  [s/S:sort r:reverse [/]:window /:filter enter:drill"
         )
-        safe_addstr(win, 0, 0, hdr.ljust(w - 1), curses.A_REVERSE)
+        safe_addstr(win, 0, 0, hdr.ljust(w - 1),
+                    theme.attr(theme.P_TAB_ACTIVE))
 
         # table header
         cols_text = (
             f"{'URL':<40}  {'reqs':>7} {'mean':>7} {'p50':>7} {'p95':>7} "
             f"{'max':>7}  {'KB':>6} {'MB':>7} {'err%':>5}  {'latency ' + str(win_min) + 'm':<30}"
         )
-        safe_addstr(win, 2, 0, cols_text, curses.A_BOLD)
-        safe_addstr(win, 3, 0, "─" * (w - 1))
+        safe_addstr(win, 2, 0, cols_text,
+                    theme.attr(theme.P_HEADER, curses.A_BOLD))
+        safe_addstr(win, 3, 0, "─" * (w - 1), theme.attr(theme.P_DIM))
 
         body_top = 4
         body_h = h - body_top - 1
@@ -207,7 +210,6 @@ class UrlsPanel(Panel):
 
         for i, (url, b) in enumerate(visible):
             row = body_top + i
-            u = store.url_detail(url)
             count = b.count
             mean_ms = b.hist.mean()
             p50 = b.hist.p50()
@@ -217,27 +219,27 @@ class UrlsPanel(Panel):
             tot_mb = b.bytes / 1_048_576
             err_pct = (b.errors / count * 100) if count else 0
 
-            line = (
-                f"{url[:40]:<40}  "
-                f"{human_count(count):>7} "
-                f"{human_ms(mean_ms):>7} "
-                f"{human_ms(p50):>7} "
-                f"{human_ms(p95):>7} "
-                f"{human_ms(max_ms):>7}  "
-                f"{avg_kb:>6.1f} "
-                f"{tot_mb:>7.2f} "
-                f"{err_pct:>4.1f}%  "
-            )
-            attr = 0
-            if self.scroll + i == self.cursor:
-                attr = curses.A_REVERSE
-            elif err_pct > 5:
-                attr = curses.A_BOLD
+            row_attr = curses.A_REVERSE if self.scroll + i == self.cursor else 0
+            cells = [
+                (f"{url[:40]:<40}  ", 0),
+                (f"{human_count(count):>7} ", 0),
+                (f"{human_ms(mean_ms):>7} ", theme.latency_color(mean_ms)),
+                (f"{human_ms(p50):>7} ", theme.latency_color(p50)),
+                (f"{human_ms(p95):>7} ", theme.latency_color(p95)),
+                (f"{human_ms(max_ms):>7}  ", theme.latency_color(max_ms)),
+                (f"{avg_kb:>6.1f} ", 0),
+                (f"{tot_mb:>7.2f} ", 0),
+                (f"{err_pct:>4.1f}%  ", theme.err_color(err_pct)),
+            ]
+            x_end = write_row(win, row, 0, cells, row_attr=row_attr)
 
-            # leave room for sparkline on the right
-            avail_spark = max(0, w - len(line) - 2)
-            sl = sparkline(series_cache.get(url, []), maxval=spark_max, width=min(30, avail_spark))
-            safe_addstr(win, row, 0, line + sl, attr)
+            avail_spark = max(0, w - x_end - 2)
+            sl = sparkline(series_cache.get(url, []),
+                           maxval=spark_max,
+                           width=min(30, avail_spark))
+            if sl:
+                safe_addstr(win, row, x_end, sl,
+                            theme.attr(theme.P_SPARK) | row_attr)
 
     def _draw_detail(self, win, store):
         h, w = win.getmaxyx()

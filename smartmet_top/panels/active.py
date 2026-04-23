@@ -5,7 +5,8 @@ from __future__ import annotations
 import curses
 import time
 
-from .base import Panel, safe_addstr
+from .. import theme
+from .base import Panel, safe_addstr, write_row
 
 
 class ActivePanel(Panel):
@@ -31,15 +32,16 @@ class ActivePanel(Panel):
         h, w = win.getmaxyx()
         snap = store.activerequests
         age = f"{time.time() - snap.fetched_at:.1f}s ago" if snap.fetched_at else "never"
+        hdr_attr = theme.attr(theme.P_TAB_ACTIVE) if snap.ok else theme.attr(theme.P_BAD, curses.A_BOLD)
         safe_addstr(win, 0, 0,
                     f" Active — {'OK' if snap.ok else 'ERROR'}  fetched {age}".ljust(w - 1),
-                    curses.A_REVERSE)
+                    hdr_attr)
         if not snap.ok:
-            safe_addstr(win, 2, 2, f"error: {snap.error}")
+            safe_addstr(win, 2, 2, f"error: {snap.error}", theme.attr(theme.P_BAD))
             return
         rows = snap.rows or []
         if not rows:
-            safe_addstr(win, 2, 2, "no active requests")
+            safe_addstr(win, 2, 2, "no active requests", theme.attr(theme.P_DIM))
             return
 
         # sort by descending duration (long-running first)
@@ -51,8 +53,9 @@ class ActivePanel(Panel):
 
         rows = sorted(rows, key=dur, reverse=True)
         safe_addstr(win, 2, 0,
-                    f"{'id':>6} {'dur_s':>7} {'client':<20} {'apikey':<20}  request", curses.A_BOLD)
-        safe_addstr(win, 3, 0, "─" * (w - 1))
+                    f"{'id':>6} {'dur_s':>7} {'client':<20} {'apikey':<20}  request",
+                    theme.attr(theme.P_HEADER, curses.A_BOLD))
+        safe_addstr(win, 3, 0, "─" * (w - 1), theme.attr(theme.P_DIM))
 
         body_top = 4
         body_h = h - body_top - 1
@@ -65,6 +68,12 @@ class ActivePanel(Panel):
             cip = str(r.get("ClientIP") or r.get("clientip") or "?")
             ak = str(r.get("Apikey") or r.get("apikey") or "-")
             req = str(r.get("RequestString") or r.get("requeststring") or "")
-            line = f"{rid:>6} {d:>7.1f} {cip[:20]:<20} {ak[:20]:<20}  {req}"
-            attr = curses.A_BOLD if d > 10 else 0
-            safe_addstr(win, body_top + i, 0, line, attr)
+            dur_attr = theme.duration_color(d)
+            cells = [
+                (f"{rid:>6} ", 0),
+                (f"{d:>7.1f} ", dur_attr),
+                (f"{cip[:20]:<20} ", 0),
+                (f"{ak[:20]:<20}  ", theme.attr(theme.P_ACCENT)),
+                (req, 0),
+            ]
+            write_row(win, body_top + i, 0, cells)

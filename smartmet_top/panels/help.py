@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import curses
 
+from .. import theme
 from .base import Panel, safe_addstr
 
 
@@ -31,18 +32,22 @@ class HelpPanel(Panel):
 
     def draw(self, win, store):
         h, w = win.getmaxyx()
-        safe_addstr(win, 0, 0, " Help".ljust(w - 1), curses.A_REVERSE)
-        safe_addstr(win, 2, 2, "Keys", curses.A_BOLD)
+        safe_addstr(win, 0, 0, " Help".ljust(w - 1),
+                    theme.attr(theme.P_TAB_ACTIVE))
+        safe_addstr(win, 2, 2, "Keys", theme.attr(theme.P_HEADER, curses.A_BOLD))
         row = 3
         for k, v in KEYS:
-            safe_addstr(win, row, 2, f"  {k:<22} {v}")
+            safe_addstr(win, row, 2, f"  {k:<22}", theme.attr(theme.P_ACCENT))
+            safe_addstr(win, row, 28, v)
             row += 1
 
         row += 1
-        safe_addstr(win, row, 2, "Data sources", curses.A_BOLD)
+        safe_addstr(win, row, 2, "Data sources",
+                    theme.attr(theme.P_HEADER, curses.A_BOLD))
         row += 1
         safe_addstr(win, row, 2, f"  log tail: {store.logtail_status}")
         row += 1
         safe_addstr(win, row, 2, f"  admin:    {store.admin_status}")
         row += 2
-        safe_addstr(win, row, 2, "Press ? again to return to the previous panel.")
+        safe_addstr(win, row, 2, "Press ? again to return to the previous panel.",
+                    theme.attr(theme.P_DIM))

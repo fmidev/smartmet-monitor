@@ -8,6 +8,7 @@ import signal
 import time
 from typing import List, Optional
 
+from . import theme
 from .panels.active import ActivePanel
 from .panels.base import Panel, safe_addstr
 from .panels.caches import CachesPanel
@@ -62,23 +63,28 @@ class App:
         if self.admin_url:
             src.append(f"admin:{self.store.admin_status}")
         status = "  ".join(src)
-        safe_addstr(stdscr, 0, 0, (title + status).ljust(w - 1), curses.A_REVERSE)
+        safe_addstr(stdscr, 0, 0, (title + status).ljust(w - 1),
+                    theme.attr(theme.P_TITLE, curses.A_BOLD))
 
         # tabs
         x = 1
         for i, p in enumerate(self.panels):
             label = f" {p.hotkey} {p.name} "
-            attr = curses.A_REVERSE if (not self.show_help and i == self.panel_idx) else 0
-            safe_addstr(stdscr, 1, x, label, attr)
+            if not self.show_help and i == self.panel_idx:
+                a = theme.attr(theme.P_TAB_ACTIVE, curses.A_BOLD)
+            else:
+                a = theme.attr(theme.P_TAB_INACTIVE)
+            safe_addstr(stdscr, 1, x, label, a)
             x += len(label) + 1
         # help hint
         hint = " ? help   q quit   Tab next "
         if x + len(hint) < w:
-            safe_addstr(stdscr, 1, w - len(hint) - 2, hint, curses.A_DIM)
+            safe_addstr(stdscr, 1, w - len(hint) - 2, hint, theme.attr(theme.P_DIM))
 
         # status line
         p = self.current_panel
-        safe_addstr(stdscr, h - 1, 0, f" {p.help_text}".ljust(w - 1), curses.A_REVERSE)
+        safe_addstr(stdscr, h - 1, 0, f" {p.help_text}".ljust(w - 1),
+                    theme.attr(theme.P_TITLE))
 
     def draw(self, stdscr) -> None:
         stdscr.erase()
@@ -139,6 +145,7 @@ class App:
         curses.curs_set(0)
         stdscr.nodelay(True)
         stdscr.keypad(True)
+        theme.init()
         try:
             curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
         except Exception:

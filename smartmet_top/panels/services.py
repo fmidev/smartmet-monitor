@@ -5,8 +5,9 @@ from __future__ import annotations
 import curses
 import time
 
+from .. import theme
 from ..widgets.bars import hbar, human_count, human_ms
-from .base import Panel, safe_addstr
+from .base import Panel, safe_addstr, write_row
 
 
 def _f(v, default=0.0):
@@ -40,15 +41,16 @@ class ServicesPanel(Panel):
         h, w = win.getmaxyx()
         snap = store.servicestats
         age = f"{time.time() - snap.fetched_at:.1f}s ago" if snap.fetched_at else "never"
+        hdr_attr = theme.attr(theme.P_TAB_ACTIVE) if snap.ok else theme.attr(theme.P_BAD, curses.A_BOLD)
         safe_addstr(win, 0, 0,
                     f" Services — {'OK' if snap.ok else 'ERROR'}  fetched {age}".ljust(w - 1),
-                    curses.A_REVERSE)
+                    hdr_attr)
         if not snap.ok:
-            safe_addstr(win, 2, 2, f"error: {snap.error}")
+            safe_addstr(win, 2, 2, f"error: {snap.error}", theme.attr(theme.P_BAD))
             return
         rows = snap.rows or []
         if not rows:
-            safe_addstr(win, 2, 2, "no service data available yet")
+            safe_addstr(win, 2, 2, "no service data available yet", theme.attr(theme.P_DIM))
             return
 
         # compute max for scaling
@@ -56,8 +58,9 @@ class ServicesPanel(Panel):
 
         safe_addstr(win, 2, 0,
                     f"{'handler':<40} {'req/min':>8} {'req/h':>8} {'req/d':>10} "
-                    f"{'avg_ms':>8}  {'last min':<25}", curses.A_BOLD)
-        safe_addstr(win, 3, 0, "─" * (w - 1))
+                    f"{'avg_ms':>8}  {'last min':<25}",
+                    theme.attr(theme.P_HEADER, curses.A_BOLD))
+        safe_addstr(win, 3, 0, "─" * (w - 1), theme.attr(theme.P_DIM))
 
         body_top = 4
         body_h = h - body_top - 1
@@ -78,13 +81,13 @@ class ServicesPanel(Panel):
             m60 = _f(r.get("LastHour"))
             d24 = _f(r.get("Last24Hours"))
             avg = _f(r.get("AverageDuration"))
-            line = (
-                f"{handler[:40]:<40} "
-                f"{m1:>8.1f} "
-                f"{m60:>8.1f} "
-                f"{d24:>10.1f} "
-                f"{human_ms(avg):>8}  "
-                f"{hbar(m1, mx1, 25)}"
-            )
-            attr = curses.A_REVERSE if self.scroll + i == self.cursor else 0
-            safe_addstr(win, body_top + i, 0, line, attr)
+            row_attr = curses.A_REVERSE if self.scroll + i == self.cursor else 0
+            cells = [
+                (f"{handler[:40]:<40} ", 0),
+                (f"{m1:>8.1f} ", 0),
+                (f"{m60:>8.1f} ", 0),
+                (f"{d24:>10.1f} ", 0),
+                (f"{human_ms(avg):>8}  ", theme.latency_color(avg)),
+                (hbar(m1, mx1, 25), theme.attr(theme.P_SPARK)),
+            ]
+            write_row(win, body_top + i, 0, cells, row_attr=row_attr)

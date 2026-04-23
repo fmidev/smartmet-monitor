@@ -43,3 +43,29 @@ def safe_addstr(win, y, x, text, attr=0):
         win.addstr(y, x, text, attr)
     except curses.error:
         pass
+
+
+def write_row(win, y, x, cells, row_attr=0):
+    """Write a list of (text, attr) cells left-to-right on one row.
+
+    row_attr is ORed with every cell's attribute. This lets the caller
+    apply a whole-row highlight (e.g. A_REVERSE on the selected row)
+    without losing per-cell colours.
+    """
+    try:
+        h, w = win.getmaxyx()
+    except curses.error:
+        return x
+    if y < 0 or y >= h:
+        return x
+    for text, a in cells:
+        avail = w - x - 1
+        if avail <= 0:
+            break
+        s = text if len(text) <= avail else text[:avail]
+        try:
+            win.addstr(y, x, s, a | row_attr)
+        except curses.error:
+            pass
+        x += len(s)
+    return x

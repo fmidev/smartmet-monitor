@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import curses
 
+from .. import theme
 from .base import Panel, safe_addstr
 
 
@@ -53,7 +54,8 @@ class LogsPanel(Panel):
     def draw(self, win, store):
         h, w = win.getmaxyx()
         hdr = f" Logs — filter:{self.filter or '<none>'}  {'FOLLOW' if self.follow else 'scrolled'}"
-        safe_addstr(win, 0, 0, hdr.ljust(w - 1), curses.A_REVERSE)
+        safe_addstr(win, 0, 0, hdr.ljust(w - 1),
+                    theme.attr(theme.P_TAB_ACTIVE))
 
         lines = list(store.recent_lines)
         if self.filter:
@@ -75,4 +77,4 @@ class LogsPanel(Panel):
 
         if self.filter_editing:
             safe_addstr(win, h - 1, 0, f" /{self.filter}_ (enter/esc to stop)".ljust(w - 1),
-                        curses.A_REVERSE)
+                        theme.attr(theme.P_HIGHLIGHT))
