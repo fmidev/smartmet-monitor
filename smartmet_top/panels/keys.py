@@ -91,6 +91,24 @@ class KeysPanel(Panel):
             self.detail_key = None
         return None
 
+    def export_snapshot(self, store):
+        rows = self._sorted(store)
+        win_min = WINDOWS[self.window_idx]
+        headers = ["apikey", "window_min", "count", "mean_ms", "p50_ms",
+                   "p95_ms", "max_ms", "total_bytes", "errors", "err_pct"]
+        out = []
+        for k, b in rows:
+            out.append([
+                k, win_min, b.count,
+                round(b.hist.mean(), 3),
+                round(b.hist.p50(), 3),
+                round(b.hist.p95(), 3),
+                round(b.hist.max_ms, 3),
+                b.bytes, b.errors,
+                round(b.errors / b.count * 100, 3) if b.count else 0,
+            ])
+        return headers, out
+
     def _sorted(self, store) -> List[Tuple[str, MinuteBucket]]:
         win_min = WINDOWS[self.window_idx]
         rows = store.snapshot_keys(win_min)

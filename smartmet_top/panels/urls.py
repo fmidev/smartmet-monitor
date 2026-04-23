@@ -109,6 +109,32 @@ class UrlsPanel(Panel):
             self.detail_url = None
         return None
 
+    # ---- export ------------------------------------------------------------
+
+    def export_snapshot(self, store):
+        rows = self._sorted_urls(store)
+        win_min = WINDOWS[self.window_idx]
+        headers = ["url", "window_min", "count", "mean_ms", "p50_ms", "p95_ms",
+                   "p99_ms", "max_ms", "avg_bytes", "total_bytes",
+                   "errors", "err_pct"]
+        out = []
+        for url, b in rows:
+            out.append([
+                url,
+                win_min,
+                b.count,
+                round(b.hist.mean(), 3),
+                round(b.hist.p50(), 3),
+                round(b.hist.p95(), 3),
+                round(b.hist.p99(), 3),
+                round(b.hist.max_ms, 3),
+                int(b.bytes / b.count) if b.count else 0,
+                b.bytes,
+                b.errors,
+                round(b.errors / b.count * 100, 3) if b.count else 0,
+            ])
+        return headers, out
+
     # ---- selection / sort --------------------------------------------------
 
     def _sorted_urls(self, store) -> List[Tuple[str, MinuteBucket]]:

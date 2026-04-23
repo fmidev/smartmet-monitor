@@ -37,6 +37,25 @@ class ServicesPanel(Panel):
             self.cursor += 10
         return None
 
+    def export_snapshot(self, store):
+        headers = ["host", "handler", "req_per_min", "req_per_hour",
+                   "req_per_day", "avg_ms"]
+        rows = []
+        for host in store.admin_hosts:
+            snap = store.servicestats.get(host)
+            if snap is None or not snap.ok:
+                continue
+            for r in snap.rows or []:
+                rows.append([
+                    host,
+                    str(r.get("Handler") or r.get("handler") or "?"),
+                    _f(r.get("LastMinute")),
+                    _f(r.get("LastHour")),
+                    _f(r.get("Last24Hours")),
+                    _f(r.get("AverageDuration")),
+                ])
+        return headers, rows
+
     def draw(self, win, store):
         h, w = win.getmaxyx()
         hosts = store.admin_hosts

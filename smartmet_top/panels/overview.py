@@ -14,6 +14,23 @@ class OverviewPanel(Panel):
     hotkey = "1"
     help_text = "Global sparklines: request rate, latency, bandwidth, errors."
 
+    def export_snapshot(self, store):
+        headers = ["window_min", "reqs", "mean_ms", "p50_ms", "p95_ms",
+                   "max_ms", "total_bytes", "errors", "err_pct"]
+        rows = []
+        for m in (1, 5, 15, 60):
+            b = store.global_window(m)
+            rows.append([
+                m, b.count,
+                round(b.hist.mean(), 3),
+                round(b.hist.p50(), 3),
+                round(b.hist.p95(), 3),
+                round(b.hist.max_ms, 3),
+                b.bytes, b.errors,
+                round(b.errors / b.count * 100, 3) if b.count else 0,
+            ])
+        return headers, rows
+
     def draw(self, win, store):
         h, w = win.getmaxyx()
         safe_addstr(win, 0, 0, " Overview — all URLs, last 60 min".ljust(w - 1),

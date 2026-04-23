@@ -22,6 +22,7 @@ KEYS = [
     ("s / S",             "cycle sort column forward/back"),
     ("r",                 "reverse sort"),
     ("[ / ]",             "shrink / grow time window (1/5/15/60 min)"),
+    ("e / E",             "export current panel as CSV / JSON"),
 ]
 
 

@@ -8,7 +8,7 @@ import signal
 import time
 from typing import List, Optional
 
-from . import theme
+from . import export, theme
 from .panels.active import ActivePanel
 from .panels.base import Panel, safe_addstr
 from .panels.caches import CachesPanel
@@ -52,6 +52,7 @@ class App:
         self.show_help = False
         self.running = True
         self.last_error = ""
+        self.toast: Optional[tuple] = None  # (expires_at, message, attr)
 
     @property
     def current_panel(self) -> Panel:
@@ -87,8 +88,15 @@ class App:
         if x + len(hint) < w:
             safe_addstr(stdscr, 1, w - len(hint) - 2, hint, theme.attr(theme.P_DIM))
 
-        # status line
+        # status line (or toast if one is active)
         p = self.current_panel
+        toast = self.toast
+        if toast is not None:
+            expires, msg, tattr = toast
+            if time.time() < expires:
+                safe_addstr(stdscr, h - 1, 0, f" {msg}".ljust(w - 1), tattr)
+                return
+            self.toast = None
         safe_addstr(stdscr, h - 1, 0, f" {p.help_text}".ljust(w - 1),
                     theme.attr(theme.P_TITLE))
 
@@ -140,12 +148,38 @@ class App:
             if key in (ord("?"), curses.KEY_F1):
                 self.show_help = not self.show_help
                 return
+            if key == ord("e") or key == ord("E"):
+                fmt = "json" if key == ord("E") else "csv"
+                self._export(fmt)
+                return
 
         # delegate to the panel
         try:
             p.handle_key(key, self.store)
         except Exception as e:
             self.last_error = f"{type(e).__name__}: {e}"
+
+    def _set_toast(self, msg: str, attr: int, seconds: float = 4.0) -> None:
+        self.toast = (time.time() + seconds, msg, attr)
+
+    def _export(self, fmt: str) -> None:
+        p = self.current_panel
+        try:
+            headers, rows = p.export_snapshot(self.store)
+        except Exception as e:
+            self._set_toast(f"export failed: {e}", theme.attr(theme.P_BAD, curses.A_BOLD))
+            return
+        if headers is None:
+            self._set_toast(f"{p.name}: nothing to export",
+                            theme.attr(theme.P_WARN))
+            return
+        try:
+            path = export.save_snapshot(p.name, headers, rows, fmt=fmt)
+        except Exception as e:
+            self._set_toast(f"export failed: {e}", theme.attr(theme.P_BAD, curses.A_BOLD))
+            return
+        self._set_toast(f"exported {len(rows)} rows → {path}",
+                        theme.attr(theme.P_GOOD, curses.A_BOLD))
 
     async def run(self, stdscr) -> None:
         curses.curs_set(0)

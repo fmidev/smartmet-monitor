@@ -27,6 +27,12 @@ class Panel:
         """
         return None
 
+    def export_snapshot(self, store):
+        """Return (headers, rows) describing what this panel is showing right
+        now, for export to CSV/JSON. Panels that cannot be exported return
+        (None, None)."""
+        return None, None
+
 
 def safe_addstr(win, y, x, text, attr=0):
     """Write a string clipped to the window width."""
