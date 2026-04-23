@@ -1,0 +1,23 @@
+#!/bin/bash
+# bstat — SmartMet access-log summary dashboard.
+# Thin wrapper around the sourced library. See `bstat --help`.
+
+set -o pipefail
+
+LIB="${SMARTMET_MONITOR_LIB:-/usr/share/smartmet/bstat.sh}"
+if [ ! -r "$LIB" ]; then
+    # Fall back to the sibling library when running from the source tree.
+    here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+    if [ -r "$here/../share/smartmet/bstat.sh" ]; then
+        LIB="$here/../share/smartmet/bstat.sh"
+    fi
+fi
+
+if [ ! -r "$LIB" ]; then
+    echo "bstat: library not found at $LIB" >&2
+    exit 1
+fi
+
+# shellcheck source=/usr/share/smartmet/bstat.sh
+. "$LIB"
+bstat "$@"

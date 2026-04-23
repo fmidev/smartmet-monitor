@@ -525,6 +525,15 @@ EOF
 # -----------------------------------------------------------------------------
 
 bstatus() {
+    if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+        cat <<EOF
+Usage: bstatus [LOG-FILE]
+
+Print HTTP status-code distribution and per-class breakdown, with
+horizontal Unicode bars. Reads stdin if no file is given.
+EOF
+        return 0
+    fi
     gawk '
     BEGIN {
         p8[1]="▏"; p8[2]="▎"; p8[3]="▍"; p8[4]="▌"
@@ -593,6 +602,14 @@ bkeys() {
         case "$1" in
             -n) top="$2"; shift 2 ;;
             -s) sort_by="$2"; shift 2 ;;
+            -h|--help)
+                cat <<EOF
+Usage: bkeys [-n N] [-s SORT] [LOG-FILE]
+
+  -n N     show top N API keys       (default: 20)
+  -s SORT  reqs | ms | mb            (default: reqs)
+EOF
+                return 0 ;;
             *) args+=("$1"); shift ;;
         esac
     done

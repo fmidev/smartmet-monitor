@@ -1,0 +1,33 @@
+.TH BKEYS 1 "2026-04-23" "smartmet-monitor" "SmartMet Server"
+.SH NAME
+bkeys \- top API keys in a SmartMet access log
+.SH SYNOPSIS
+.B bkeys
+.RI [ \-n\  N ]
+.RI [ \-s\  reqs|ms|mb ]
+.RI [ LOG-FILE ]
+.SH DESCRIPTION
+.B bkeys
+groups access\-log entries by API key (the last field of each log
+line) and prints the top
+.B N
+keys sorted by the chosen metric. Each row shows request count,
+mean latency, total bandwidth in MB, and a horizontal bar scaled
+to the leading metric.
+.SH OPTIONS
+.TP
+.BI \-n \ N
+Number of API keys to show. Default
+.BR 20 .
+.TP
+.BI \-s \ SORT
+Sort column. One of
+.BR reqs ,\  ms ,\  mb .
+Default
+.BR reqs .
+.SH SEE ALSO
+.BR bstat (1),
+.BR bchart (1),
+.BR burls (1),
+.BR bstatus (1),
+.BR smtop (1)

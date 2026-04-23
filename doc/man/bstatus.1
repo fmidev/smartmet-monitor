@@ -1,0 +1,20 @@
+.TH BSTATUS 1 "2026-04-23" "smartmet-monitor" "SmartMet Server"
+.SH NAME
+bstatus \- HTTP status code distribution from a SmartMet access log
+.SH SYNOPSIS
+.B bstatus
+.RI [ LOG-FILE ]
+.SH DESCRIPTION
+.B bstatus
+counts HTTP status codes and prints a distribution table: each code
+with its count and percentage plus a horizontal Unicode bar scaled
+to the most common code. A second block groups codes by class
+(2xx, 3xx, 4xx, 5xx).
+.PP
+Reads standard input when no log file is given.
+.SH SEE ALSO
+.BR bstat (1),
+.BR bchart (1),
+.BR burls (1),
+.BR bkeys (1),
+.BR smtop (1)

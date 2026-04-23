@@ -1,0 +1,127 @@
+.TH SMTOP 1 "2026-04-23" "smartmet-monitor" "SmartMet Server"
+.SH NAME
+smtop \- interactive terminal monitor for SmartMet Server
+.SH SYNOPSIS
+.B smtop
+.RI [ options ]
+.SH DESCRIPTION
+.B smtop
+is a curses dashboard that combines offline access\-log analysis with
+live polling of the SmartMet admin plugin. Up to seven panels are
+rotated with
+.B Tab
+or the digit keys: Overview, URLs, Caches, Services, Active, Logs,
+and API Keys.
+.PP
+The URLs panel is the primary view: per\-endpoint request counts,
+mean / p50 / p95 / max latency, error rate, bandwidth, and a
+per\-URL latency sparkline. Press
+.B Enter
+to drill into a URL; the detail view shows windowed stats,
+a 60\-minute latency sparkline, an exponential histogram, status
+code breakdown, and the top API keys calling that URL.
+.PP
+Data sources run concurrently:
+.IP \(bu 2
+Log files given with
+.BR \-l ,
+tailed (\fBtail -F\fP semantics, rotation\-aware).
+.IP \(bu 2
+Admin\-plugin URLs given with
+.BR \-u ,
+polled every
+.B \-n
+seconds (default 2) for cache, service, active\-request and
+last\-request data. Endpoint availability and frontend/backend
+role are auto\-detected from
+.BR ?what=list .
+.SH OPTIONS
+.TP
+.BI \-l \ PATH-OR-GLOB
+Access\-log file. May be given multiple times; globs are expanded.
+Defaults to
+.BR /var/log/smartmet/*-access-log .
+.TP
+.BI \-u \ URL
+Admin\-plugin base URL. Repeatable or comma\-separated; each URL
+may be prefixed with a label (\fILABEL=URL\fP). Duplicate labels
+are disambiguated with a trailing
+.BR #N .
+.TP
+.BI \-n \ SECONDS
+Admin\-plugin poll interval. Default 2.0 seconds.
+.TP
+.B \-\-no\-logs
+Do not tail any log file (rely solely on admin\-plugin
+.IR lastrequests ).
+.TP
+.B \-\-replay
+On startup, read up to 256 MiB from the tail of each log file so
+the dashboard opens with panels populated instead of empty.
+.SH KEYS
+.TP
+.BR 1 " \- " 7
+Jump to a panel by number.
+.TP
+.BR Tab " / " Shift\-Tab
+Next / previous panel.
+.TP
+.BR ? " / " F1
+Toggle help overlay.
+.TP
+.BR Enter
+Drill into the selected URL / API key.
+.TP
+.BR j " / " k " / " n " / " p
+Next / previous entry while drilled in.
+.TP
+.BR /
+Filter (URLs, Keys, Logs).
+.TP
+.BR s " / " S
+Cycle sort column forward / backward.
+.TP
+.BR r
+Reverse current sort.
+.TP
+.BR [ " / " ]
+Shrink / grow the time window (1, 5, 15, 60 minutes).
+.TP
+.BR H " / " T " / " K
+Toggle histogram / status / API\-key sections in the URLs drill\-in.
+.TP
+.BR e " / " E
+Export the current panel to CSV / JSON under
+.B $SMARTMET_MONITOR_EXPORT_DIR
+(default
+.BR /tmp ).
+.TP
+.BR q " / " Ctrl\-C
+Quit.
+.SH FILES
+.TP
+.B /var/log/smartmet/*-access-log
+Default log glob when no
+.B \-l
+is given.
+.TP
+.B /usr/bin/smtop
+The dashboard binary (and its
+.B smartmet\-top
+symlink).
+.TP
+.B /usr/share/smartmet/bstat.sh
+Shared library sourced by the offline
+.BR bstat ,
+.BR bchart ,
+.BR burls ,
+.BR bstatus " and " bkeys
+commands.
+.SH SEE ALSO
+.BR bstat (1),
+.BR bchart (1),
+.BR burls (1),
+.BR bstatus (1),
+.BR bkeys (1)
+.SH AUTHOR
+Finnish Meteorological Institute.

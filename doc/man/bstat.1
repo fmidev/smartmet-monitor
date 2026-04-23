@@ -1,0 +1,51 @@
+.TH BSTAT 1 "2026-04-23" "smartmet-monitor" "SmartMet Server"
+.SH NAME
+bstat \- per\-bucket access\-log summary with Unicode sparklines
+.SH SYNOPSIS
+.B bstat
+.RI [ \-i\  1s|10s|1m|10m|1h|1d ]
+.RI [ \-w\  WIDTH ]
+.RI [ LOG-FILE ]
+.SH DESCRIPTION
+.B bstat
+aggregates a SmartMet Server access\-log file into fixed\-width time
+buckets and prints a summary table:
+.IP \(bu 2
+Request count, mean / max latency, mean response size, total
+bandwidth, error percentage.
+.IP \(bu 2
+Four horizontal eighth\-block bars per row (requests, latency, size,
+bandwidth) so rows can be eyeballed at a glance.
+.IP \(bu 2
+A TOTAL row aggregating the whole sample.
+.IP \(bu 2
+Four vertical sparklines (requests / latency / average size / bandwidth)
+under the table, one character per time bucket.
+.PP
+Reads standard input when no log file is given. The log format parsed
+is the one produced by
+.B spine/AccessLogger.cpp
+(IP, bracketed end/start timestamps, method/URL/version, status,
+duration in ms, content length, etag, API key).
+.SH OPTIONS
+.TP
+.BI \-i \ INTERVAL
+Time\-bucket width. One of
+.BR 1s ,\  10s ,\  1m ,\  10m ,\  1h ,\  1d .
+Default
+.BR 1h .
+.TP
+.BI \-w \ WIDTH
+Horizontal bar width in columns. Default
+.BR 20 .
+.SH ENVIRONMENT
+.TP
+.B SMARTMET_MONITOR_LIB
+Override the path of the shared library (default
+.BR /usr/share/smartmet/bstat.sh ).
+.SH SEE ALSO
+.BR bchart (1),
+.BR burls (1),
+.BR bstatus (1),
+.BR bkeys (1),
+.BR smtop (1)

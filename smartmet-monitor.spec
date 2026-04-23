@@ -1,11 +1,11 @@
 %global _python3_sitelib %{python3_sitelib}
 
-Name:           smartmet-tools
+Name:           smartmet-monitor
 Version:        0.1.0
 Release:        1%{?dist}
-Summary:        Command-line analysis and monitoring tools for SmartMet Server
+Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
-URL:            https://github.com/fmidev/smartmet-tools
+URL:            https://github.com/fmidev/smartmet-monitor
 Source0:        %{name}-%{version}.tar.gz
 BuildArch:      noarch
 
@@ -17,9 +17,9 @@ Requires:       python3 >= 3.9
 %description
 Two companion tools for operating a SmartMet Server:
 
-  * bstat, bchart, burls, bstatus, bkeys — Bash/awk functions for
-    analysing access-log files offline. Sourced automatically into
-    interactive login shells from /etc/profile.d/smartmet-tools.sh.
+  * bstat, bchart, burls, bstatus, bkeys — Bash/awk command-line tools
+    for analysing access-log files offline. Installed under /usr/bin/
+    and share a common library at /usr/share/smartmet/bstat.sh.
 
   * smtop — an interactive curses dashboard (like btop) that tails
     access logs and polls the admin plugin for cache statistics,
@@ -48,8 +48,19 @@ make install \
 %files
 %{_bindir}/smtop
 %{_bindir}/smartmet-top
+%{_bindir}/bstat
+%{_bindir}/bchart
+%{_bindir}/burls
+%{_bindir}/bstatus
+%{_bindir}/bkeys
 %{_datadir}/smartmet/bstat.sh
-/etc/profile.d/smartmet-tools.sh
+%{_mandir}/man1/smtop.1*
+%{_mandir}/man1/bstat.1*
+%{_mandir}/man1/bchart.1*
+%{_mandir}/man1/burls.1*
+%{_mandir}/man1/bstatus.1*
+%{_mandir}/man1/bkeys.1*
+%doc %{_docdir}/smartmet-monitor/README.md
 %{_python3_sitelib}/smartmet_top/
 %{_python3_sitelib}/smartmet_top/*/
 

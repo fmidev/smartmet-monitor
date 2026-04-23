@@ -1,0 +1,22 @@
+#!/bin/bash
+# bchart — vertical btop-style chart of one metric from the SmartMet
+# access log. Thin wrapper around the sourced library; see `bchart --help`.
+
+set -o pipefail
+
+LIB="${SMARTMET_MONITOR_LIB:-/usr/share/smartmet/bstat.sh}"
+if [ ! -r "$LIB" ]; then
+    here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+    if [ -r "$here/../share/smartmet/bstat.sh" ]; then
+        LIB="$here/../share/smartmet/bstat.sh"
+    fi
+fi
+
+if [ ! -r "$LIB" ]; then
+    echo "bchart: library not found at $LIB" >&2
+    exit 1
+fi
+
+# shellcheck source=/usr/share/smartmet/bstat.sh
+. "$LIB"
+bchart "$@"

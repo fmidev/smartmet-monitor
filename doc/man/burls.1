@@ -1,0 +1,43 @@
+.TH BURLS 1 "2026-04-23" "smartmet-monitor" "SmartMet Server"
+.SH NAME
+burls \- top URLs in a SmartMet access log
+.SH SYNOPSIS
+.B burls
+.RI [ \-n\  N ]
+.RI [ \-s\  reqs|ms|kb|mb ]
+.RI [ LOG-FILE ]
+.SH DESCRIPTION
+.B burls
+groups access\-log entries by URL path (query string stripped), then
+prints the top
+.B N
+URLs sorted by the chosen metric. Each row shows request count, mean
+latency, mean response size, total bandwidth in MB, and a horizontal
+bar scaled to the row\-leading metric.
+.SH OPTIONS
+.TP
+.BI \-n \ N
+Number of URLs to show. Default
+.BR 20 .
+.TP
+.BI \-s \ SORT
+Sort column. One of
+.BR reqs ,\  ms ,\  kb ,\  mb :
+.RS
+.IP \(bu 2
+.B reqs \- by request count
+.IP \(bu 2
+.B ms   \- by total time spent (ms)
+.IP \(bu 2
+.B kb   \- by mean response size (KB)
+.IP \(bu 2
+.B mb   \- by total bandwidth (MB)
+.RE
+Default
+.BR ms .
+.SH SEE ALSO
+.BR bstat (1),
+.BR bchart (1),
+.BR bstatus (1),
+.BR bkeys (1),
+.BR smtop (1)

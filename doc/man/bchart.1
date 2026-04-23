@@ -1,0 +1,55 @@
+.TH BCHART 1 "2026-04-23" "smartmet-monitor" "SmartMet Server"
+.SH NAME
+bchart \- btop\-style vertical chart of one access\-log metric
+.SH SYNOPSIS
+.B bchart
+.RI [ \-i\  INTERVAL ]
+.RI [ \-m\  reqs|ms|kb|mb|err ]
+.RI [ \-h\  HEIGHT ]
+.RI [ \-w\  CELLW ]
+.RI [ LOG-FILE ]
+.SH DESCRIPTION
+.B bchart
+renders a vertical Unicode block chart of a chosen metric over time.
+Each column represents one time bucket; bar heights are auto\-scaled
+to the maximum observed value and a y\-axis legend is printed on the
+left.
+.SH OPTIONS
+.TP
+.BI \-i \ INTERVAL
+Time\-bucket width. One of
+.BR 1s ,\  10s ,\  1m ,\  10m ,\  1h ,\  1d .
+Default
+.BR 1h .
+.TP
+.BI \-m \ METRIC
+Metric to plot. One of
+.BR reqs ,\  ms ,\  kb ,\  mb ,\  err :
+.RS
+.IP \(bu 2
+.B reqs \- requests per bucket
+.IP \(bu 2
+.B ms   \- mean latency (ms)
+.IP \(bu 2
+.B kb   \- mean response size (KB)
+.IP \(bu 2
+.B mb   \- total bandwidth (MB)
+.IP \(bu 2
+.B err  \- error rate (%)
+.RE
+Default
+.BR reqs .
+.TP
+.BI \-h \ HEIGHT
+Chart height in rows. Default
+.BR 12 .
+.TP
+.BI \-w \ CELLW
+Columns per time bucket. Default
+.BR 2 .
+.SH SEE ALSO
+.BR bstat (1),
+.BR burls (1),
+.BR bstatus (1),
+.BR bkeys (1),
+.BR smtop (1)
