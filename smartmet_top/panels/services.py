@@ -6,7 +6,7 @@ import curses
 import time
 
 from .. import theme
-from ..widgets.bars import hbar, human_count, human_ms
+from ..widgets.bars import hbar, human_count, human_ms, sparkline
 from .base import Panel, safe_addstr, write_row
 
 
@@ -58,7 +58,7 @@ class ServicesPanel(Panel):
 
         safe_addstr(win, 2, 0,
                     f"{'handler':<40} {'req/min':>8} {'req/h':>8} {'req/d':>10} "
-                    f"{'avg_ms':>8}  {'last min':<25}",
+                    f"{'avg_ms':>8}  {'last min':<25}  {'trend':<20}",
                     theme.attr(theme.P_HEADER, curses.A_BOLD))
         safe_addstr(win, 3, 0, "─" * (w - 1), theme.attr(theme.P_DIM))
 
@@ -82,6 +82,8 @@ class ServicesPanel(Panel):
             d24 = _f(r.get("Last24Hours"))
             avg = _f(r.get("AverageDuration"))
             row_attr = curses.A_REVERSE if self.scroll + i == self.cursor else 0
+            trend = store.service_history.series(handler, "req_per_min", samples=20)
+            trend_str = sparkline(trend, width=20) if trend else " " * 20
             cells = [
                 (f"{handler[:40]:<40} ", 0),
                 (f"{m1:>8.1f} ", 0),
@@ -89,5 +91,7 @@ class ServicesPanel(Panel):
                 (f"{d24:>10.1f} ", 0),
                 (f"{human_ms(avg):>8}  ", theme.latency_color(avg)),
                 (hbar(m1, mx1, 25), theme.attr(theme.P_SPARK)),
+                ("  ", 0),
+                (trend_str, theme.attr(theme.P_SPARK)),
             ]
             write_row(win, body_top + i, 0, cells, row_attr=row_attr)

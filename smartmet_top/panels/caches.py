@@ -6,7 +6,7 @@ import curses
 import time
 
 from .. import theme
-from ..widgets.bars import hbar, human_count
+from ..widgets.bars import hbar, human_count, sparkline
 from .base import Panel, safe_addstr, write_row
 
 
@@ -63,7 +63,7 @@ class CachesPanel(Panel):
         # header
         safe_addstr(win, 2, 0,
                     f"{'cache':<34} {'size':>9} {'max':>9} {'hits/m':>9} {'ins/m':>9} "
-                    f"{'hit%':>6}  {'hitrate':<20}",
+                    f"{'hit%':>6}  {'hitrate':<20}  {'hit/m trend':<20}",
                     theme.attr(theme.P_HEADER, curses.A_BOLD))
         safe_addstr(win, 3, 0, "─" * (w - 1), theme.attr(theme.P_DIM))
 
@@ -89,6 +89,8 @@ class CachesPanel(Panel):
             ipm = _as_float(r.get("inserts/min") or r.get("inserts_per_min") or 0)
             hr = _as_float(str(r.get("hitrate") or "0").rstrip("%"))
             row_attr = curses.A_REVERSE if self.scroll + i == self.cursor else 0
+            trend = store.cache_history.series(name, "hits_per_min", samples=20)
+            trend_str = sparkline(trend, width=20) if trend else " " * 20
             cells = [
                 (f"{name[:34]:<34} ", 0),
                 (f"{human_count(size):>9} ", theme.fill_color(size, mx)),
@@ -97,5 +99,7 @@ class CachesPanel(Panel):
                 (f"{ipm:>9.1f} ", 0),
                 (f"{hr:>5.1f}%  ", theme.hitrate_color(hr)),
                 (hbar(hr, 100, 20), theme.hitrate_color(hr)),
+                ("  ", 0),
+                (trend_str, theme.attr(theme.P_SPARK)),
             ]
             write_row(win, body_top + i, 0, cells, row_attr=row_attr)

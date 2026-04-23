@@ -19,6 +19,10 @@ from typing import Deque, Dict, List, Optional, Tuple
 from .histogram import Histogram
 
 HISTORY_MINUTES = 60
+# Admin snapshots: keep ~5 minutes of 2-second polls = 150 samples.
+# The actual cap is independent of poll interval; the deque just bounds
+# memory so a long-running instance doesn't grow without limit.
+ADMIN_HISTORY_SAMPLES = 300
 
 
 @dataclass
@@ -112,6 +116,45 @@ class AdminSnapshot:
     rows: List[dict] = field(default_factory=list)
 
 
+@dataclass
+class SeriesPoint:
+    ts: float
+    values: Dict[str, float] = field(default_factory=dict)
+
+
+class HistorySeries:
+    """Bounded ring buffer of SeriesPoints keyed by entity name."""
+
+    __slots__ = ("_data",)
+
+    def __init__(self) -> None:
+        self._data: Dict[str, Deque[SeriesPoint]] = {}
+
+    def append(self, name: str, ts: float, values: Dict[str, float]) -> None:
+        dq = self._data.get(name)
+        if dq is None:
+            dq = deque(maxlen=ADMIN_HISTORY_SAMPLES)
+            self._data[name] = dq
+        dq.append(SeriesPoint(ts=ts, values=dict(values)))
+
+    def series(self, name: str, key: str, samples: int = 0) -> List[float]:
+        dq = self._data.get(name)
+        if not dq:
+            return []
+        data = list(dq)
+        if samples > 0:
+            data = data[-samples:]
+        return [p.values.get(key, 0.0) for p in data]
+
+    def names(self) -> List[str]:
+        return list(self._data.keys())
+
+    def prune(self, keep: set) -> None:
+        for k in list(self._data.keys()):
+            if k not in keep:
+                del self._data[k]
+
+
 class Store:
     """Thread-safe store for URL stats and admin-plugin snapshots."""
 
@@ -128,6 +171,9 @@ class Store:
         self.servicestats = AdminSnapshot()
         self.activerequests = AdminSnapshot()
         self.lastrequests = AdminSnapshot()
+        # per-entity historical series (for sparklines)
+        self.cache_history = HistorySeries()
+        self.service_history = HistorySeries()
         # recent log lines (raw) for the Logs panel
         self.recent_lines: Deque[str] = deque(maxlen=2000)
         # status: data source health

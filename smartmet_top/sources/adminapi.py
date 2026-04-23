@@ -76,6 +76,10 @@ async def poll_admin(base_url: str, store, interval: float = 2.0) -> None:
 
                 if name == "lastrequests":
                     _ingest_lastrequests(store, rows, seen_requests)
+                elif name == "cachestats":
+                    _update_cache_history(store, rows, snap.fetched_at)
+                elif name == "servicestats":
+                    _update_service_history(store, rows, snap.fetched_at)
             except Exception as e:
                 snap = getattr(store, name)
                 snap.ok = False
@@ -91,6 +95,52 @@ async def poll_admin(base_url: str, store, interval: float = 2.0) -> None:
 
         elapsed = time.time() - start
         await asyncio.sleep(max(0.0, interval - elapsed))
+
+
+def _to_float(v, default: float = 0.0) -> float:
+    try:
+        return float(str(v).rstrip("%"))
+    except (TypeError, ValueError):
+        return default
+
+
+def _update_cache_history(store, rows, ts: float) -> None:
+    names = set()
+    for r in rows:
+        name = str(r.get("cache_name") or r.get("name") or "?")
+        names.add(name)
+        store.cache_history.append(
+            name,
+            ts,
+            {
+                "size": _to_float(r.get("size")),
+                "maxsize": _to_float(r.get("maxsize") or r.get("max") or 0),
+                "hits_per_min": _to_float(r.get("hits/min") or r.get("hits_per_min")),
+                "inserts_per_min": _to_float(
+                    r.get("inserts/min") or r.get("inserts_per_min")
+                ),
+                "hitrate": _to_float(r.get("hitrate")),
+            },
+        )
+    store.cache_history.prune(names)
+
+
+def _update_service_history(store, rows, ts: float) -> None:
+    names = set()
+    for r in rows:
+        name = str(r.get("Handler") or r.get("handler") or "?")
+        names.add(name)
+        store.service_history.append(
+            name,
+            ts,
+            {
+                "req_per_min": _to_float(r.get("LastMinute")),
+                "req_per_hour": _to_float(r.get("LastHour")),
+                "req_per_day": _to_float(r.get("Last24Hours")),
+                "avg_ms": _to_float(r.get("AverageDuration")),
+            },
+        )
+    store.service_history.prune(names)
 
 
 def _ingest_lastrequests(store, rows, seen: set, keep_last: int = 20_000) -> None:
