@@ -44,7 +44,7 @@ class KeysPanel(Panel):
         if self.filter_editing:
             return self._handle_filter_key(key)
         if self.detail_key is not None:
-            return self._handle_detail_key(key)
+            return self._handle_detail_key(key, store)
         if key in (curses.KEY_UP, ord("k")):
             self.cursor = max(0, self.cursor - 1)
         elif key in (curses.KEY_DOWN, ord("j")):
@@ -86,10 +86,30 @@ class KeysPanel(Panel):
             self.filter += chr(key)
         return None
 
-    def _handle_detail_key(self, key):
-        if key in (27, ord("q"), curses.KEY_LEFT, ord("h"), ord("b")):
+    def _handle_detail_key(self, key, store=None):
+        if key in (27, ord("q"), curses.KEY_LEFT, ord("b")):
             self.detail_key = None
+            return None
+        if key in (ord("j"), curses.KEY_DOWN, ord("n")):
+            self._step_detail(+1, store)
+        elif key in (ord("k"), curses.KEY_UP, ord("p")):
+            self._step_detail(-1, store)
         return None
+
+    def _step_detail(self, delta, store):
+        if store is None or self.detail_key is None:
+            return
+        rows = self._sorted(store)
+        if not rows:
+            return
+        keys_list = [k for k, _ in rows]
+        try:
+            idx = keys_list.index(self.detail_key)
+        except ValueError:
+            idx = 0
+        new = max(0, min(len(keys_list) - 1, idx + delta))
+        self.detail_key = keys_list[new]
+        self.cursor = new
 
     def export_snapshot(self, store):
         rows = self._sorted(store)

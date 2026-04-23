@@ -52,6 +52,11 @@ class UrlsPanel(Panel):
         self.filter = ""
         self.filter_editing = False
         self.detail_url: Optional[str] = None
+        # visibility toggles inside the drill-in view
+        self.detail_show_hist = True
+        self.detail_show_status = True
+        self.detail_show_keys = True
+        self.detail_window_idx = 1  # 5 minutes for histogram/status section
 
     # ---- key handling ------------------------------------------------------
 
@@ -60,7 +65,7 @@ class UrlsPanel(Panel):
             return self._handle_filter_key(key)
 
         if self.detail_url is not None:
-            return self._handle_detail_key(key)
+            return self._handle_detail_key(key, store)
 
         if key in (curses.KEY_UP, ord("k")):
             self.cursor = max(0, self.cursor - 1)
@@ -104,10 +109,41 @@ class UrlsPanel(Panel):
             self.filter += chr(key)
         return None
 
-    def _handle_detail_key(self, key):
-        if key in (27, ord("q"), curses.KEY_LEFT, ord("h"), ord("b")):
+    def _handle_detail_key(self, key, store=None):
+        if key in (27, ord("q"), curses.KEY_LEFT, ord("b")):
             self.detail_url = None
+            return None
+        # step through URLs in current sort order
+        if key in (ord("j"), curses.KEY_DOWN, ord("n")):
+            self._step_detail(+1, store)
+        elif key in (ord("k"), curses.KEY_UP, ord("p")):
+            self._step_detail(-1, store)
+        elif key == ord("["):
+            self.detail_window_idx = max(0, self.detail_window_idx - 1)
+        elif key == ord("]"):
+            self.detail_window_idx = min(len(WINDOWS) - 1, self.detail_window_idx + 1)
+        elif key == ord("H"):
+            self.detail_show_hist = not self.detail_show_hist
+        elif key == ord("T"):
+            self.detail_show_status = not self.detail_show_status
+        elif key == ord("K"):
+            self.detail_show_keys = not self.detail_show_keys
         return None
+
+    def _step_detail(self, delta: int, store) -> None:
+        if store is None or self.detail_url is None:
+            return
+        rows = self._sorted_urls(store)
+        if not rows:
+            return
+        urls = [u for u, _ in rows]
+        try:
+            idx = urls.index(self.detail_url)
+        except ValueError:
+            idx = 0
+        new = max(0, min(len(urls) - 1, idx + delta))
+        self.detail_url = urls[new]
+        self.cursor = new
 
     # ---- export ------------------------------------------------------------
 
@@ -271,104 +307,146 @@ class UrlsPanel(Panel):
         h, w = win.getmaxyx()
         url = self.detail_url
         u = store.url_detail(url)
-        safe_addstr(win, 0, 0, f" detail: {url}".ljust(w - 1), curses.A_REVERSE)
+        # position within the current sort for "n/m" header
+        sorted_rows = self._sorted_urls(store)
+        urls_list = [x[0] for x in sorted_rows]
+        try:
+            pos = urls_list.index(url) + 1
+        except ValueError:
+            pos = 0
+        total_rows = len(urls_list)
+        detail_w = WINDOWS[self.detail_window_idx]
+
+        head = f" detail [{pos}/{total_rows}]: {url}   hist-window:{detail_w}m "
+        safe_addstr(win, 0, 0, head.ljust(w - 1),
+                    theme.attr(theme.P_TAB_ACTIVE))
 
         if u is None:
-            safe_addstr(win, 2, 2, "no data for this URL (yet)")
-            safe_addstr(win, h - 1, 0, " [esc/left/q: back] ".ljust(w - 1),
-                        curses.A_REVERSE)
+            safe_addstr(win, 2, 2, "no data for this URL (yet)",
+                        theme.attr(theme.P_DIM))
+            safe_addstr(win, h - 1, 0, " [j/k/n/p: next/prev | esc/b: back] ".ljust(w - 1),
+                        theme.attr(theme.P_TITLE))
             return
 
-        # Windowed stats block
         row = 2
-        safe_addstr(win, row, 2, "Windowed stats", curses.A_BOLD)
+        safe_addstr(win, row, 2, "Windowed stats",
+                    theme.attr(theme.P_HEADER, curses.A_BOLD))
         row += 1
         safe_addstr(win, row, 2,
                     f"{'window':>8}  {'reqs':>8} {'mean':>7} {'p50':>7} "
                     f"{'p95':>7} {'p99':>7} {'max':>7}  {'avg_KB':>7} "
-                    f"{'MB':>8} {'err%':>5}")
+                    f"{'MB':>8} {'err%':>5}",
+                    theme.attr(theme.P_HEADER))
         row += 1
-        safe_addstr(win, row, 2, "─" * min(w - 4, 90))
+        safe_addstr(win, row, 2, "─" * min(w - 4, 90), theme.attr(theme.P_DIM))
         row += 1
         for win_min in WINDOWS:
             b = u.window(win_min)
             if b.count == 0:
                 continue
-            safe_addstr(
-                win, row, 2,
-                f"{str(win_min) + 'm':>8}  "
-                f"{human_count(b.count):>8} "
-                f"{human_ms(b.hist.mean()):>7} "
-                f"{human_ms(b.hist.p50()):>7} "
-                f"{human_ms(b.hist.p95()):>7} "
-                f"{human_ms(b.hist.p99()):>7} "
-                f"{human_ms(b.hist.max_ms):>7}  "
-                f"{(b.bytes / b.count / 1024):>7.1f} "
-                f"{b.bytes / 1_048_576:>8.2f} "
-                f"{(b.errors / b.count * 100):>4.1f}%",
-            )
+            err_pct = b.errors / b.count * 100 if b.count else 0
+            cells = [
+                (f"{str(win_min) + 'm':>8}  ", 0),
+                (f"{human_count(b.count):>8} ", 0),
+                (f"{human_ms(b.hist.mean()):>7} ", theme.latency_color(b.hist.mean())),
+                (f"{human_ms(b.hist.p50()):>7} ", theme.latency_color(b.hist.p50())),
+                (f"{human_ms(b.hist.p95()):>7} ", theme.latency_color(b.hist.p95())),
+                (f"{human_ms(b.hist.p99()):>7} ", theme.latency_color(b.hist.p99())),
+                (f"{human_ms(b.hist.max_ms):>7}  ", 0),
+                (f"{(b.bytes / b.count / 1024):>7.1f} ", 0),
+                (f"{b.bytes / 1_048_576:>8.2f} ", 0),
+                (f"{err_pct:>4.1f}%", theme.err_color(err_pct)),
+            ]
+            write_row(win, row, 2, cells)
             row += 1
 
-        # Latency sparkline across last 60 minutes
         row += 1
-        safe_addstr(win, row, 2, "Mean latency per minute (last 60 min)", curses.A_BOLD)
+        safe_addstr(win, row, 2, "Mean latency per minute (last 60 min)",
+                    theme.attr(theme.P_HEADER, curses.A_BOLD))
         row += 1
         series = u.minute_series(60, "mean_ms")
-        s = sparkline(series, width=60)
-        safe_addstr(win, row, 2, s)
+        safe_addstr(win, row, 2, sparkline(series, width=60),
+                    theme.attr(theme.P_SPARK))
         row += 1
-        # tick marks
-        safe_addstr(win, row, 2, f"{'-60m':<20}{'-30m':<20}{'now':<20}")
+        safe_addstr(win, row, 2, f"{'-60m':<20}{'-30m':<20}{'now':<20}",
+                    theme.attr(theme.P_DIM))
         row += 2
 
-        # Histogram bars (use the 5-min window to focus on recent)
-        b5 = u.window(5)
-        if b5.count > 0:
-            safe_addstr(win, row, 2, "Latency distribution (last 5 min)", curses.A_BOLD)
+        bw = u.window(detail_w)
+        if self.detail_show_hist and bw.count > 0 and row < h - 4:
+            safe_addstr(win, row, 2,
+                        f"Latency distribution (last {detail_w} min)",
+                        theme.attr(theme.P_HEADER, curses.A_BOLD))
             row += 1
-            max_bin = max(b5.hist.buckets) if b5.hist.buckets else 0
+            max_bin = max(bw.hist.buckets) if bw.hist.buckets else 0
             if max_bin > 0:
-                for i, c in enumerate(b5.hist.buckets):
-                    if c == 0 and i > 0 and all(b5.hist.buckets[j] == 0 for j in range(i)):
-                        continue
-                    if c == 0 and all(b5.hist.buckets[j] == 0 for j in range(i + 1, len(b5.hist.buckets))):
+                leading_zero = 0
+                trailing_zero = len(bw.hist.buckets)
+                for j, c in enumerate(bw.hist.buckets):
+                    if c == 0 and leading_zero == j:
+                        leading_zero = j + 1
+                for j in range(len(bw.hist.buckets) - 1, -1, -1):
+                    if bw.hist.buckets[j] != 0:
+                        trailing_zero = j + 1
                         break
-                    lo = 1.5 ** i if i > 0 else 0
-                    hi = 1.5 ** (i + 1)
+                else:
+                    trailing_zero = 1
+                for j in range(leading_zero, trailing_zero):
+                    c = bw.hist.buckets[j]
+                    lo = 1.5 ** j if j > 0 else 0
+                    hi = 1.5 ** (j + 1)
                     label = f"{lo:>7.1f}–{hi:>7.1f}ms "
                     bar = hbar(c, max_bin, 40)
-                    safe_addstr(win, row, 4, f"{label}{bar} {c}")
-                    row += 1
-                    if row >= h - 6:
-                        break
-
-        # top 5 status codes
-        row += 1
-        if row < h - 3:
-            safe_addstr(win, row, 2, "Status codes (last 5 min)", curses.A_BOLD)
-            row += 1
-            if b5.count > 0:
-                items = sorted(b5.status_counts.items(), key=lambda x: -x[1])
-                for st, c in items[:8]:
-                    pct = c / b5.count * 100
-                    safe_addstr(win, row, 4,
-                                f"{st:>4}  {c:>6}  {pct:>5.1f}%  {hbar(c, b5.count, 30)}")
+                    cells = [
+                        (label, theme.attr(theme.P_DIM)),
+                        (bar, theme.latency_color(lo)),
+                        (f" {c}", 0),
+                    ]
+                    write_row(win, row, 4, cells)
                     row += 1
                     if row >= h - 3:
                         break
 
-        # top API keys (by count, all-time for this URL)
-        if row < h - 3:
-            safe_addstr(win, row, 2, "Top API keys (all time)", curses.A_BOLD)
+        if self.detail_show_status and bw.count > 0 and row < h - 4:
+            row += 1
+            safe_addstr(win, row, 2, f"Status codes (last {detail_w} min)",
+                        theme.attr(theme.P_HEADER, curses.A_BOLD))
+            row += 1
+            items = sorted(bw.status_counts.items(), key=lambda x: -x[1])
+            for st, c in items[:6]:
+                pct = c / bw.count * 100
+                col = theme.attr(theme.P_BAD, curses.A_BOLD) if st >= 500 else \
+                      theme.attr(theme.P_WARN) if st >= 400 else \
+                      theme.attr(theme.P_GOOD)
+                cells = [
+                    (f"{st:>4}", col),
+                    (f"  {c:>6}  {pct:>5.1f}%  ", 0),
+                    (hbar(c, bw.count, 30), col),
+                ]
+                write_row(win, row, 4, cells)
+                row += 1
+                if row >= h - 3:
+                    break
+
+        if self.detail_show_keys and row < h - 3:
+            row += 1
+            safe_addstr(win, row, 2, "Top API keys (all time)",
+                        theme.attr(theme.P_HEADER, curses.A_BOLD))
             row += 1
             items = sorted(u.apikey_counts.items(), key=lambda x: -x[1])[:5]
             total = sum(c for _, c in items) or 1
             for k, c in items:
-                safe_addstr(win, row, 4,
-                            f"{k[:40]:<40}  {c:>8}  {hbar(c, total, 30)}")
+                cells = [
+                    (f"{k[:40]:<40}  ",
+                     theme.attr(theme.P_ACCENT) if k != "-" else theme.attr(theme.P_DIM)),
+                    (f"{c:>8}  ", 0),
+                    (hbar(c, total, 30), theme.attr(theme.P_SPARK)),
+                ]
+                write_row(win, row, 4, cells)
                 row += 1
                 if row >= h - 2:
                     break
 
-        safe_addstr(win, h - 1, 0, " [esc/left/q: back] ".ljust(w - 1),
-                    curses.A_REVERSE)
+        safe_addstr(win, h - 1, 0,
+                    " j/k n/p next/prev | [ ] window | H T K toggle | e export | esc back ".ljust(w - 1),
+                    theme.attr(theme.P_TITLE))

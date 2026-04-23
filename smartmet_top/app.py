@@ -125,7 +125,14 @@ class App:
         # Let the active panel consume input first if it has modal state
         # (filter editing, detail view). Otherwise global keys.
         p = self.current_panel
-        intercept = getattr(p, "filter_editing", False) or getattr(p, "detail_url", None)
+        intercept = getattr(p, "filter_editing", False) or getattr(p, "detail_url", None) or getattr(p, "detail_key", None)
+
+        # Export works from any mode — it is a read-only action.
+        if not getattr(p, "filter_editing", False):
+            if key == ord("e"):
+                self._export("csv"); return
+            if key == ord("E"):
+                self._export("json"); return
 
         if not intercept:
             if key in (ord("q"),):
@@ -147,10 +154,6 @@ class App:
                     return
             if key in (ord("?"), curses.KEY_F1):
                 self.show_help = not self.show_help
-                return
-            if key == ord("e") or key == ord("E"):
-                fmt = "json" if key == ord("E") else "csv"
-                self._export(fmt)
                 return
 
         # delegate to the panel
