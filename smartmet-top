@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+"""smartmet-top launcher: runs the app from this directory without install."""
+
+import os
+import sys
+
+here = os.path.dirname(os.path.realpath(__file__))
+if here not in sys.path:
+    sys.path.insert(0, here)
+
+from smartmet_top.__main__ import main
+
+if __name__ == "__main__":
+    sys.exit(main())
