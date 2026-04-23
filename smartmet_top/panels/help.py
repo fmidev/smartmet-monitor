@@ -52,7 +52,10 @@ class HelpPanel(Panel):
         for host in store.admin_hosts:
             row += 1
             s = store.admin_status.get(host, "?")
-            safe_addstr(win, row, 2, f"  admin[{host}]: {s}")
+            role = store.host_role.get(host, "unknown")
+            whats = len(store.available_what.get(host, set()))
+            safe_addstr(win, row, 2,
+                        f"  admin[{host}] role={role} what-count={whats}  {s}")
         if not store.admin_hosts:
             row += 1
             safe_addstr(win, row, 2, "  admin:    (no hosts configured)",

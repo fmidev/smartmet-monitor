@@ -41,6 +41,20 @@ async def _run(loop, executor, fn, *args):
     return await loop.run_in_executor(executor, fn, *args)
 
 
+# Endpoints we *might* poll; each declares its what= name, the URL suffix,
+# and which role (if any) suggests the endpoint should be useful. Panels
+# still drive which data they need; this just gates the outgoing HTTP
+# calls so we don't spam a host with requests it can't serve.
+_POLLED_ENDPOINTS = [
+    ("cachestats",     "?what=cachestats&format=json"),
+    ("servicestats",   "?what=servicestats&format=json"),
+    ("activerequests", "?what=activerequests&format=json"),
+    ("lastrequests",   "?what=lastrequests&format=json&minutes=1"),
+]
+
+_LIST_REFRESH_SECONDS = 300.0  # re-check endpoint availability every 5 min
+
+
 async def poll_admin(base_url: str, host: str, store,
                      interval: float = 2.0, executor=None) -> None:
     """Poll admin endpoints forever and push snapshots into store[host]."""
@@ -50,26 +64,52 @@ async def poll_admin(base_url: str, host: str, store,
         executor = ThreadPoolExecutor(max_workers=4)
     store.register_admin_host(host)
 
-    endpoints = [
-        ("cachestats", f"{base_url}?what=cachestats&format=json"),
-        ("servicestats", f"{base_url}?what=servicestats&format=json"),
-        ("activerequests", f"{base_url}?what=activerequests&format=json"),
-        ("lastrequests", f"{base_url}?what=lastrequests&format=json&minutes=1"),
-    ]
-
     seen_requests: set = set()
-    store.admin_status[host] = f"polling {base_url}"
+    store.admin_status[host] = f"probing {base_url}"
+    list_last_fetched: float = 0.0
 
     try:
         while True:
             start = time.time()
             any_ok = False
             errors = []
-            for name, url in endpoints:
-                snap_dict = getattr(store, name)  # Dict[host, AdminSnapshot]
-                snap = snap_dict[host]
+
+            # (1) Refresh the availability map periodically (cheap).
+            if start - list_last_fetched >= _LIST_REFRESH_SECONDS:
                 try:
-                    rows = await _run(loop, executor, _fetch, url)
+                    list_rows = await _run(
+                        loop, executor, _fetch,
+                        f"{base_url}?what=list&format=json",
+                    )
+                    whats = set()
+                    for r in list_rows:
+                        val = r.get("What") or r.get("what") or r.get("name") or ""
+                        if val:
+                            whats.add(val)
+                    if whats:
+                        store.available_what[host] = whats
+                        store.host_role[host] = _detect_role(whats)
+                        list_last_fetched = start
+                except Exception as e:
+                    # Leave availability empty so panels still attempt the
+                    # standard endpoints; the per-endpoint error will surface
+                    # if the host is truly unreachable.
+                    errors.append(f"list: {e}")
+
+            # (2) Poll the standard endpoints, skipping ones the host has
+            #     declared unsupported (if we have a list).
+            available = store.available_what.get(host)
+            for name, suffix in _POLLED_ENDPOINTS:
+                snap_dict = getattr(store, name)
+                snap = snap_dict[host]
+                if available and name not in available:
+                    snap.ok = False
+                    snap.error = "not supported on this host"
+                    snap.rows = []
+                    snap.fetched_at = time.time()
+                    continue
+                try:
+                    rows = await _run(loop, executor, _fetch, base_url + suffix)
                     snap.fetched_at = time.time()
                     snap.ok = True
                     snap.error = ""
@@ -92,17 +132,38 @@ async def poll_admin(base_url: str, host: str, store,
                     snap.fetched_at = time.time()
                     errors.append(f"{name}: {e}")
 
-            store.admin_status[host] = (
-                f"ok" if any_ok and not errors
-                else f"partial: {'; '.join(errors[:2])}" if any_ok
-                else f"failing: {errors[0] if errors else 'unknown'}"
-            )
+            role = store.host_role.get(host, "unknown")
+            role_suffix = f" [{role}]" if role != "unknown" else ""
+            if any_ok and not errors:
+                store.admin_status[host] = f"ok{role_suffix}"
+            elif any_ok:
+                store.admin_status[host] = f"partial{role_suffix}: {'; '.join(errors[:2])}"
+            else:
+                store.admin_status[host] = f"failing{role_suffix}: {errors[0] if errors else 'unknown'}"
 
             elapsed = time.time() - start
             await asyncio.sleep(max(0.0, interval - elapsed))
     finally:
         if owned_executor:
             executor.shutdown(wait=False)
+
+
+# Role heuristic. Frontends expose the sputnik backends endpoint; backends
+# expose qengine / gridproducers / obsproducers. Keep this generous — the
+# role label is just a visual cue, never a hard filter.
+def _detect_role(whats: set) -> str:
+    frontend_markers = {"backends", "clusterinfo"}
+    backend_markers = {"qengine", "producers", "gridproducers", "obsproducers",
+                       "gridgenerations", "parameterinfo", "stations"}
+    is_frontend = bool(whats & frontend_markers)
+    is_backend = bool(whats & backend_markers)
+    if is_frontend and is_backend:
+        return "mixed"
+    if is_frontend:
+        return "frontend"
+    if is_backend:
+        return "backend"
+    return "unknown"
 
 
 async def poll_all(urls, store, interval: float = 2.0) -> None:

@@ -180,6 +180,9 @@ class Store:
         # per-entity historical series (for sparklines), per host
         self.cache_history: Dict[str, HistorySeries] = {}
         self.service_history: Dict[str, HistorySeries] = {}
+        # auto-detected endpoint availability & role per host
+        self.available_what: Dict[str, set] = {}
+        self.host_role: Dict[str, str] = {}  # "frontend", "backend", or "unknown"
         # recent log lines (raw) for the Logs panel
         self.recent_lines: Deque[str] = deque(maxlen=2000)
         # status: data source health
@@ -198,6 +201,14 @@ class Store:
             self.cache_history.setdefault(host, HistorySeries())
             self.service_history.setdefault(host, HistorySeries())
             self.admin_status.setdefault(host, "(starting)")
+            self.available_what.setdefault(host, set())
+            self.host_role.setdefault(host, "unknown")
+
+    def hosts_supporting(self, what: str) -> List[str]:
+        """Which configured hosts have declared support for a given what=?"""
+        with self._lock:
+            return [h for h in self.admin_hosts
+                    if not self.available_what.get(h) or what in self.available_what[h]]
 
     # -- log updates --------------------------------------------------------
 
