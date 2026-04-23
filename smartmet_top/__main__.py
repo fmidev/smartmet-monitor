@@ -15,7 +15,7 @@ DEFAULT_LOG_GLOB = "/var/log/smartmet/*-access-log"
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        prog="smartmet-top",
+        prog="smtop",
         description="Interactive terminal monitor for SmartMet Server.",
     )
     p.add_argument(
@@ -66,7 +66,7 @@ def main(argv=None) -> int:
 
     if not log_paths and not admin_urls:
         sys.stderr.write(
-            "smartmet-top: no data sources. Pass -l LOG_FILE or -u ADMIN_URL.\n"
+            "smtop: no data sources. Pass -l LOG_FILE or -u ADMIN_URL.\n"
         )
         return 2
 

@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+"""smtop launcher.
+
+When run from the source tree (./smtop), makes the sibling
+smartmet_top package importable. When installed system-wide by the
+RPM, the package lives on Python's default path so the sys.path
+insertion below is a harmless no-op.
+"""
+
+import os
+import sys
+
+here = os.path.dirname(os.path.realpath(__file__))
+if os.path.isdir(os.path.join(here, "smartmet_top")) and here not in sys.path:
+    sys.path.insert(0, here)
+
+from smartmet_top.__main__ import main
+
+if __name__ == "__main__":
+    sys.exit(main())
