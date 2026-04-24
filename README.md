@@ -18,7 +18,9 @@ make install                  # installs under /usr/{bin,share,lib/pythonX}/
 make rpm                      # builds an RPM under ./rpmbuild/RPMS/noarch/
 ```
 
-The RPM package name is `smartmet-monitor`. It requires `python3 >= 3.9`.
+The RPM package name is `smartmet-monitor`. It requires Python 3.9
+(the `python3` package on RHEL 10 / Fedora, or the `python39`
+AppStream module on RHEL 8) plus `gawk`.
 
 ## `bstat` family — offline log analysis
 

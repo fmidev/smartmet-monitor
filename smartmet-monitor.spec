@@ -1,3 +1,13 @@
+# On RHEL 8 the Python 3.9 AppStream module ships as `python39`; on
+# RHEL 10+ and Fedora the package name is `python3`. Pick the right
+# one and use the matching rpm-macros package so %{python3_sitelib}
+# resolves to /usr/lib/python3.9/site-packages on RHEL 8 too.
+%if 0%{?rhel} == 8
+%global python3_pkgversion 39
+%else
+%global python3_pkgversion 3
+%endif
+
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
@@ -9,10 +19,13 @@ URL:            https://github.com/fmidev/smartmet-monitor
 Source0:        %{name}-%{version}.tar.gz
 BuildArch:      noarch
 
-BuildRequires:  python3 >= 3.9
+BuildRequires:  python%{python3_pkgversion}
+BuildRequires:  python%{python3_pkgversion}-rpm-macros
 BuildRequires:  make
 
-Requires:       python3 >= 3.9
+Requires:       python%{python3_pkgversion}
+# bstat.sh uses GNU-awk features (asort), so mawk/busybox awk won't do.
+Requires:       gawk
 
 %description
 Two companion tools for operating a SmartMet Server:

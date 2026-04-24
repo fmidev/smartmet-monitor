@@ -125,8 +125,16 @@ doesn't break data ingestion.
 
 ## 3. Python runtime baseline
 
-**Current floor:** Python 3.9 (declared in `smartmet-monitor.spec`
-`Requires:` and `BuildRequires:`, and in the CLAUDE.md).
+**Current floor:** Python 3.9.
+
+Package name differs across RHEL majors, so the spec picks it
+conditionally via `%{python3_pkgversion}`:
+
+- **RHEL 8** — Python 3.9 ships as the `python39` AppStream module;
+  the matching macros are in `python39-rpm-macros`. The base `python3`
+  package on RHEL 8 is Python 3.6 and is not a viable target.
+- **RHEL 10 / Fedora** — `python3` already is ≥ 3.9, macros in
+  `python3-rpm-macros`.
 
 The codebase is **pure stdlib by design** (see CLAUDE.md §"What this
 is"). Adding a PyPI dependency is a policy decision, not a mechanical
@@ -134,6 +142,8 @@ one.
 
 ### Update here when…
 
+- RHEL 8 is dropped as a target. Remove the `%if 0%{?rhel} == 8`
+  branch from the spec.
 - RHEL/Rocky base image drops Python 3.9 support. Raise the floor in
   the spec and retire any compatibility shims added for 3.9.
 - You genuinely need a stdlib feature only present in a later Python
@@ -144,7 +154,8 @@ one.
 ## 4. GNU awk & Bash assumptions
 
 `share/smartmet/bstat.sh` uses GNU-awk specific features — notably
-`asort()` with 1-indexed results. Wrappers in `bin/` target Bash 4+.
+`asort()` with 1-indexed results. The spec pulls in `gawk` as a
+runtime `Requires:` accordingly. Wrappers in `bin/` target Bash 4+.
 
 ### Update here when…
 
