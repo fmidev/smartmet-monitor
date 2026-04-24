@@ -1,9 +1,16 @@
 PREFIX ?= /usr
 DESTDIR ?=
 
-# Resolve the system Python 3 site-packages dir (e.g. /usr/lib/python3.9/site-packages).
-# Override PYSITELIB= at invocation to force a specific path (the RPM does this).
-PYSITELIB ?= $(shell python3 -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
+# On RHEL 8 `/usr/bin/python3` is 3.6 (platform-python); the packaged
+# module we actually target is `/usr/bin/python3.9`. Override PYTHON=
+# at invocation (the RPM spec does this on RHEL 8) to point at a
+# specific interpreter. Everywhere else `python3` already is ≥ 3.9.
+PYTHON ?= python3
+
+# Resolve the Python 3 site-packages dir for the chosen interpreter
+# (e.g. /usr/lib/python3.9/site-packages). Override PYSITELIB= to force
+# a specific path (the RPM does this).
+PYSITELIB ?= $(shell $(PYTHON) -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
 
 BINDIR = $(DESTDIR)$(PREFIX)/bin
 SHAREDIR = $(DESTDIR)$(PREFIX)/share/smartmet
@@ -54,8 +61,8 @@ uninstall:
 	rm -rf $(SITEDIR)
 
 check:
-	python3 -c 'import sys; sys.path.insert(0, "."); import smartmet_top, smartmet_top.app'
-	python3 -m py_compile smartmet_top/*.py smartmet_top/*/*.py
+	$(PYTHON) -c 'import sys; sys.path.insert(0, "."); import smartmet_top, smartmet_top.app'
+	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
 	bash -n share/smartmet/bstat.sh
 	for t in $(BTOOLS) $(LEGACY); do bash -n bin/$$t; done
 	# End-to-end: each wrapper must load the library and print at least

@@ -1,11 +1,14 @@
 # On RHEL 8 the Python 3.9 AppStream module ships as `python39`; on
 # RHEL 10+ and Fedora the package name is `python3`. Pick the right
-# one and use the matching rpm-macros package so %{python3_sitelib}
+# one and use the matching rpm-macros package so %%{python3_sitelib}
 # resolves to /usr/lib/python3.9/site-packages on RHEL 8 too.
 %if 0%{?rhel} == 8
 %global python3_pkgversion 39
+# On RHEL 8 `/usr/bin/python3` is 3.6 — we must invoke 3.9 explicitly.
+%global python3_bin python3.9
 %else
 %global python3_pkgversion 3
+%global python3_bin python3
 %endif
 
 %global _python3_sitelib %{python3_sitelib}
@@ -48,8 +51,9 @@ packages are required at runtime.
 
 %build
 # Nothing to compile — Python stdlib only. The Makefile's check target
-# validates byte-compilation across all modules.
-make check PYSITELIB=%{_python3_sitelib}
+# validates byte-compilation across all modules. PYTHON= pins the
+# interpreter to the 3.9 build even on RHEL 8 where `python3` is 3.6.
+make check PYTHON=%{python3_bin} PYSITELIB=%{_python3_sitelib}
 
 %install
 rm -rf %{buildroot}

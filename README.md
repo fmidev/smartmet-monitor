@@ -22,6 +22,14 @@ The RPM package name is `smartmet-monitor`. It requires Python 3.9
 (the `python3` package on RHEL 10 / Fedora, or the `python39`
 AppStream module on RHEL 8) plus `gawk`.
 
+On a fresh builder, install the build dependencies straight from the
+spec before running `make rpm`:
+
+```sh
+sudo yum-builddep smartmet-monitor.spec     # RHEL 8
+sudo dnf builddep smartmet-monitor.spec     # RHEL 10 / Fedora
+```
+
 ## `bstat` family — offline log analysis
 
 Each tool accepts a log file path (or reads stdin) and writes a
