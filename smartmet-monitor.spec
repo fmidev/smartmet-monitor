@@ -77,7 +77,6 @@ make install \
 %{_mandir}/man1/bstat24.1*
 %doc %{_docdir}/smartmet-monitor/README.md
 %{_python3_sitelib}/smartmet_top/
-%{_python3_sitelib}/smartmet_top/*/
 
 %changelog
 * Thu Apr 23 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.1.0-1

@@ -11,7 +11,7 @@ MANDIR = $(DESTDIR)$(PREFIX)/share/man/man1
 DOCDIR = $(DESTDIR)$(PREFIX)/share/doc/smartmet-monitor
 SITEDIR = $(DESTDIR)$(PYSITELIB)/smartmet_top
 
-.PHONY: all install uninstall clean check rpm rpm-sources
+.PHONY: all install uninstall clean check rpm
 
 all:
 	@echo "smartmet-monitor is a no-build package. Use 'make install' or 'make rpm'."
@@ -68,15 +68,14 @@ check:
 clean:
 	find . -name __pycache__ -prune -exec rm -rf {} +
 
-# Build RPM from the working tree. Requires rpmbuild.
+# Build RPM from HEAD. Uses ~/.rpmmacros for %_topdir, matching other
+# smartmet-* repos in this hub (e.g. macgyver, spine).
 NAME = smartmet-monitor
 VERSION = $(shell sed -n 's/^__version__ = "\(.*\)"/\1/p' smartmet_top/__init__.py)
 
-rpm-sources:
-	rm -rf rpmbuild && mkdir -p rpmbuild/SOURCES rpmbuild/SPECS
+rpm: clean $(NAME).spec
+	rm -f $(NAME)-$(VERSION).tar.gz
 	git archive --format=tar.gz --prefix=$(NAME)-$(VERSION)/ HEAD \
-		-o rpmbuild/SOURCES/$(NAME)-$(VERSION).tar.gz
-	cp smartmet-monitor.spec rpmbuild/SPECS/
-
-rpm: rpm-sources
-	rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -bb rpmbuild/SPECS/smartmet-monitor.spec
+	    -o $(NAME)-$(VERSION).tar.gz
+	rpmbuild -tb $(NAME)-$(VERSION).tar.gz
+	rm -f $(NAME)-$(VERSION).tar.gz

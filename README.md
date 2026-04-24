@@ -139,9 +139,12 @@ reports the exact path after write.
 ## Building the RPM
 
 ```sh
-git clean -fdx rpmbuild
 make rpm
 ```
+
+`make rpm` builds a source tarball from `HEAD` and runs `rpmbuild -tb`,
+which uses `%_topdir` from `~/.rpmmacros` — the same convention as the
+other `smartmet-*` packages in this workspace.
 
 The resulting `smartmet-monitor-<version>-<release>.noarch.rpm` installs
 everything under `/usr/bin`, `/usr/share/smartmet`, and the distribution
