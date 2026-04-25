@@ -87,7 +87,8 @@ All five commands share `/usr/share/smartmet/bstat.sh` as a library; set
 
 ```sh
 smtop [-l PATH-OR-GLOB ...] [-u LABEL=URL,URL ...] [-n SECONDS] \
-      [--replay] [--ascii] [--perf] [--perf-interval SEC]
+      [--replay] [--replay-bytes N] [--include-rotated] \
+      [--history-minutes N] [--ascii] [--perf] [--perf-interval SEC]
 ```
 
 Each panel has one **red highlighted letter** in its tab label — pressing
@@ -179,13 +180,26 @@ reports the exact path after write.
 ### Memory model
 
 * Per-URL stats are kept as one exponential-bin histogram (40 bins,
-  base 1.5) per minute, retained for 60 minutes. ~20 KB per URL.
-* Per-plugin (per-access-log) stats keep 60 1-second buckets plus 60
-  1-minute buckets. ~3 KB per plugin × ~20 plugins ≈ 60 KB total.
+  base 1.5) per minute, retained for `--history-minutes` (default 60
+  minutes). ~20 KB per URL per hour.
+* Per-plugin (per-access-log) stats keep 60 1-second buckets plus
+  `--history-minutes` 1-minute buckets. ~3 KB per plugin per hour ×
+  ~20 plugins ≈ 60 KB per hour. With `--history-minutes 1440` (24 h)
+  that's ~17 MB; with `--history-minutes 10080` (7 d) ~120 MB.
 * Admin-plugin snapshots retain 300 samples per entity per host
   (≈ 10 minutes at the default 2-second poll cadence).
 * Per-PID memory/IO samples retain 1800 ticks (60 min @ 2 s) ≈ 360 KB
   per smartmetd process.
+
+### Replaying historical logs
+
+`--replay` reads the tail of each log file (capped at `--replay-bytes`,
+default 256 MB) so the dashboard opens with populated panels rather
+than empty ones. Add `--include-rotated` to also read every rotated
+sibling (`<base>-YYYYMMDD`, `<base>-YYYYMMDD.gz`) in chronological
+order — combined with `--history-minutes 10080` this gives a full
+week of context. Compressed `.gz` files are read transparently via
+the stdlib `gzip` module; no pip dependency.
 
 ## Building the RPM
 

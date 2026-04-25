@@ -72,8 +72,35 @@ Do not tail any log file (rely solely on admin\-plugin
 .IR lastrequests ).
 .TP
 .B \-\-replay
-On startup, read up to 256 MiB from the tail of each log file so
-the dashboard opens with panels populated instead of empty.
+On startup, read the tail of each log file (capped at
+.BR \-\-replay\-bytes )
+so the dashboard opens with panels populated instead of empty.
+.TP
+.BI \-\-replay\-bytes \ N
+Maximum number of bytes to read per log file when
+.B \-\-replay
+is in effect. Default 256 MiB. Gzipped rotated files are read in
+full regardless of this cap (gzip doesn\(aqt support cheap
+seek\-to\-tail).
+.TP
+.B \-\-include\-rotated
+When
+.B \-\-replay
+is in effect, also read each log file\(aqs rotated siblings — both
+.IR <base>\-YYYYMMDD " (uncompressed) and"
+.IR <base>\-YYYYMMDD.gz " (compressed) —"
+in chronological order. When the same date is present in both states
+the
+.I .gz
+is preferred to avoid double\-counting during a mid\-rotation window.
+.TP
+.BI \-\-history\-minutes \ N
+Per\-minute history retention. Default 60 minutes. Raise to 1440 for
+a day, 10080 for a week. Memory grows roughly linearly: ~12 KB per
+minute on a 20\-plugin host, so 24 h ≈ 17 MB and 7 d ≈ 120 MB.
+Combine with
+.B \-\-include\-rotated
+to actually retain the historical data being replayed.
 .TP
 .B \-\-ascii
 Render charts with eighth\-block characters instead of Braille.

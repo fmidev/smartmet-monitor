@@ -9,6 +9,7 @@ import sys
 from typing import List
 
 from .app import run_app
+from .state.store import set_history_minutes
 from .widgets.bars import set_ascii
 
 DEFAULT_LOG_GLOB = "/var/log/smartmet/*-access-log"
@@ -42,8 +43,37 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     )
     p.add_argument(
         "--replay", action="store_true",
-        help="On startup, read the tail of each log file (up to 256 MB) "
-             "so the panels come up populated instead of empty.",
+        help="On startup, read the tail of each log file so the panels "
+             "come up populated instead of empty. Capped at "
+             "--replay-bytes per file (default 256 MB).",
+    )
+    p.add_argument(
+        "--replay-bytes", type=int, default=256 * 1024 * 1024,
+        metavar="N",
+        help="Maximum number of bytes to read per log file when "
+             "--replay is in effect. Default 256 MB. Raise this on "
+             "low-traffic logs where 256 MB doesn't cover the desired "
+             "history window; lower it on busy logs to reduce startup "
+             "time. Note: gzipped rotated logs are read in full "
+             "regardless of this cap (gzip doesn't support cheap "
+             "seek-to-tail).",
+    )
+    p.add_argument(
+        "--include-rotated", action="store_true",
+        help="When --replay is in effect, also read each log file's "
+             "rotated siblings (e.g. wms-access-log-20260424.gz). "
+             "Files are read in chronological order — historical first, "
+             "live last — so the store sees a continuous timeline. "
+             "Combine with --history-minutes to keep the historical "
+             "data instead of pruning it back to 60 minutes.",
+    )
+    p.add_argument(
+        "--history-minutes", type=int, default=60, metavar="N",
+        help="Per-minute history retention. Default 60 minutes. Raise "
+             "to keep multiple hours, a day (1440) or a week (10080) "
+             "of bucketed history visible in the panels. Memory grows "
+             "roughly linearly: ~12 KB per minute on a 20-plugin host, "
+             "so 24h ≈ 17 MB and 7 days ≈ 120 MB.",
     )
     p.add_argument(
         "--ascii", action="store_true",
@@ -88,6 +118,8 @@ def main(argv=None) -> int:
 
     if args.ascii:
         set_ascii(True)
+    if args.history_minutes != 60:
+        set_history_minutes(args.history_minutes)
 
     # Without log files and admin URLs the access-log panels stay empty,
     # but the Proc panel still works against any local smartmetd process.
@@ -104,6 +136,8 @@ def main(argv=None) -> int:
             admin_urls=admin_urls,
             admin_interval=args.admin_interval,
             replay=args.replay,
+            replay_bytes=args.replay_bytes,
+            include_rotated=args.include_rotated,
             enable_perf=args.perf,
             perf_interval=args.perf_interval,
         )

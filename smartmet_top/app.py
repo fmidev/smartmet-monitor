@@ -38,6 +38,8 @@ class App:
     def __init__(self, log_paths: List[str],
                  admin_urls: List[tuple],  # [(host_label, base_url), ...]
                  admin_interval: float, replay: bool,
+                 replay_bytes: int = 256 * 1024 * 1024,
+                 include_rotated: bool = False,
                  enable_perf: bool = False,
                  perf_interval: float = 10.0) -> None:
         self.store = Store()
@@ -47,6 +49,8 @@ class App:
         self.admin_urls = admin_urls
         self.admin_interval = admin_interval
         self.replay = replay
+        self.replay_bytes = replay_bytes
+        self.include_rotated = include_rotated
         self.enable_perf = enable_perf
         self.perf_interval = perf_interval
         self.store.perf_enabled = enable_perf
@@ -222,7 +226,9 @@ class App:
         tasks = []
         if self.replay and self.log_paths:
             # synchronous bulk load first so opening on a live server feels fast
-            await bulk_load(self.log_paths, self.store)
+            await bulk_load(self.log_paths, self.store,
+                            max_bytes_per_file=self.replay_bytes,
+                            include_rotated=self.include_rotated)
         if self.log_paths:
             tasks.append(asyncio.create_task(tail_many(self.log_paths, self.store)))
         if self.admin_urls:
@@ -274,8 +280,12 @@ class App:
 
 def run_app(log_paths: List[str], admin_urls: List[tuple],
             admin_interval: float, replay: bool,
+            replay_bytes: int = 256 * 1024 * 1024,
+            include_rotated: bool = False,
             enable_perf: bool = False, perf_interval: float = 10.0) -> None:
     app = App(log_paths, admin_urls, admin_interval, replay,
+              replay_bytes=replay_bytes,
+              include_rotated=include_rotated,
               enable_perf=enable_perf, perf_interval=perf_interval)
 
     def _curses_main(stdscr):

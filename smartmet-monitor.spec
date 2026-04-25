@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.3.2
+Version:        0.4.0
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,29 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sat Apr 25 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.4.0-1
+- Plugins panel: add window selector. `[` and `]` cycle through 60s
+  (live, per-second), 1m, 5m, 15m, 60m. The 60s mode is unchanged
+  and still the default; the minute modes read the per-minute
+  buckets that --replay populates, so the panel is no longer empty
+  immediately after replay finishes.
+- New --replay-bytes N flag controls the per-file byte cap during
+  --replay (default 256 MB, same as before). Raise on low-traffic
+  logs that need a longer history; lower on busy logs to reduce
+  startup time.
+- New --include-rotated flag walks each log path's rotated siblings
+  during --replay. Detects both `<base>-YYYYMMDD` (uncompressed,
+  freshly rotated) and `<base>-YYYYMMDD.gz` (compressed); when the
+  same date appears in both states the .gz is preferred so a
+  mid-rotation snapshot doesn't get double-counted. gzip files are
+  read transparently via the stdlib `gzip` module — still no pip
+  dependency.
+- New --history-minutes N flag controls the per-minute retention
+  window. Default 60 minutes (unchanged); raise to 1440 for a day
+  or 10080 for a week of bucketed history. Memory grows roughly
+  linearly with the window: ~12 KB per minute on a 20-plugin host,
+  so 24h ≈ 17 MB and 7d ≈ 120 MB.
+
 * Sat Apr 25 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.3.2-1
 - perf record: drop -q (which silenced the very error messages we
   needed to diagnose failure) and drop --no-children (a perf report

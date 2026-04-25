@@ -32,6 +32,20 @@ SORT_COLS = (
     ("MB/s",   "bytes",     "bytes per second"),
 )
 
+# Window options: (display label, span, resolution).
+# `span` is in seconds for "second"-resolution windows, in minutes for
+# "minute"-resolution. Per-second mode shows live monitoring at 1Hz —
+# `--replay` can't backfill it, anything older than 60s is gone — so
+# the minute-resolution rows below let the operator zoom out and see
+# the historical context that --replay does populate.
+WINDOWS = (
+    ("60s", 60,  "second"),
+    ("1m",  1,   "minute"),
+    ("5m",  5,   "minute"),
+    ("15m", 15,  "minute"),
+    ("60m", 60,  "minute"),
+)
+
 
 class PluginsPanel(Panel):
     name = "Graphs"
@@ -58,6 +72,10 @@ class PluginsPanel(Panel):
         # Hide entirely-idle rows by default — production hosts have
         # many always-empty handler logs we don't want crowding the view.
         self.hide_idle = True
+        # Window selector: 60s (live), 1m, 5m, 15m, 60m. Default 60s
+        # keeps the live feel; `[` / `]` cycle, and the minute modes
+        # are the ones --replay populates.
+        self.window_idx = 0
 
     # ---- key handling ------------------------------------------------------
 
@@ -105,6 +123,10 @@ class PluginsPanel(Panel):
             self.sort_idx = (self.sort_idx - 1) % len(SORT_COLS)
         elif key == ord("r"):
             self.reverse = not self.reverse
+        elif key == ord("["):
+            self.window_idx = max(0, self.window_idx - 1)
+        elif key == ord("]"):
+            self.window_idx = min(len(WINDOWS) - 1, self.window_idx + 1)
         else:
             return False
         return True
@@ -135,12 +157,16 @@ class PluginsPanel(Panel):
     # ---- selection / sort --------------------------------------------------
 
     def _sorted_rows(self, store) -> List[Tuple[SourceStats, "object"]]:
-        """Return [(source_stats, last-60s-window), ...] sorted per
+        """Return [(source_stats, current-window-bucket), ...] sorted per
         the current sort column. The window is computed once here so
         downstream callers don't redo the merge per redraw."""
+        _, span, resolution = WINDOWS[self.window_idx]
         rows: List[Tuple[SourceStats, object]] = []
         for src in store.snapshot_sources():
-            snap = src.second_window(60)
+            if resolution == "second":
+                snap = src.second_window(span)
+            else:
+                snap = src.minute_window(span)
             if self.hide_idle and snap.count == 0:
                 continue
             if self.filter and self.filter.lower() not in src.label.lower():
@@ -183,8 +209,10 @@ class PluginsPanel(Panel):
         size_label = "B/s" if self.size_metric == "bytes" else "size"
         idle_state = "hidden" if self.hide_idle else "shown"
         sort_name = SORT_COLS[self.sort_idx][0]
+        win_label, _, win_res = WINDOWS[self.window_idx]
         hdr = (
             f" Graphs — {len(rows)}/{total} log files  "
+            f"window:{win_label}({win_res})  "
             f"sort:{sort_name}{'↓' if self.reverse else '↑'}  "
             f"time={time_label}  size={size_label}  idle={idle_state}  "
             f"filter:{self.filter or '<none>'}"
@@ -207,11 +235,11 @@ class PluginsPanel(Panel):
             self._draw_footer(win)
             return
 
-        # Header row — sparks always represent the last 60 s of data,
-        # auto-scaled column-wide.
-        time_hdr = f"resp-{time_label} (60s)"
-        size_hdr = ("resp-bytes/s (60s)" if self.size_metric == "bytes"
-                    else "resp-size (60s)")
+        # Header row — sparks span the active window, auto-scaled
+        # column-wide.
+        time_hdr = f"resp-{time_label} ({win_label})"
+        size_hdr = (f"resp-bytes/s ({win_label})" if self.size_metric == "bytes"
+                    else f"resp-size ({win_label})")
         col_hdr = (
             f"{'plugin':<{name_col}} "
             f"{'req/s':>{num_cols}} "
@@ -245,18 +273,26 @@ class PluginsPanel(Panel):
 
         # Compute per-column max across visible rows so each spark
         # auto-scales to its own data range, independent of the others.
+        _, span, resolution = WINDOWS[self.window_idx]
         time_series_cache: List[List[float]] = []
         size_series_cache: List[List[float]] = []
         for src, _ in visible:
-            time_series_cache.append(src.second_series(self.time_metric, 60))
-            size_series_cache.append(src.second_series(self.size_metric, 60))
+            if resolution == "second":
+                time_series_cache.append(src.second_series(self.time_metric, span))
+                size_series_cache.append(src.second_series(self.size_metric, span))
+            else:
+                time_series_cache.append(src.minute_series(self.time_metric, span))
+                size_series_cache.append(src.minute_series(self.size_metric, span))
         time_max = max((max(s, default=0.0) for s in time_series_cache), default=0.0)
         size_max = max((max(s, default=0.0) for s in size_series_cache), default=0.0)
 
+        # req/s normalisation: in second-mode, snap.count is over
+        # `span` seconds; in minute-mode, over `span` minutes.
+        rps_divisor = float(span) if resolution == "second" else float(span * 60)
         for i, (src, snap) in enumerate(visible):
             y = body_top + i
             row_attr = curses.A_REVERSE if (self.scroll + i == self.cursor) else 0
-            req_per_s = snap.count / 60.0
+            req_per_s = snap.count / rps_divisor if rps_divisor else 0.0
             mean_ms = snap.hist.mean()
             p95_ms = snap.hist.p95()
             err_pct = (snap.errors / snap.count * 100) if snap.count else 0.0
@@ -300,8 +336,8 @@ class PluginsPanel(Panel):
                         theme.attr(theme.P_HIGHLIGHT))
             return
         msg = (
-            " s/S sort  r reverse  m time mean↔p95  b size mean↔B/s  "
-            "i idle on/off  / filter  e/E export "
+            " s/S sort  r reverse  [/] window  m time mean↔p95  "
+            "b size mean↔B/s  i idle on/off  / filter  e/E export "
         )
         safe_addstr(win, h - 1, 0, msg.ljust(w - 1),
                     theme.attr(theme.P_TITLE))

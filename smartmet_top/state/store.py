@@ -18,7 +18,23 @@ from typing import Deque, Dict, Iterable, List, Optional, Tuple
 
 from .histogram import Histogram
 
+# Mutable retention window for minute-bucketed history. Defaults to 60
+# minutes; raise via `set_history_minutes()` (the smtop CLI exposes this
+# as `--history-minutes`) to keep multiple hours, a day or a week of
+# data — useful with `--include-rotated`. Memory grows roughly linearly:
+# ~600 B per source per minute × 20 sources ≈ 12 KB per minute, so 24h
+# ≈ 17 MB and 7 days ≈ 120 MB.
 HISTORY_MINUTES = 60
+
+
+def set_history_minutes(n: int) -> None:
+    """Set the per-minute bucket retention. Affects every Store created
+    after this call AND any in-flight pruning, since record() reads the
+    module-level HISTORY_MINUTES on each insert."""
+    global HISTORY_MINUTES
+    HISTORY_MINUTES = max(1, int(n))
+
+
 # Admin snapshots: keep ~5 minutes of 2-second polls = 150 samples.
 # The actual cap is independent of poll interval; the deque just bounds
 # memory so a long-running instance doesn't grow without limit.
@@ -127,6 +143,53 @@ class SourceStats:
             elif metric == "bytes":  # total bytes in this second (≈ B/s)
                 out.append(float(b.bytes))
             elif metric == "bytes_mean":  # mean response size in this second
+                out.append(float(b.bytes) / b.count if b.count else 0.0)
+            elif metric == "err_pct":
+                out.append(b.errors / b.count * 100.0 if b.count else 0.0)
+            else:
+                out.append(0.0)
+        return out
+
+    def minute_window(self, minutes: int) -> MinuteBucket:
+        """Merge the last N minute-buckets into one. Counterpart of
+        second_window() at coarser resolution — readable after --replay
+        because minute_buckets get backfilled by historical log lines."""
+        now_min = int(time.time() // 60)
+        merged = MinuteBucket()
+        for m in range(now_min - minutes + 1, now_min + 1):
+            b = self.minute_buckets.get(m)
+            if b is None:
+                continue
+            merged.hist.merge(b.hist)
+            merged.count += b.count
+            merged.bytes += b.bytes
+            merged.errors += b.errors
+            for k, v in b.status_counts.items():
+                merged.status_counts[k] = merged.status_counts.get(k, 0) + v
+        return merged
+
+    def minute_series(self, metric: str, minutes: int) -> List[float]:
+        """Per-minute values for the last N minutes. Oldest first."""
+        now_min = int(time.time() // 60)
+        out: List[float] = []
+        for m in range(now_min - minutes + 1, now_min + 1):
+            b = self.minute_buckets.get(m)
+            if b is None or b.count == 0:
+                out.append(0.0)
+                continue
+            if metric == "count":
+                # Same semantics as second_series 'count' but per minute —
+                # divide by 60 if the panel wants req/s units.
+                out.append(float(b.count))
+            elif metric == "mean_ms":
+                out.append(b.hist.mean())
+            elif metric == "p95_ms":
+                out.append(b.hist.p95())
+            elif metric == "max_ms":
+                out.append(b.hist.max_ms)
+            elif metric == "bytes":
+                out.append(float(b.bytes))
+            elif metric == "bytes_mean":
                 out.append(float(b.bytes) / b.count if b.count else 0.0)
             elif metric == "err_pct":
                 out.append(b.errors / b.count * 100.0 if b.count else 0.0)
