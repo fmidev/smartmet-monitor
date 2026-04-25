@@ -65,8 +65,10 @@ check:
 	$(PYTHON) -c 'import sys; sys.path.insert(0, "."); \
 	    import smartmet_top, smartmet_top.app, \
 	           smartmet_top.sources.proc, smartmet_top.sources.perftop, \
-	           smartmet_top.panels.proc, smartmet_top.widgets.bars, \
-	           smartmet_top.views.live, smartmet_top.views.composite; \
+	           smartmet_top.panels.proc, smartmet_top.panels.flame, \
+	           smartmet_top.widgets.bars, \
+	           smartmet_top.views.live, smartmet_top.views.admin, \
+	           smartmet_top.views.composite; \
 	    from smartmet_top.widgets.bars import sparkline, vchart, set_ascii; \
 	    set_ascii(False); assert sparkline([0,1,2,3,4,5,6,7,8], width=4); \
 	    set_ascii(True);  assert sparkline([0,1,2,3,4,5,6,7,8], width=4); \

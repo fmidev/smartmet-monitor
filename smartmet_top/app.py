@@ -12,6 +12,7 @@ from . import export, theme
 from .panels.active import ActivePanel
 from .panels.base import Panel, safe_addstr, write_label
 from .panels.caches import CachesPanel
+from .panels.flame import FlamePanel
 from .panels.help import HelpPanel
 from .panels.keys import KeysPanel
 from .panels.logs import LogsPanel
@@ -20,6 +21,7 @@ from .panels.plugins import PluginsPanel
 from .panels.proc import ProcPanel
 from .panels.services import ServicesPanel
 from .panels.urls import UrlsPanel
+from .views.admin import AdminView
 from .views.live import LiveView
 from .sources.adminapi import poll_all
 from .sources.logtail import bulk_load, tail_many
@@ -50,6 +52,8 @@ class App:
         self.store.perf_enabled = enable_perf
         self.panels: List[Panel] = [
             LiveView(),
+            AdminView(),
+            FlamePanel(),
             OverviewPanel(),
             PluginsPanel(),
             UrlsPanel(),

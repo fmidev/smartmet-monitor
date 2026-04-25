@@ -8,11 +8,23 @@ smtop \- interactive terminal monitor for SmartMet Server
 .B smtop
 is a curses dashboard that combines offline access\-log analysis with
 live polling of the SmartMet admin plugin and per\-process /proc
-inspection. Nine panels are rotated with
+inspection. Twelve views are rotated with
 .B Tab
-or each panel\(aqs single\-letter mnemonic (highlighted in red in the
-tab label): Overview, Graphs (live per\-plugin), URLs, Caches,
-Services, Active, Proc, Logs, and API Keys. Sparklines and charts use Braille glyphs by default for
+or each view\(aqs single\-letter mnemonic (highlighted in red in the
+tab label).
+.PP
+Three of the views are
+.I composite
+\- they draw multiple panels at once on a single screen, the same way
+btop composes CPU + memory + processes + network. The composites are
+.B Live
+(per\-plugin Graphs + per\-URL table; default startup view),
+.B Health
+(Caches + Services + Active in\-flight stacked), and
+.B Flame
+(full\-screen live flamegraph). The remaining nine views are dedicated
+single\-panel views (Overview, Graphs, URLs, Caches, Services, Active,
+Proc, Logs, Keys) for sortable / filterable interaction. Sparklines and charts use Braille glyphs by default for
 2\(mu horizontal density and 4\(mu vertical resolution; pass
 .B \-\-ascii
 on terminals or fonts that don\(aqt render U+2800..U+28FF properly.
@@ -84,8 +96,15 @@ installed and either root or
 Full perf cycle in seconds (record 1 s + idle remainder). Default 10.0.
 .SH KEYS
 .TP
-.BR o " / " g " / " u " / " c " / " s " / " a " / " p " / " l " / " k
-Jump to a panel by mnemonic letter (highlighted in the tab).
+.BR i " / " h " / " f " / " o " / " g " / " u " / " c " / " s " / " a " / " p " / " l " / " k
+Jump to a view (composite or single-panel) by mnemonic letter
+(highlighted in the tab). Composites:
+.I i
+Live,
+.I h
+Health,
+.I f
+Flame.
 .TP
 .BR Tab " / " Shift\-Tab
 Next / previous panel.

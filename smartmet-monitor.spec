@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.3.0
+Version:        0.3.1
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,20 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sat Apr 25 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.3.1-1
+- Add Health composite view (mnemonic h): Caches + Services + Active
+  stacked in equal thirds. Operator goal: "is this server healthy?"
+- Add Flame view (mnemonic f): full-screen live flamegraph for the
+  focused smartmetd PID. Reuses the tree builder + renderer from the
+  Proc panel but gives them the entire terminal so deep stacks stay
+  readable. Requires --perf. The Proc panel keeps its inline
+  flamegraph toggle for the case where flame + memory should be
+  compared side by side.
+- Flame view's "disabled" state now shows store.perf_status verbatim
+  ("perf not found in PATH", "(disabled — start smtop with --perf)",
+  etc.) and lists the three common causes in the body text rather
+  than a single generic message.
+
 * Sat Apr 25 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.3.0-1
 - First step toward btop-style multi-panel layouts. Add a Live view
   (mnemonic i) that renders the Graphs panel (top 60%) and the URLs
