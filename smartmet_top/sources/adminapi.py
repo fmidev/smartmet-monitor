@@ -26,7 +26,23 @@ def _fetch(url: str, timeout: float = 5.0) -> list:
     req = urllib.request.Request(url, headers={"User-Agent": "smartmet-top/0.1"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = resp.read()
-    parsed = json.loads(data)
+        ctype = resp.headers.get("Content-Type", "")
+    # The admin plugin happily returns HTML when it doesn't know the
+    # request (and an empty body in some edge cases). Surface both as a
+    # clear error including a body preview, so a JSONDecodeError at
+    # char 0 actually tells the operator what they're looking at.
+    if not data:
+        raise ValueError(
+            f"empty response from {url} (Content-Type: {ctype or '?'})"
+        )
+    try:
+        parsed = json.loads(data)
+    except json.JSONDecodeError as e:
+        snippet = data[:120].decode("utf-8", errors="replace").replace("\n", " ").strip()
+        raise ValueError(
+            f"non-JSON response from {url} "
+            f"(Content-Type: {ctype or '?'}, body[:120]={snippet!r})"
+        ) from e
     if isinstance(parsed, list):
         return parsed
     # Some endpoints wrap the rows in an object; flatten to a list.
@@ -63,6 +79,10 @@ async def poll_admin(base_url: str, host: str, store,
     if executor is None:
         executor = ThreadPoolExecutor(max_workers=4)
     store.register_admin_host(host)
+    # Operators often paste the URL with a trailing slash; suffixes start
+    # with `?` so a stray `/` would produce `…/admin/?what=…` which on
+    # some configurations 404s back as HTML.
+    base_url = base_url.rstrip("/")
 
     seen_requests: set = set()
     store.admin_status[host] = f"probing {base_url}"
@@ -83,7 +103,16 @@ async def poll_admin(base_url: str, host: str, store,
                     )
                     whats = set()
                     for r in list_rows:
-                        val = r.get("What") or r.get("what") or r.get("name") or ""
+                        # The list endpoint historically returned HTML-style
+                        # rows with a "What" column; some builds return a
+                        # plain JSON array of strings instead. Accept both.
+                        if isinstance(r, str):
+                            val = r
+                        elif isinstance(r, dict):
+                            val = (r.get("What") or r.get("what")
+                                   or r.get("name") or "")
+                        else:
+                            val = ""
                         if val:
                             whats.add(val)
                     if whats:
