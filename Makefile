@@ -30,7 +30,7 @@ MANPAGES = smtop.1 bstat.1 bchart.1 burls.1 bstatus.1 bkeys.1 \
 
 install:
 	install -d $(BINDIR) $(SHAREDIR) $(MANDIR) $(DOCDIR)
-	install -d $(SITEDIR) $(SITEDIR)/panels $(SITEDIR)/sources $(SITEDIR)/state $(SITEDIR)/widgets
+	install -d $(SITEDIR) $(SITEDIR)/panels $(SITEDIR)/sources $(SITEDIR)/state $(SITEDIR)/views $(SITEDIR)/widgets
 	# smtop plus bstat-family command wrappers
 	install -m 0755 smtop $(BINDIR)/smtop
 	$(foreach t,$(BTOOLS),install -m 0755 bin/$(t) $(BINDIR)/$(t); )
@@ -43,6 +43,7 @@ install:
 	install -m 0644 smartmet_top/panels/*.py  $(SITEDIR)/panels/
 	install -m 0644 smartmet_top/sources/*.py $(SITEDIR)/sources/
 	install -m 0644 smartmet_top/state/*.py   $(SITEDIR)/state/
+	install -m 0644 smartmet_top/views/*.py   $(SITEDIR)/views/
 	install -m 0644 smartmet_top/widgets/*.py $(SITEDIR)/widgets/
 	# man pages
 	$(foreach m,$(MANPAGES),install -m 0644 doc/man/$(m) $(MANDIR)/$(m); )
@@ -64,7 +65,8 @@ check:
 	$(PYTHON) -c 'import sys; sys.path.insert(0, "."); \
 	    import smartmet_top, smartmet_top.app, \
 	           smartmet_top.sources.proc, smartmet_top.sources.perftop, \
-	           smartmet_top.panels.proc, smartmet_top.widgets.bars; \
+	           smartmet_top.panels.proc, smartmet_top.widgets.bars, \
+	           smartmet_top.views.live, smartmet_top.views.composite; \
 	    from smartmet_top.widgets.bars import sparkline, vchart, set_ascii; \
 	    set_ascii(False); assert sparkline([0,1,2,3,4,5,6,7,8], width=4); \
 	    set_ascii(True);  assert sparkline([0,1,2,3,4,5,6,7,8], width=4); \

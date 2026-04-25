@@ -20,6 +20,7 @@ from .panels.plugins import PluginsPanel
 from .panels.proc import ProcPanel
 from .panels.services import ServicesPanel
 from .panels.urls import UrlsPanel
+from .views.live import LiveView
 from .sources.adminapi import poll_all
 from .sources.logtail import bulk_load, tail_many
 from .sources.perftop import perf_loop
@@ -48,6 +49,7 @@ class App:
         self.perf_interval = perf_interval
         self.store.perf_enabled = enable_perf
         self.panels: List[Panel] = [
+            LiveView(),
             OverviewPanel(),
             PluginsPanel(),
             UrlsPanel(),
@@ -59,7 +61,7 @@ class App:
             KeysPanel(),
         ]
         self.help_panel = HelpPanel()
-        self.panel_idx = 1  # default: Graphs (live per-plugin view)
+        self.panel_idx = 0  # default: Live composite (Graphs + URLs)
         self.show_help = False
         self.running = True
         self.last_error = ""

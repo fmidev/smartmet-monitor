@@ -97,33 +97,39 @@ for 2× horizontal density and 4× vertical resolution; pass `--ascii` to
 fall back to eighth-block characters on terminals that don't render
 Braille well.
 
-1. **O**verview — totals (1m/5m/60m) plus four mini-charts
+1. l**i**ve — composite view that draws the Graphs panel (per-plugin
+   live) on top and the URLs panel underneath, both at once, so you
+   can see *which plugin is busy* and *which URLs inside that plugin
+   are slow* on a single screen. This is the default startup view
+   when log files are configured. Switch to the dedicated `g` or `u`
+   panels for sortable / filterable interaction.
+2. **O**verview — totals (1m/5m/60m) plus four mini-charts
    (requests/min, mean ms, MB/min, error %) and a full-width
    request-rate sparkline.
-2. **G**raphs — live per-plugin access-log monitor. One row per
+3. **G**raphs — live per-plugin access-log monitor. One row per
    `*-access-log` file with req/s, mean/p95 latency, error %, and two
    independently auto-scaling Braille sparklines (response time +
    response size) over the last 60 seconds at 1-second resolution.
    `m` toggles time spark mean ↔ p95, `b` toggles size spark
    mean ↔ throughput, `i` shows/hides idle handlers.
-3. **U**RLs — live, sortable table with p50/p95/max latency, mean size,
+4. **U**RLs — live, sortable table with p50/p95/max latency, mean size,
    error %, and a per-URL latency sparkline. Press Enter to drill into
    a URL: windowed stats, 60-minute mean-latency sparkline, exponential
    histogram, status-code breakdown, and top API keys using that URL.
    `j/k/n/p` walk through URLs without leaving the drill-in.
-4. **C**aches — per-cache size / hit rate / hits-per-minute bars plus
+5. **C**aches — per-cache size / hit rate / hits-per-minute bars plus
    a trend sparkline (from polled history).
-5. **S**ervices — per-handler request rate + trend sparkline.
-6. **A**ctive — in-flight requests sorted by descending duration.
-7. **P**roc — `/proc`-based memory + I/O for each `smartmetd` process
+6. **S**ervices — per-handler request rate + trend sparkline.
+7. **A**ctive — in-flight requests sorted by descending duration.
+8. **P**roc — `/proc`-based memory + I/O for each `smartmetd` process
    on the host, with RSS-split sparklines (file-backed vs anon vs
    shmem), `VmPTE`, swap, FDs, and on-demand `smaps_rollup`. Multiple
    smartmetd PIDs (frontend + backend) are switched via `n`/`N`. With
    `--perf`, the panel adds a live perf-top symbol view and a Braille
    flamegraph that updates each cycle (`f` toggles between them).
-8. **L**ogs — raw access-log tail with `/` filter.
-9. **K**eys — per-API-key aggregate stats; Enter drills into the key
-   to see top URLs it calls.
+9. **L**ogs — raw access-log tail with `/` filter.
+10. **K**eys — per-API-key aggregate stats; Enter drills into the key
+    to see top URLs it calls.
 
 ### Data sources
 
@@ -139,7 +145,7 @@ Braille well.
 
 | Key              | Effect                                              |
 |------------------|-----------------------------------------------------|
-| `o g u c s a p l k` | jump to panel by mnemonic letter (highlighted red in tab) |
+| `i o g u c s a p l k` | jump to view / panel by mnemonic letter (highlighted red in tab) |
 | `Tab` / `Shift-Tab` | next / previous panel                            |
 | `?` / `F1`       | help overlay                                        |
 | `↑↓` `jk` `PgUp` `PgDn` `gG` | cursor and page movement                |

@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.2.1
+Version:        0.3.0
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,16 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sat Apr 25 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.3.0-1
+- First step toward btop-style multi-panel layouts. Add a Live view
+  (mnemonic i) that renders the Graphs panel (top 60%) and the URLs
+  panel (bottom 40%) at the same time, each in a derwin'd sub-window.
+  This is the new default startup view when log files are configured;
+  the dedicated single-panel views (g, u, ...) remain available for
+  sortable / filterable interaction. Composite views are display-only
+  in 0.3 — focus management between sub-regions will land in a later
+  release once the layouts settle from operator use.
+
 * Sat Apr 25 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.2.1-1
 - adminapi: when the admin plugin returns a non-JSON body, surface the
   URL, Content-Type and a 120-byte body preview in the error rather
