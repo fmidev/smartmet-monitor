@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.2.0
+Version:        0.2.1
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,14 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sat Apr 25 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.2.1-1
+- adminapi: when the admin plugin returns a non-JSON body, surface the
+  URL, Content-Type and a 120-byte body preview in the error rather
+  than a bare JSONDecodeError at column 0. Strip a trailing slash off
+  the base URL so `-u http://host/admin/` composes into a valid query.
+  Accept both shapes the `?what=list` endpoint emits (list of dicts
+  and list of strings).
+
 * Sat Apr 25 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.2.0-1
 - smtop charts now render in Braille (U+2800..U+28FF) by default,
   packing two samples per cell at four-step vertical resolution.
