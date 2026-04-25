@@ -10,16 +10,20 @@ from typing import List, Optional
 
 from . import export, theme
 from .panels.active import ActivePanel
-from .panels.base import Panel, safe_addstr
+from .panels.base import Panel, safe_addstr, write_label
 from .panels.caches import CachesPanel
 from .panels.help import HelpPanel
 from .panels.keys import KeysPanel
 from .panels.logs import LogsPanel
 from .panels.overview import OverviewPanel
+from .panels.plugins import PluginsPanel
+from .panels.proc import ProcPanel
 from .panels.services import ServicesPanel
 from .panels.urls import UrlsPanel
 from .sources.adminapi import poll_all
 from .sources.logtail import bulk_load, tail_many
+from .sources.perftop import perf_loop
+from .sources.proc import proc_loop
 from .state.store import Store
 
 
@@ -30,7 +34,9 @@ KEY_POLL = 0.02   # seconds between key polls
 class App:
     def __init__(self, log_paths: List[str],
                  admin_urls: List[tuple],  # [(host_label, base_url), ...]
-                 admin_interval: float, replay: bool) -> None:
+                 admin_interval: float, replay: bool,
+                 enable_perf: bool = False,
+                 perf_interval: float = 10.0) -> None:
         self.store = Store()
         for host, _ in admin_urls:
             self.store.register_admin_host(host)
@@ -38,17 +44,22 @@ class App:
         self.admin_urls = admin_urls
         self.admin_interval = admin_interval
         self.replay = replay
+        self.enable_perf = enable_perf
+        self.perf_interval = perf_interval
+        self.store.perf_enabled = enable_perf
         self.panels: List[Panel] = [
             OverviewPanel(),
+            PluginsPanel(),
             UrlsPanel(),
             CachesPanel(),
             ServicesPanel(),
             ActivePanel(),
+            ProcPanel(),
             LogsPanel(),
             KeysPanel(),
         ]
         self.help_panel = HelpPanel()
-        self.panel_idx = 1  # default: URLs (primary)
+        self.panel_idx = 1  # default: Graphs (live per-plugin view)
         self.show_help = False
         self.running = True
         self.last_error = ""
@@ -73,17 +84,22 @@ class App:
         safe_addstr(stdscr, 0, 0, (title + status).ljust(w - 1),
                     theme.attr(theme.P_TITLE, curses.A_BOLD))
 
-        # tabs
+        # tabs — each label has one character (the panel's hotkey) drawn in
+        # red+bold so the user sees at a glance which key switches to it.
         x = 1
         for i, p in enumerate(self.panels):
-            label = f" {p.hotkey} {p.name} "
-            if not self.show_help and i == self.panel_idx:
-                a = theme.attr(theme.P_TAB_ACTIVE, curses.A_BOLD)
-            else:
-                a = theme.attr(theme.P_TAB_INACTIVE)
-            safe_addstr(stdscr, 1, x, label, a)
-            x += len(label) + 1
-        # help hint
+            active = (not self.show_help and i == self.panel_idx)
+            base_attr = (theme.attr(theme.P_TAB_ACTIVE, curses.A_BOLD)
+                         if active else theme.attr(theme.P_TAB_INACTIVE))
+            hot_attr = theme.attr(theme.P_MNEMONIC,
+                                  curses.A_BOLD | curses.A_UNDERLINE)
+            # leading and trailing space framed in the base attribute
+            safe_addstr(stdscr, 1, x, " ", base_attr)
+            x = write_label(stdscr, 1, x + 1, p.name,
+                            p.mnemonic_pos, base_attr, hot_attr)
+            safe_addstr(stdscr, 1, x, " ", base_attr)
+            x += 2  # one space gap between tabs
+        # right-aligned hint
         hint = " ? help   q quit   Tab next "
         if x + len(hint) < w:
             safe_addstr(stdscr, 1, w - len(hint) - 2, hint, theme.attr(theme.P_DIM))
@@ -122,45 +138,47 @@ class App:
         curses.doupdate()
 
     def handle_key(self, key: int) -> None:
-        # Let the active panel consume input first if it has modal state
-        # (filter editing, detail view). Otherwise global keys.
+        # Delegate to the active panel first. Panels return True if they
+        # consumed the key. Anything they don't consume falls through to
+        # the global keys below.
         p = self.current_panel
-        intercept = getattr(p, "filter_editing", False) or getattr(p, "detail_url", None) or getattr(p, "detail_key", None)
-
-        # Export works from any mode — it is a read-only action.
-        if not getattr(p, "filter_editing", False):
-            if key == ord("e"):
-                self._export("csv"); return
-            if key == ord("E"):
-                self._export("json"); return
-
-        if not intercept:
-            if key in (ord("q"),):
-                self.running = False
-                return
-            if key == 9:  # Tab
-                self.show_help = False
-                self.panel_idx = (self.panel_idx + 1) % len(self.panels)
-                return
-            if key == curses.KEY_BTAB:  # Shift-Tab
-                self.show_help = False
-                self.panel_idx = (self.panel_idx - 1) % len(self.panels)
-                return
-            if ord("1") <= key <= ord("9"):
-                n = key - ord("1")
-                if n < len(self.panels):
-                    self.show_help = False
-                    self.panel_idx = n
-                    return
-            if key in (ord("?"), curses.KEY_F1):
-                self.show_help = not self.show_help
-                return
-
-        # delegate to the panel
         try:
-            p.handle_key(key, self.store)
+            consumed = bool(p.handle_key(key, self.store))
         except Exception as e:
             self.last_error = f"{type(e).__name__}: {e}"
+            consumed = True
+        if consumed:
+            return
+
+        # Global keys.
+        if key == ord("q"):
+            self.running = False
+            return
+        if key == 9:  # Tab
+            self.show_help = False
+            self.panel_idx = (self.panel_idx + 1) % len(self.panels)
+            return
+        if key == curses.KEY_BTAB:  # Shift-Tab
+            self.show_help = False
+            self.panel_idx = (self.panel_idx - 1) % len(self.panels)
+            return
+        if key in (ord("?"), curses.KEY_F1):
+            self.show_help = not self.show_help
+            return
+        if key == ord("e"):
+            self._export("csv"); return
+        if key == ord("E"):
+            self._export("json"); return
+
+        # Panel mnemonics — single letter per panel, taken from each
+        # panel's `hotkey` attribute. Case-insensitive.
+        if 32 <= key < 127:
+            ch = chr(key).lower()
+            for i, panel in enumerate(self.panels):
+                if panel.hotkey == ch:
+                    self.show_help = False
+                    self.panel_idx = i
+                    return
 
     def _set_toast(self, msg: str, attr: int, seconds: float = 4.0) -> None:
         self.toast = (time.time() + seconds, msg, attr)
@@ -207,6 +225,13 @@ class App:
                     poll_all(self.admin_urls, self.store, self.admin_interval)
                 )
             )
+        # Always poll /proc — even without log files or admin URLs, the
+        # ProcPanel works as long as smartmetd is running on this host.
+        tasks.append(asyncio.create_task(proc_loop(self.store)))
+        if self.enable_perf:
+            tasks.append(asyncio.create_task(
+                perf_loop(self.store, self.perf_interval)
+            ))
 
         last_draw = 0.0
         try:
@@ -242,8 +267,10 @@ class App:
 
 
 def run_app(log_paths: List[str], admin_urls: List[tuple],
-            admin_interval: float, replay: bool) -> None:
-    app = App(log_paths, admin_urls, admin_interval, replay)
+            admin_interval: float, replay: bool,
+            enable_perf: bool = False, perf_interval: float = 10.0) -> None:
+    app = App(log_paths, admin_urls, admin_interval, replay,
+              enable_perf=enable_perf, perf_interval=perf_interval)
 
     def _curses_main(stdscr):
         # asyncio.run inside the curses wrapper keeps teardown correct

@@ -37,7 +37,7 @@ SORT_COLS = (
 
 class UrlsPanel(Panel):
     name = "URLs"
-    hotkey = "2"
+    hotkey = "u"
     help_text = (
         "Latency per URL. Sort: s cycles, [/] resize window, "
         "Enter drills in, / filters, ↑↓ PgUp PgDn navigate."
@@ -98,7 +98,9 @@ class UrlsPanel(Panel):
                 self.detail_url = urls[self.cursor][0]
         elif key == 27:  # ESC clears filter
             self.filter = ""
-        return None
+        else:
+            return False
+        return True
 
     def _handle_filter_key(self, key):
         if key in (10, 13, curses.KEY_ENTER, 27):
@@ -107,12 +109,12 @@ class UrlsPanel(Panel):
             self.filter = self.filter[:-1]
         elif 32 <= key < 127:
             self.filter += chr(key)
-        return None
+        return True
 
     def _handle_detail_key(self, key, store=None):
-        if key in (27, ord("q"), curses.KEY_LEFT, ord("b")):
+        if key in (27, curses.KEY_LEFT, ord("b")):
             self.detail_url = None
-            return None
+            return True
         # step through URLs in current sort order
         if key in (ord("j"), curses.KEY_DOWN, ord("n")):
             self._step_detail(+1, store)
@@ -122,13 +124,15 @@ class UrlsPanel(Panel):
             self.detail_window_idx = max(0, self.detail_window_idx - 1)
         elif key == ord("]"):
             self.detail_window_idx = min(len(WINDOWS) - 1, self.detail_window_idx + 1)
-        elif key == ord("H"):
+        elif key == ord("h"):
             self.detail_show_hist = not self.detail_show_hist
-        elif key == ord("T"):
+        elif key == ord("t"):
             self.detail_show_status = not self.detail_show_status
-        elif key == ord("K"):
+        elif key == ord("y"):
             self.detail_show_keys = not self.detail_show_keys
-        return None
+        else:
+            return False
+        return True
 
     def _step_detail(self, delta: int, store) -> None:
         if store is None or self.detail_url is None:

@@ -14,9 +14,25 @@ from typing import Iterable, List, Optional
 from .logparse import parse
 
 
+def source_label_for(path: str) -> str:
+    """Derive a short plugin label from an access-log path.
+
+    `/var/log/smartmet/wms-access-log` → `wms`. Anything that doesn't end
+    in `-access-log` keeps its full basename (the operator may have a
+    custom layout — we'd rather show "weird-thing.log" than misclassify
+    it as "weird-thing.log").
+    """
+    base = os.path.basename(path)
+    suffix = "-access-log"
+    if base.endswith(suffix):
+        return base[: -len(suffix)] or base
+    return base
+
+
 class _TailedFile:
     def __init__(self, path: str) -> None:
         self.path = path
+        self.label = source_label_for(path)
         self.fh = None
         self.inode: Optional[int] = None
         self._open()
@@ -70,6 +86,10 @@ class _TailedFile:
 async def tail_many(paths: Iterable[str], store, poll_interval: float = 0.25) -> None:
     """Tail all paths forever, feeding parsed records into `store`."""
     files = [_TailedFile(p) for p in paths]
+    # Pre-register sources so the Plugins panel shows idle handlers as
+    # rows rather than hiding them until the first request lands.
+    for f in files:
+        store.register_source(f.label)
     store.logtail_status = f"tailing {len(files)} file(s)"
 
     while True:
@@ -93,6 +113,7 @@ async def tail_many(paths: Iterable[str], store, poll_interval: float = 0.25) ->
                     nbytes=rec["bytes"],
                     status=rec["status"],
                     apikey=rec["apikey"],
+                    source_label=f.label,
                 )
         if any_data:
             store.logtail_status = f"tailing {len(files)} file(s)"
@@ -103,6 +124,8 @@ async def bulk_load(paths: Iterable[str], store, max_bytes_per_file: int = 256 *
     """One-shot load: read each file fully (bounded), feed into store. Useful for
     the `--replay` mode or initial backfill."""
     for p in paths:
+        label = source_label_for(p)
+        store.register_source(label)
         try:
             size = os.path.getsize(p)
             with open(p, "r", encoding="utf-8", errors="replace") as fh:
@@ -122,6 +145,7 @@ async def bulk_load(paths: Iterable[str], store, max_bytes_per_file: int = 256 *
                         nbytes=rec["bytes"],
                         status=rec["status"],
                         apikey=rec["apikey"],
+                        source_label=label,
                     )
         except FileNotFoundError:
             continue

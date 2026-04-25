@@ -29,6 +29,10 @@ BuildRequires:  make
 Requires:       python%{python3_pkgversion}
 # bstat.sh uses GNU-awk features (asort), so mawk/busybox awk won't do.
 Requires:       gawk
+# smtop --perf shells out to `perf` (linux-tools); without it the Proc
+# panel still works for memory/IO. Operators who need flamegraphs are
+# expected to dnf install perf separately.
+Recommends:     perf
 
 %description
 Two companion tools for operating a SmartMet Server:

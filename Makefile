@@ -61,7 +61,16 @@ uninstall:
 	rm -rf $(SITEDIR)
 
 check:
-	$(PYTHON) -c 'import sys; sys.path.insert(0, "."); import smartmet_top, smartmet_top.app'
+	$(PYTHON) -c 'import sys; sys.path.insert(0, "."); \
+	    import smartmet_top, smartmet_top.app, \
+	           smartmet_top.sources.proc, smartmet_top.sources.perftop, \
+	           smartmet_top.panels.proc, smartmet_top.widgets.bars; \
+	    from smartmet_top.widgets.bars import sparkline, vchart, set_ascii; \
+	    set_ascii(False); assert sparkline([0,1,2,3,4,5,6,7,8], width=4); \
+	    set_ascii(True);  assert sparkline([0,1,2,3,4,5,6,7,8], width=4); \
+	    set_ascii(False); assert len(vchart([0,1,2,3,4,5,6,7,8], 3)) == 3; \
+	    from smartmet_top.sources.perftop import parse_perf_script; \
+	    assert parse_perf_script("smartmetd 1 [0] 1.0:    99 cycles:\n    deadbeef foo+0x0 (lib.so)\n\n")[0] == ("foo",)'
 	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
 	bash -n share/smartmet/bstat.sh
 	for t in $(BTOOLS) $(LEGACY); do bash -n bin/$$t; done
@@ -71,6 +80,8 @@ check:
 	    SMARTMET_MONITOR_LIB=$(CURDIR)/share/smartmet/bstat.sh \
 	        bin/$$t --help >/dev/null || exit 1; \
 	done
+	# smtop -h must work (catches argparse / import-time wiring bugs).
+	$(PYTHON) -m smartmet_top --help >/dev/null
 
 clean:
 	find . -name __pycache__ -prune -exec rm -rf {} +

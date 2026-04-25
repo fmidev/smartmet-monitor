@@ -14,7 +14,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from threading import RLock
-from typing import Deque, Dict, List, Optional, Tuple
+from typing import Deque, Dict, Iterable, List, Optional, Tuple
 
 from .histogram import Histogram
 
@@ -23,6 +23,12 @@ HISTORY_MINUTES = 60
 # The actual cap is independent of poll interval; the deque just bounds
 # memory so a long-running instance doesn't grow without limit.
 ADMIN_HISTORY_SAMPLES = 300
+# Per-process memory/IO samples at 2-second cadence: 1800 = 60 min of
+# history, ~360 KB per PID. Plenty for the rolling sparklines.
+PROC_HISTORY_SAMPLES = 1800
+# Per-source per-second history depth — drives the live Plugins panel.
+# 60 seconds × histogram (~40 ints each) × 20 sources ≈ 50 KB. Cheap.
+HISTORY_SECONDS = 60
 
 
 @dataclass
@@ -32,6 +38,101 @@ class MinuteBucket:
     bytes: int = 0
     errors: int = 0
     status_counts: Dict[int, int] = field(default_factory=dict)
+
+
+@dataclass
+class SecondBucket:
+    """Same shape as MinuteBucket but bucketed at 1 s resolution."""
+
+    hist: Histogram = field(default_factory=Histogram)
+    count: int = 0
+    bytes: int = 0
+    errors: int = 0
+
+
+@dataclass
+class SourceStats:
+    """Per-access-log-file rolling stats: 60 s of second-buckets for the
+    "live" view, plus 60 min of minute-buckets for parity with the
+    URLs/Keys panels."""
+
+    label: str
+    second_buckets: Dict[int, SecondBucket] = field(default_factory=dict)
+    minute_buckets: Dict[int, MinuteBucket] = field(default_factory=dict)
+    last_seen: float = 0.0
+
+    def record(self, ts: float, dur_ms: float, nbytes: int, status: int) -> None:
+        s = int(ts)
+        sb = self.second_buckets.get(s)
+        if sb is None:
+            sb = SecondBucket()
+            self.second_buckets[s] = sb
+            cutoff = s - HISTORY_SECONDS
+            for k in list(self.second_buckets.keys()):
+                if k < cutoff:
+                    del self.second_buckets[k]
+        sb.hist.add(dur_ms)
+        sb.count += 1
+        sb.bytes += nbytes
+        if status >= 400:
+            sb.errors += 1
+
+        m = int(ts // 60)
+        mb = self.minute_buckets.get(m)
+        if mb is None:
+            mb = MinuteBucket()
+            self.minute_buckets[m] = mb
+            cutoff_m = m - HISTORY_MINUTES
+            for k in list(self.minute_buckets.keys()):
+                if k < cutoff_m:
+                    del self.minute_buckets[k]
+        mb.hist.add(dur_ms)
+        mb.count += 1
+        mb.bytes += nbytes
+        if status >= 400:
+            mb.errors += 1
+        mb.status_counts[status] = mb.status_counts.get(status, 0) + 1
+        self.last_seen = ts
+
+    def second_window(self, seconds: int) -> SecondBucket:
+        now_s = int(time.time())
+        merged = SecondBucket()
+        for s in range(now_s - seconds + 1, now_s + 1):
+            b = self.second_buckets.get(s)
+            if b is None:
+                continue
+            merged.hist.merge(b.hist)
+            merged.count += b.count
+            merged.bytes += b.bytes
+            merged.errors += b.errors
+        return merged
+
+    def second_series(self, metric: str, seconds: int = HISTORY_SECONDS) -> List[float]:
+        """Per-second values for the last `seconds`. Oldest first."""
+        now_s = int(time.time())
+        out: List[float] = []
+        for s in range(now_s - seconds + 1, now_s + 1):
+            b = self.second_buckets.get(s)
+            if b is None or b.count == 0:
+                out.append(0.0)
+                continue
+            if metric == "count":  # requests in this second
+                out.append(float(b.count))
+            elif metric == "mean_ms":
+                out.append(b.hist.mean())
+            elif metric == "p95_ms":
+                out.append(b.hist.p95())
+            elif metric == "max_ms":
+                out.append(b.hist.max_ms)
+            elif metric == "bytes":  # total bytes in this second (≈ B/s)
+                out.append(float(b.bytes))
+            elif metric == "bytes_mean":  # mean response size in this second
+                out.append(float(b.bytes) / b.count if b.count else 0.0)
+            elif metric == "err_pct":
+                out.append(b.errors / b.count * 100.0 if b.count else 0.0)
+            else:
+                out.append(0.0)
+        return out
 
 
 @dataclass
@@ -104,6 +205,60 @@ class UrlStats:
             else:
                 out.append(0.0)
         return out
+
+
+@dataclass
+class ProcSample:
+    """One polling tick of cheap /proc counters for a single PID."""
+
+    ts: float = 0.0
+    vm_rss_kb: int = 0
+    vm_size_kb: int = 0
+    vm_swap_kb: int = 0
+    vm_pte_kb: int = 0
+    vm_hwm_kb: int = 0
+    rss_anon_kb: int = 0
+    rss_file_kb: int = 0
+    rss_shmem_kb: int = 0
+    threads: int = 0
+    io_read_bytes: int = 0
+    io_write_bytes: int = 0
+    fds: int = 0
+
+
+@dataclass
+class PerfData:
+    """Aggregated perf samples for one PID.
+
+    `minute_buckets[minute_epoch][symbol] = sample_count` — the bucketing
+    matches the access-log Histogram so the perf time series renders the
+    same way as URL latency. `recent_stacks` is a bounded ring of the
+    most recent full call stacks (root → leaf), used by the flamegraph
+    view; older stacks fall off automatically.
+    """
+
+    pid: int
+    minute_buckets: Dict[int, Dict[str, int]] = field(default_factory=dict)
+    recent_stacks: Deque[Tuple[str, ...]] = field(
+        default_factory=lambda: deque(maxlen=20000)
+    )
+    last_sample_ts: float = 0.0
+    last_sample_count: int = 0
+
+
+@dataclass
+class ProcInfo:
+    """Static metadata + ring of samples + last on-demand smaps_rollup."""
+
+    pid: int
+    cmdline: str = ""
+    role: str = "unknown"
+    started_at: float = 0.0
+    samples: Deque[ProcSample] = field(
+        default_factory=lambda: deque(maxlen=PROC_HISTORY_SAMPLES)
+    )
+    rollup: Dict[str, int] = field(default_factory=dict)
+    rollup_ts: float = 0.0
 
 
 @dataclass
@@ -188,6 +343,22 @@ class Store:
         # status: data source health
         self.logtail_status: str = "(starting)"
         self.admin_status: Dict[str, str] = {}
+        # /proc-derived per-PID stats for smartmetd processes
+        self.procs: Dict[int, ProcInfo] = {}
+        # Per-access-log-file (per-plugin) live stats. Key is the log
+        # basename minus the trailing "-access-log" suffix — e.g. "wms",
+        # "timeseries", "wfs". The Plugins panel reads from here.
+        self.source_stats: Dict[str, SourceStats] = {}
+        # Which PID the operator is focused on. Source of truth for both
+        # the ProcPanel and the (optional) perf sampler — when the user
+        # switches PIDs the perf loop re-targets automatically.
+        self.selected_proc_pid: Optional[int] = None
+        # Perf-top sampler state (only populated when smtop is run with
+        # --perf, which gates the sampler from spawning at all).
+        self.perfdata: Dict[int, PerfData] = {}
+        self.perf_enabled: bool = False
+        self.perf_status: str = "(disabled — start smtop with --perf)"
+        self.perf_target_pid: Optional[int] = None
 
     def register_admin_host(self, host: str) -> None:
         with self._lock:
@@ -220,8 +391,16 @@ class Store:
         nbytes: int,
         status: int,
         apikey: str,
+        source_label: Optional[str] = None,
     ) -> None:
         with self._lock:
+            if source_label is not None:
+                src = self.source_stats.get(source_label)
+                if src is None:
+                    src = SourceStats(label=source_label)
+                    self.source_stats[source_label] = src
+                src.record(ts, dur_ms, nbytes, status)
+
             u = self.urls.get(url)
             if u is None:
                 u = UrlStats(url=url)
@@ -335,3 +514,166 @@ class Store:
     def key_detail(self, apikey: str) -> Optional[UrlStats]:
         with self._lock:
             return self.keys.get(apikey)
+
+    # -- per-source (per-access-log-file) -----------------------------------
+
+    def register_source(self, label: str) -> None:
+        """Register a log file's source label so the Plugins panel shows it
+        even before the first request lands."""
+        with self._lock:
+            if label not in self.source_stats:
+                self.source_stats[label] = SourceStats(label=label)
+
+    def snapshot_sources(self) -> List[SourceStats]:
+        with self._lock:
+            return sorted(self.source_stats.values(), key=lambda s: s.label)
+
+    def source_detail(self, label: str) -> Optional[SourceStats]:
+        with self._lock:
+            return self.source_stats.get(label)
+
+    # -- /proc-derived stats ------------------------------------------------
+
+    def proc_register(self, pid: int, cmdline: str = "", role: str = "unknown",
+                      started_at: float = 0.0) -> None:
+        with self._lock:
+            info = self.procs.get(pid)
+            if info is None:
+                self.procs[pid] = ProcInfo(
+                    pid=pid, cmdline=cmdline, role=role, started_at=started_at
+                )
+            else:
+                # PID may be re-registered with refined info after discovery.
+                info.cmdline = cmdline or info.cmdline
+                info.role = role or info.role
+                info.started_at = started_at or info.started_at
+
+    def proc_update(self, pid: int, ts: float, **fields) -> None:
+        with self._lock:
+            info = self.procs.get(pid)
+            if info is None:
+                info = ProcInfo(pid=pid)
+                self.procs[pid] = info
+            sample = ProcSample(ts=ts, **fields)
+            info.samples.append(sample)
+
+    def proc_remove(self, pid: int) -> None:
+        with self._lock:
+            self.procs.pop(pid, None)
+
+    def proc_list(self) -> List[ProcInfo]:
+        with self._lock:
+            return sorted(self.procs.values(), key=lambda p: p.pid)
+
+    def proc_latest(self, pid: int) -> Optional[ProcSample]:
+        with self._lock:
+            info = self.procs.get(pid)
+            if info is None or not info.samples:
+                return None
+            return info.samples[-1]
+
+    def proc_series(self, pid: int, field_name: str,
+                    samples: int = 0) -> List[float]:
+        """Return per-tick values for `field_name` across the most recent
+        `samples` ticks (or the whole history if `samples == 0`)."""
+        with self._lock:
+            info = self.procs.get(pid)
+            if info is None or not info.samples:
+                return []
+            data = list(info.samples)
+            if samples > 0:
+                data = data[-samples:]
+            return [float(getattr(s, field_name, 0)) for s in data]
+
+    def proc_set_rollup(self, pid: int, rollup: Dict[str, int],
+                        ts: float) -> None:
+        with self._lock:
+            info = self.procs.get(pid)
+            if info is None:
+                return
+            info.rollup = dict(rollup)
+            info.rollup_ts = ts
+
+    def proc_select(self, pid: Optional[int]) -> None:
+        with self._lock:
+            self.selected_proc_pid = pid
+
+    def proc_selected(self) -> Optional[int]:
+        with self._lock:
+            pid = self.selected_proc_pid
+            if pid is not None and pid in self.procs:
+                return pid
+            # Fall back to the lowest-PID smartmetd if the saved one is gone.
+            if self.procs:
+                pid = min(self.procs.keys())
+                self.selected_proc_pid = pid
+                return pid
+            return None
+
+    # -- perf data ----------------------------------------------------------
+
+    def perf_record_samples(self, pid: int, ts: float,
+                            stacks: Iterable[Tuple[str, ...]]) -> None:
+        """Aggregate a batch of stacks: per-minute leaf-symbol counts plus
+        a copy on the bounded `recent_stacks` ring for flamegraph view."""
+        with self._lock:
+            pd = self.perfdata.get(pid)
+            if pd is None:
+                pd = PerfData(pid=pid)
+                self.perfdata[pid] = pd
+            m = int(ts // 60)
+            bucket = pd.minute_buckets.get(m)
+            if bucket is None:
+                bucket = {}
+                pd.minute_buckets[m] = bucket
+                cutoff = m - HISTORY_MINUTES
+                for k in list(pd.minute_buckets.keys()):
+                    if k < cutoff:
+                        del pd.minute_buckets[k]
+            n = 0
+            for stack in stacks:
+                if not stack:
+                    continue
+                leaf = stack[-1]
+                bucket[leaf] = bucket.get(leaf, 0) + 1
+                pd.recent_stacks.append(stack)
+                n += 1
+            pd.last_sample_ts = ts
+            pd.last_sample_count = n
+
+    def perf_top_symbols(self, pid: int, minutes: int = 10,
+                         n: int = 20) -> List[Tuple[str, int]]:
+        with self._lock:
+            pd = self.perfdata.get(pid)
+            if pd is None:
+                return []
+            now_min = int(time.time() // 60)
+            merged: Dict[str, int] = {}
+            for m in range(now_min - minutes + 1, now_min + 1):
+                for sym, c in pd.minute_buckets.get(m, {}).items():
+                    merged[sym] = merged.get(sym, 0) + c
+            return sorted(merged.items(), key=lambda x: -x[1])[:n]
+
+    def perf_symbol_series(self, pid: int, symbol: str,
+                           minutes: int = 20) -> List[float]:
+        with self._lock:
+            pd = self.perfdata.get(pid)
+            if pd is None:
+                return []
+            now_min = int(time.time() // 60)
+            return [
+                float(pd.minute_buckets.get(m, {}).get(symbol, 0))
+                for m in range(now_min - minutes + 1, now_min + 1)
+            ]
+
+    def perf_recent_stacks(self, pid: int) -> List[Tuple[str, ...]]:
+        with self._lock:
+            pd = self.perfdata.get(pid)
+            if pd is None:
+                return []
+            return list(pd.recent_stacks)
+
+    def perf_last_sample_count(self, pid: int) -> int:
+        with self._lock:
+            pd = self.perfdata.get(pid)
+            return pd.last_sample_count if pd else 0

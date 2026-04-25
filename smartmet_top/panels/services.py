@@ -19,7 +19,7 @@ def _f(v, default=0.0):
 
 class ServicesPanel(Panel):
     name = "Services"
-    hotkey = "4"
+    hotkey = "s"
     help_text = "Per-handler throughput from /admin?what=servicestats."
 
     def __init__(self):
@@ -35,7 +35,9 @@ class ServicesPanel(Panel):
             self.cursor = max(0, self.cursor - 10)
         elif key == curses.KEY_NPAGE:
             self.cursor += 10
-        return None
+        else:
+            return False
+        return True
 
     def export_snapshot(self, store):
         headers = ["host", "handler", "req_per_min", "req_per_hour",

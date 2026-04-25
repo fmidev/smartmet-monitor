@@ -21,6 +21,7 @@ P_HIGHLIGHT = 9
 P_SPARK = 10
 P_AXIS = 11
 P_ACCENT = 12
+P_MNEMONIC = 13
 
 _initialized = False
 
@@ -51,6 +52,10 @@ def init() -> None:
     curses.init_pair(P_SPARK,        curses.COLOR_CYAN,   default_bg)
     curses.init_pair(P_AXIS,         curses.COLOR_WHITE,  default_bg)
     curses.init_pair(P_ACCENT,       curses.COLOR_MAGENTA, default_bg)
+    # Mnemonic letter = red on the default background. Used to highlight
+    # the single hotkey character inside tab labels and inline option
+    # markers ("[s]ort", "[r]everse", etc.).
+    curses.init_pair(P_MNEMONIC,     curses.COLOR_RED,    default_bg)
     _initialized = True
 
 

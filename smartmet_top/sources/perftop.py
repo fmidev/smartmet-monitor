@@ -1,0 +1,148 @@
+"""Perf-top sampler for the focused smartmetd PID.
+
+Spawns `perf record -g -F 99 -p PID -- sleep N` periodically, then parses
+`perf script` output to extract leaf-symbol counts and full call-stack
+samples. Both are pushed into the Store; the ProcPanel renders them as
+"top symbols" and "flamegraph" views.
+
+This is opt-in (`--perf`) because perf adds real load to the target
+process. The duty cycle (record 1s, idle until interval seconds elapse)
+keeps overhead bounded and predictable.
+
+Symbols depend on debug info; FMI installs the smartmet-server-debuginfo
+package on production hosts, so we expect real names rather than
+`[unknown]`.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import re
+import shutil
+import time
+from typing import List, Optional, Tuple
+
+
+PERF_FREQ = 99           # samples/sec, mirrors btop's CPU graph default
+RECORD_SECONDS = 1       # actual recording duration each cycle
+DEFAULT_INTERVAL = 10.0  # full cycle (record + idle) — keeps load ~10%
+PERF_DATA_PATH = "/tmp/.smtop_perf.data"
+
+
+_FRAME_RE = re.compile(
+    r"^\s+[0-9a-fA-F]+\s+(?P<sym>.+?)\s+\((?P<dso>[^()]*)\)\s*$"
+)
+_OFFSET_RE = re.compile(r"\+0x[0-9a-fA-F]+$")
+
+
+def _strip_offset(symbol: str) -> str:
+    return _OFFSET_RE.sub("", symbol).strip() or "[unknown]"
+
+
+def parse_perf_script(text: str) -> List[Tuple[str, ...]]:
+    """Parse `perf script` output into a list of stacks.
+
+    Each returned stack is a tuple of symbols ordered root → leaf
+    (outermost call first), matching the conventional flamegraph layout.
+    perf-script emits frames in leaf → root order, so we reverse here.
+    Blank lines separate samples.
+    """
+    stacks: List[Tuple[str, ...]] = []
+    current: List[str] = []
+    in_sample = False
+    for raw in text.splitlines():
+        if not raw.strip():
+            if current:
+                stacks.append(tuple(reversed(current)))
+                current = []
+            in_sample = False
+            continue
+        if not in_sample:
+            in_sample = True
+            continue
+        m = _FRAME_RE.match(raw)
+        if not m:
+            continue
+        sym = _strip_offset(m.group("sym"))
+        current.append(sym)
+    if current:
+        stacks.append(tuple(reversed(current)))
+    return stacks
+
+
+async def _run_perf_record(perf_bin: str, pid: int) -> Tuple[bool, str]:
+    cmd = [
+        perf_bin, "record",
+        "-F", str(PERF_FREQ),
+        "-g", "--no-children",
+        "-p", str(pid),
+        "-o", PERF_DATA_PATH,
+        "-q",
+        "--", "sleep", str(RECORD_SECONDS),
+    ]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    return proc.returncode == 0, stderr.decode("utf-8", errors="replace")
+
+
+async def _run_perf_script(perf_bin: str) -> str:
+    cmd = [perf_bin, "script", "-i", PERF_DATA_PATH, "--no-inline"]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    out, _ = await proc.communicate()
+    return out.decode("utf-8", errors="replace")
+
+
+async def perf_loop(store, interval: float = DEFAULT_INTERVAL) -> None:
+    perf_bin = shutil.which("perf")
+    if not perf_bin:
+        store.perf_status = "perf not found in PATH (install linux-tools)"
+        store.perf_enabled = False
+        return
+    store.perf_status = "waiting for PID"
+    while True:
+        pid: Optional[int] = store.proc_selected()
+        if pid is None:
+            await asyncio.sleep(0.5)
+            continue
+        store.perf_target_pid = pid
+        store.perf_status = f"recording pid={pid}"
+        try:
+            ok, stderr = await _run_perf_record(perf_bin, pid)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            store.perf_status = f"record error: {e}"
+            await asyncio.sleep(interval)
+            continue
+        if not ok:
+            tail = (stderr.strip().splitlines() or ["unknown"])[-1]
+            store.perf_status = f"record failed: {tail}"
+            await asyncio.sleep(interval)
+            continue
+        store.perf_status = f"parsing pid={pid}"
+        try:
+            text = await _run_perf_script(perf_bin)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            store.perf_status = f"script error: {e}"
+            await asyncio.sleep(interval)
+            continue
+        stacks = parse_perf_script(text)
+        store.perf_record_samples(pid, time.time(), stacks)
+        store.perf_status = f"ok pid={pid} samples={len(stacks)}"
+        # Idle remainder of the duty cycle, but break early if the user
+        # selects a different PID so the next cycle re-targets quickly.
+        target = time.time() + max(0.0, interval - RECORD_SECONDS)
+        while time.time() < target:
+            if store.proc_selected() != pid:
+                break
+            await asyncio.sleep(0.5)

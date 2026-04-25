@@ -8,24 +8,29 @@ and handle keys via handle_key(key, store).
 from __future__ import annotations
 
 import curses
-from typing import Optional
 
 
 class Panel:
     name: str = "panel"
+    # Single-character mnemonic (lowercase) used both as the global hotkey
+    # to switch to this panel and as the highlighted character in the tab
+    # label. By default it is the first letter of `name`, but a panel can
+    # override `mnemonic_pos` to highlight a different character.
     hotkey: str = "?"
+    mnemonic_pos: int = 0
     help_text: str = ""
 
     def draw(self, win, store) -> None:  # pragma: no cover
         raise NotImplementedError
 
-    def handle_key(self, key: int, store) -> Optional[str]:
-        """Return a command string (or None). Known commands:
-          "quit"                - exit the app
-          "panel:<name>"        - switch to panel
-          "help"                - show help overlay
+    def handle_key(self, key: int, store) -> bool:
+        """Return True if the panel consumed the key, False otherwise.
+
+        Returning False lets the App fall through to global keys (panel
+        switching, help, quit, export). Panels consume their own per-mode
+        bindings and pass everything else up.
         """
-        return None
+        return False
 
     def export_snapshot(self, store):
         """Return (headers, rows) describing what this panel is showing right
@@ -49,6 +54,28 @@ def safe_addstr(win, y, x, text, attr=0):
         win.addstr(y, x, text, attr)
     except curses.error:
         pass
+
+
+def write_label(win, y, x, label: str, mnemonic_pos: int,
+                base_attr: int, hot_attr: int) -> int:
+    """Write `label` left-to-right, applying `hot_attr` to the character at
+    `mnemonic_pos` and `base_attr` to the rest. Returns the next x column.
+
+    Keeps the chrome simple: one call places a tab/title with its hotkey
+    letter visually highlighted.
+    """
+    if not label:
+        return x
+    pos = mnemonic_pos if 0 <= mnemonic_pos < len(label) else 0
+    if pos > 0:
+        safe_addstr(win, y, x, label[:pos], base_attr)
+        x += pos
+    safe_addstr(win, y, x, label[pos], hot_attr)
+    x += 1
+    if pos + 1 < len(label):
+        safe_addstr(win, y, x, label[pos + 1:], base_attr)
+        x += len(label) - pos - 1
+    return x
 
 
 def write_row(win, y, x, cells, row_attr=0):

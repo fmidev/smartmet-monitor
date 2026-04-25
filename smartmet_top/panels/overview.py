@@ -11,7 +11,7 @@ from .base import Panel, safe_addstr, write_row
 
 class OverviewPanel(Panel):
     name = "Overview"
-    hotkey = "1"
+    hotkey = "o"
     help_text = "Global sparklines: request rate, latency, bandwidth, errors."
 
     def export_snapshot(self, store):

@@ -86,25 +86,43 @@ All five commands share `/usr/share/smartmet/bstat.sh` as a library; set
 ## `smtop` — live dashboard
 
 ```sh
-smtop [-l PATH-OR-GLOB ...] [-u LABEL=URL,URL ...] [-n SECONDS] [--replay]
+smtop [-l PATH-OR-GLOB ...] [-u LABEL=URL,URL ...] [-n SECONDS] \
+      [--replay] [--ascii] [--perf] [--perf-interval SEC]
 ```
 
-Panels (switch with `1..7` or `Tab`/`Shift-Tab`):
+Each panel has one **red highlighted letter** in its tab label — pressing
+that letter (case-insensitive) jumps directly to it; `Tab`/`Shift-Tab`
+cycle through panels. Sparklines and charts use Braille (U+2800..U+28FF)
+for 2× horizontal density and 4× vertical resolution; pass `--ascii` to
+fall back to eighth-block characters on terminals that don't render
+Braille well.
 
-1. **Overview** — totals (1m/5m/60m) plus four btop-style mini-charts
+1. **O**verview — totals (1m/5m/60m) plus four mini-charts
    (requests/min, mean ms, MB/min, error %) and a full-width
    request-rate sparkline.
-2. **URLs** — live, sortable table with p50/p95/max latency, mean size,
+2. **G**raphs — live per-plugin access-log monitor. One row per
+   `*-access-log` file with req/s, mean/p95 latency, error %, and two
+   independently auto-scaling Braille sparklines (response time +
+   response size) over the last 60 seconds at 1-second resolution.
+   `m` toggles time spark mean ↔ p95, `b` toggles size spark
+   mean ↔ throughput, `i` shows/hides idle handlers.
+3. **U**RLs — live, sortable table with p50/p95/max latency, mean size,
    error %, and a per-URL latency sparkline. Press Enter to drill into
    a URL: windowed stats, 60-minute mean-latency sparkline, exponential
    histogram, status-code breakdown, and top API keys using that URL.
    `j/k/n/p` walk through URLs without leaving the drill-in.
-3. **Caches** — per-cache size / hit rate / hits-per-minute bars plus
+4. **C**aches — per-cache size / hit rate / hits-per-minute bars plus
    a trend sparkline (from polled history).
-4. **Services** — per-handler request rate + trend sparkline.
-5. **Active** — in-flight requests sorted by descending duration.
-6. **Logs** — raw access-log tail with `/` filter.
-7. **Keys** — per-API-key aggregate stats; Enter drills into the key
+5. **S**ervices — per-handler request rate + trend sparkline.
+6. **A**ctive — in-flight requests sorted by descending duration.
+7. **P**roc — `/proc`-based memory + I/O for each `smartmetd` process
+   on the host, with RSS-split sparklines (file-backed vs anon vs
+   shmem), `VmPTE`, swap, FDs, and on-demand `smaps_rollup`. Multiple
+   smartmetd PIDs (frontend + backend) are switched via `n`/`N`. With
+   `--perf`, the panel adds a live perf-top symbol view and a Braille
+   flamegraph that updates each cycle (`f` toggles between them).
+8. **L**ogs — raw access-log tail with `/` filter.
+9. **K**eys — per-API-key aggregate stats; Enter drills into the key
    to see top URLs it calls.
 
 ### Data sources
@@ -121,17 +139,20 @@ Panels (switch with `1..7` or `Tab`/`Shift-Tab`):
 
 | Key              | Effect                                              |
 |------------------|-----------------------------------------------------|
-| `1` – `7`        | jump to panel by number                             |
+| `o g u c s a p l k` | jump to panel by mnemonic letter (highlighted red in tab) |
 | `Tab` / `Shift-Tab` | next / previous panel                            |
 | `?` / `F1`       | help overlay                                        |
 | `↑↓` `jk` `PgUp` `PgDn` `gG` | cursor and page movement                |
 | `Enter`          | drill into selected URL / API key                   |
 | `j/k/n/p`        | next / prev entry inside a drill-in                 |
 | `/`              | filter (URLs / Keys / Logs)                         |
-| `s` / `S`        | cycle sort column forward / back                    |
-| `r`              | reverse sort                                        |
+| `s` / `S`        | cycle sort column forward / back (URLs/Keys panels) |
+| `r`              | reverse sort, or run `smaps_rollup` (Proc panel)    |
 | `[` / `]`        | shrink / grow time window (1 / 5 / 15 / 60 min)     |
-| `H` / `T` / `K`  | toggle histogram / status / API-key sections in URLs drill-in |
+| `h` / `t` / `y`  | toggle histogram / status / API-key sections in URLs drill-in |
+| `n` / `N`        | next / prev smartmetd PID (Proc panel)              |
+| `f`              | toggle flamegraph view (Proc panel, `--perf` only)  |
+| `m` / `b` / `i`  | toggle time spark / size spark / idle handlers (Graphs panel) |
 | `e` / `E`        | export current panel as CSV / JSON                  |
 | `q` / `Ctrl-C`   | quit                                                |
 
@@ -143,8 +164,12 @@ reports the exact path after write.
 
 * Per-URL stats are kept as one exponential-bin histogram (40 bins,
   base 1.5) per minute, retained for 60 minutes. ~20 KB per URL.
+* Per-plugin (per-access-log) stats keep 60 1-second buckets plus 60
+  1-minute buckets. ~3 KB per plugin × ~20 plugins ≈ 60 KB total.
 * Admin-plugin snapshots retain 300 samples per entity per host
   (≈ 10 minutes at the default 2-second poll cadence).
+* Per-PID memory/IO samples retain 1800 ticks (60 min @ 2 s) ≈ 360 KB
+  per smartmetd process.
 
 ## Building the RPM
 

@@ -10,7 +10,7 @@ from .base import Panel, safe_addstr
 
 class LogsPanel(Panel):
     name = "Logs"
-    hotkey = "6"
+    hotkey = "l"
     help_text = "Raw access-log tail. / to filter, End jumps to newest."
 
     def __init__(self):
@@ -27,7 +27,7 @@ class LogsPanel(Panel):
                 self.filter = self.filter[:-1]
             elif 32 <= key < 127:
                 self.filter += chr(key)
-            return None
+            return True
 
         if key == ord("/"):
             self.filter_editing = True
@@ -49,7 +49,9 @@ class LogsPanel(Panel):
         elif key in (curses.KEY_HOME, ord("g")):
             self.scroll = 10_000_000
             self.follow = False
-        return None
+        else:
+            return False
+        return True
 
     def draw(self, win, store):
         h, w = win.getmaxyx()

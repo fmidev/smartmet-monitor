@@ -9,8 +9,8 @@ from .base import Panel, safe_addstr
 
 
 KEYS = [
-    ("Tab / Shift-Tab",   "switch panel"),
-    ("1..7",              "jump to panel by number"),
+    ("Tab / Shift-Tab",   "cycle panels forward/back"),
+    ("o g u c s a p l k", "jump straight to panel (red letter in tab)"),
     ("? or F1",           "toggle this help"),
     ("q / Ctrl-C",        "quit"),
     ("↑ ↓ j k",           "move cursor"),
@@ -20,9 +20,9 @@ KEYS = [
     ("Esc / b / ←",       "back from drill-in; clear filter"),
     ("j / k  n / p",      "next / prev entry while drilled in"),
     ("[ / ]",             "shrink / grow time window (1/5/15/60 min)"),
-    ("H / T / K",         "toggle histogram / status / keys sections (URLs drill-in)"),
+    ("h / t / y",         "toggle histogram / status / keys sections (URLs drill-in)"),
     ("/",                 "filter (URLs / Keys / Logs)"),
-    ("s / S",             "cycle sort column forward/back"),
+    ("s / S",             "cycle sort column forward/back (inside URLs/Keys)"),
     ("r",                 "reverse sort"),
     ("e / E",             "export current panel as CSV / JSON"),
 ]

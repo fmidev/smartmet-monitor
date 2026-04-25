@@ -9,6 +9,7 @@ import sys
 from typing import List
 
 from .app import run_app
+from .widgets.bars import set_ascii
 
 DEFAULT_LOG_GLOB = "/var/log/smartmet/*-access-log"
 
@@ -44,6 +45,27 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         help="On startup, read the tail of each log file (up to 256 MB) "
              "so the panels come up populated instead of empty.",
     )
+    p.add_argument(
+        "--ascii", action="store_true",
+        help="Render charts with eighth-block characters instead of "
+             "Braille. Use this on terminals or fonts that don't render "
+             "U+2800..U+28FF correctly.",
+    )
+    p.add_argument(
+        "--perf", action="store_true",
+        help="Enable the perf sampler in the Proc panel. Spawns "
+             "`perf record -F 99 -g -p PID -- sleep 1` periodically "
+             "for the selected smartmetd PID and renders top-symbols "
+             "and a live flamegraph. Adds ~10%% CPU overhead to the "
+             "target during the recording second of each cycle. "
+             "Requires perf installed and either root or "
+             "kernel.perf_event_paranoid <= 2.",
+    )
+    p.add_argument(
+        "--perf-interval", type=float, default=10.0, metavar="SEC",
+        help="Full perf cycle in seconds (record 1s + idle remainder). "
+             "Default 10.0 (≈10%% duty cycle).",
+    )
     return p.parse_args(argv)
 
 
@@ -64,11 +86,17 @@ def main(argv=None) -> int:
 
     admin_urls = _parse_admin_urls(args.admin_url)
 
+    if args.ascii:
+        set_ascii(True)
+
+    # Without log files and admin URLs the access-log panels stay empty,
+    # but the Proc panel still works against any local smartmetd process.
+    # We let the dashboard start so the operator can use Proc directly.
     if not log_paths and not admin_urls:
         sys.stderr.write(
-            "smtop: no data sources. Pass -l LOG_FILE or -u ADMIN_URL.\n"
+            "smtop: no log files or admin URLs configured; "
+            "Proc panel will still work for local smartmetd processes.\n"
         )
-        return 2
 
     try:
         run_app(
@@ -76,6 +104,8 @@ def main(argv=None) -> int:
             admin_urls=admin_urls,
             admin_interval=args.admin_interval,
             replay=args.replay,
+            enable_perf=args.perf,
+            perf_interval=args.perf_interval,
         )
     except KeyboardInterrupt:
         pass

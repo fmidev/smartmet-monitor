@@ -11,7 +11,7 @@ from .base import Panel, safe_addstr, write_row
 
 class ActivePanel(Panel):
     name = "Active"
-    hotkey = "5"
+    hotkey = "a"
     help_text = "In-flight requests from /admin?what=activerequests."
 
     def __init__(self):
@@ -26,7 +26,9 @@ class ActivePanel(Panel):
             self.scroll = max(0, self.scroll - 10)
         elif key == curses.KEY_NPAGE:
             self.scroll += 10
-        return None
+        else:
+            return False
+        return True
 
     def export_snapshot(self, store):
         headers = ["host", "id", "duration_s", "client_ip", "apikey", "request"]

@@ -26,7 +26,7 @@ def _as_int(v, default=0):
 
 class CachesPanel(Panel):
     name = "Caches"
-    hotkey = "3"
+    hotkey = "c"
     help_text = "Cache stats polled from /admin?what=cachestats."
 
     def __init__(self):
@@ -42,7 +42,9 @@ class CachesPanel(Panel):
             self.cursor = max(0, self.cursor - 10)
         elif key == curses.KEY_NPAGE:
             self.cursor += 10
-        return None
+        else:
+            return False
+        return True
 
     def export_snapshot(self, store):
         headers = ["host", "cache_name", "size", "maxsize",

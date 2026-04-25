@@ -24,7 +24,7 @@ SORT_COLS = (
 
 class KeysPanel(Panel):
     name = "Keys"
-    hotkey = "7"
+    hotkey = "k"
     help_text = (
         "API keys. s/S sort, [/] resize window, / filter, "
         "Enter drills into a key to see top URLs."
@@ -75,7 +75,9 @@ class KeysPanel(Panel):
                 self.detail_key = rows[self.cursor][0]
         elif key == 27:
             self.filter = ""
-        return None
+        else:
+            return False
+        return True
 
     def _handle_filter_key(self, key):
         if key in (10, 13, curses.KEY_ENTER, 27):
@@ -84,17 +86,19 @@ class KeysPanel(Panel):
             self.filter = self.filter[:-1]
         elif 32 <= key < 127:
             self.filter += chr(key)
-        return None
+        return True
 
     def _handle_detail_key(self, key, store=None):
-        if key in (27, ord("q"), curses.KEY_LEFT, ord("b")):
+        if key in (27, curses.KEY_LEFT, ord("b")):
             self.detail_key = None
-            return None
+            return True
         if key in (ord("j"), curses.KEY_DOWN, ord("n")):
             self._step_detail(+1, store)
         elif key in (ord("k"), curses.KEY_UP, ord("p")):
             self._step_detail(-1, store)
-        return None
+        else:
+            return False
+        return True
 
     def _step_detail(self, delta, store):
         if store is None or self.detail_key is None:
