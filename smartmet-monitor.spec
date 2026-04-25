@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.1.0
+Version:        0.2.0
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,5 +100,42 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sat Apr 25 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.2.0-1
+- smtop charts now render in Braille (U+2800..U+28FF) by default,
+  packing two samples per cell at four-step vertical resolution.
+  Pass --ascii to fall back to eighth-block characters on terminals
+  or fonts without proper Braille glyphs.
+- Replace digit panel hotkeys with single-letter mnemonics. Each
+  panel's tab label highlights one red+bold+underlined letter
+  (o/g/u/c/s/a/p/l/k); per-panel keys take priority via a new
+  delegate-first key-handling contract.
+- New Graphs panel (mnemonic g): live per-plugin access-log monitor.
+  One row per *-access-log file with req/s, mean/p95 latency, error
+  percentage and two independently auto-scaling Braille sparklines
+  (response time + response size) at one-second resolution over the
+  last minute. m/b/i toggle the spark metrics and idle-handler
+  visibility. This is the new default startup view when log files
+  are configured.
+- New Proc panel (mnemonic p): per-smartmetd-PID memory + I/O from
+  the cheap O(1) /proc counters. Discovers PIDs via /proc/*/comm,
+  splits RSS into file/anon/shmem with per-row Braille sparklines,
+  surfaces VmSize, VmPTE, Swap, HWM, FD count and threads. The
+  expensive /proc/PID/maps and /proc/PID/smaps are deliberately not
+  read at all; smaps_rollup is gated behind an explicit r keypress
+  because smartmetd routinely keeps over a million mappings open.
+  n/N cycles between processes when more than one smartmetd is
+  running on the host.
+- New --perf flag: spawns `perf record -F 99 -g -p PID -- sleep 1`
+  periodically (default ten-second cycle, ~10% duty) against the
+  focused PID, parses `perf script` output, and renders the top
+  symbols with per-symbol Braille time-series sparklines in the
+  Proc panel. f toggles a live flamegraph view rendered as nested
+  width-proportional boxes with stable per-symbol colors that
+  rebuilds every cycle. New --perf-interval flag tunes the cycle.
+- smtop now starts even with no log files or admin URLs configured,
+  so the Proc panel can be used standalone on hosts where the
+  operator only wants to watch smartmetd memory or perf data.
+- spec: add Recommends: perf for the new flamegraph use case.
+
 * Thu Apr 23 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.1.0-1
 - Initial release. Bundles bstat and the new smtop dashboard.
