@@ -112,6 +112,12 @@ class FlamePanel(Panel):
         max_y = h - 2
         if max_y <= top:
             return
+        # If the most recent perf cycle failed, surface the full error
+        # instead of the empty flamegraph — that's what the operator
+        # actually needs to see.
+        if store.perf_last_error:
+            self._draw_perf_error(win, top, max_y, store.perf_last_error)
+            return
         stacks = store.perf_recent_stacks(info.pid)
         if not stacks:
             safe_addstr(win, top, 2,
@@ -124,6 +130,17 @@ class FlamePanel(Panel):
             return
         total = sum(v[0] for v in tree.values()) or 1
         _render_flame_level(win, top, max_y, 0, w - 1, tree, total)
+
+    def _draw_perf_error(self, win, top: int, max_y: int, msg: str) -> None:
+        h, w = win.getmaxyx()
+        safe_addstr(win, top, 2,
+                    "perf cycle failed — showing the diagnostic in full:",
+                    theme.attr(theme.P_BAD, curses.A_BOLD))
+        for i, line in enumerate(msg.splitlines() or [msg], start=1):
+            if top + i >= max_y:
+                break
+            safe_addstr(win, top + i, 4, line[:max(0, w - 6)],
+                        theme.attr(theme.P_BAD))
 
     def _draw_footer(self, win, n_procs: int) -> None:
         h, w = win.getmaxyx()

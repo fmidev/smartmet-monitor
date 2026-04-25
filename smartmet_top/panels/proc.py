@@ -344,6 +344,8 @@ class ProcPanel(Panel):
         avail = h - row - 2  # leave space for footer + bottom divider
         if avail < 1:
             return row
+        if store.perf_last_error:
+            return self._draw_perf_error(win, row, avail, store.perf_last_error)
         rows = store.perf_top_symbols(info.pid, minutes=10, n=avail)
         if not rows:
             safe_addstr(win, row, 2,
@@ -376,6 +378,8 @@ class ProcPanel(Panel):
         avail = h - row - 2
         if avail < 1:
             return row
+        if store.perf_last_error:
+            return self._draw_perf_error(win, row, avail, store.perf_last_error)
         stacks = store.perf_recent_stacks(info.pid)
         if not stacks:
             safe_addstr(win, row, 2,
@@ -392,6 +396,29 @@ class ProcPanel(Panel):
         max_y = row + avail - 1
         _render_flame_level(win, row, max_y, 0, w - 1, tree, total)
         return max_y + 1
+
+    def _draw_perf_error(self, win, row: int, avail: int, msg: str) -> int:
+        """Render a multi-line perf error block from the last failed cycle.
+
+        Each line of `msg` (perf's stderr/stdout) goes on its own row up
+        to the available height, prefixed with a small "│" so the block
+        is visually distinct from the surrounding panel headers.
+        """
+        h, w = win.getmaxyx()
+        bar = theme.attr(theme.P_BAD, curses.A_BOLD)
+        lines = msg.splitlines() or [msg]
+        # Always show the header marker even if the message is empty.
+        safe_addstr(win, row, 2,
+                    "perf cycle failed — showing the diagnostic in full:",
+                    bar)
+        used = 1
+        for line in lines:
+            if used >= avail:
+                break
+            safe_addstr(win, row + used, 4, line[:max(0, w - 6)],
+                        theme.attr(theme.P_BAD))
+            used += 1
+        return row + used
 
     def _draw_rollup(self, win, info: ProcInfo, row: int) -> int:
         h, w = win.getmaxyx()

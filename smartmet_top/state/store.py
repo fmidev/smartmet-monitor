@@ -358,6 +358,9 @@ class Store:
         self.perfdata: Dict[int, PerfData] = {}
         self.perf_enabled: bool = False
         self.perf_status: str = "(disabled — start smtop with --perf)"
+        # Full diagnostic text from the most recent failed perf record /
+        # script invocation. Cleared on the next successful cycle.
+        self.perf_last_error: str = ""
         self.perf_target_pid: Optional[int] = None
 
     def register_admin_host(self, host: str) -> None:

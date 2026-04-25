@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.3.1
+Version:        0.3.2
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,18 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sat Apr 25 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.3.2-1
+- perf record: drop -q (which silenced the very error messages we
+  needed to diagnose failure) and drop --no-children (a perf report
+  flag that some perf builds reject from `perf record`, manifesting
+  as a bare "record failed" with no detail).
+- perf record failure now stores the full perf stderr+stdout in a
+  new store.perf_last_error field. The Proc panel's perf-top and
+  flamegraph sub-sections, and the dedicated Flame view, render the
+  whole diagnostic in red so the operator can act on it instead of
+  guessing. The status line still carries a one-line summary
+  including the perf exit code.
+
 * Sat Apr 25 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.3.1-1
 - Add Health composite view (mnemonic h): Caches + Services + Active
   stacked in equal thirds. Operator goal: "is this server healthy?"

@@ -70,23 +70,40 @@ def parse_perf_script(text: str) -> List[Tuple[str, ...]]:
     return stacks
 
 
-async def _run_perf_record(perf_bin: str, pid: int) -> Tuple[bool, str]:
+async def _run_perf_record(perf_bin: str, pid: int) -> Tuple[bool, int, str]:
+    """Run perf record; return (ok, returncode, combined_diagnostic_text).
+
+    Notes on the command line:
+      * `-q` is deliberately omitted — it silences perf's own progress
+        and error messages, which is what the operator actually needs
+        when sampling fails.
+      * `--no-children` is a `perf report` aggregation flag, not a
+        valid `perf record` option in many builds. It's harmless on
+        builds that accept it but raises "unknown option" on others
+        (notably some RHEL 8 perf builds), which manifested as a bare
+        "record failed" with no useful diagnostic.
+    """
     cmd = [
         perf_bin, "record",
         "-F", str(PERF_FREQ),
-        "-g", "--no-children",
+        "-g",
         "-p", str(pid),
         "-o", PERF_DATA_PATH,
-        "-q",
         "--", "sleep", str(RECORD_SECONDS),
     ]
     proc = await asyncio.create_subprocess_exec(
         *cmd,
-        stdout=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    _, stderr = await proc.communicate()
-    return proc.returncode == 0, stderr.decode("utf-8", errors="replace")
+    stdout, stderr = await proc.communicate()
+    rc = proc.returncode if proc.returncode is not None else -1
+    # Combine stdout + stderr — perf normally writes diagnostics to
+    # stderr but some builds emit warnings on stdout, and we'd rather
+    # surface both than silently drop one.
+    text = (stderr.decode("utf-8", errors="replace") + "\n"
+            + stdout.decode("utf-8", errors="replace")).strip()
+    return rc == 0, rc, text
 
 
 async def _run_perf_script(perf_bin: str) -> str:
@@ -115,18 +132,25 @@ async def perf_loop(store, interval: float = DEFAULT_INTERVAL) -> None:
         store.perf_target_pid = pid
         store.perf_status = f"recording pid={pid}"
         try:
-            ok, stderr = await _run_perf_record(perf_bin, pid)
+            ok, rc, diag = await _run_perf_record(perf_bin, pid)
         except asyncio.CancelledError:
             raise
         except Exception as e:
             store.perf_status = f"record error: {e}"
+            store.perf_last_error = str(e)
             await asyncio.sleep(interval)
             continue
         if not ok:
-            tail = (stderr.strip().splitlines() or ["unknown"])[-1]
-            store.perf_status = f"record failed: {tail}"
+            # Keep the short summary panel-header-friendly; stash the full
+            # diagnostic so the panels can show it as multi-line context.
+            first = (diag.splitlines() or [""])[0].strip()
+            short = first[:120] if first else f"exit={rc}"
+            store.perf_status = f"record failed (exit={rc}): {short}"
+            store.perf_last_error = diag or f"perf record exited with {rc} and no diagnostic output"
             await asyncio.sleep(interval)
             continue
+        # Success — clear any previous error so the panel stops showing it.
+        store.perf_last_error = ""
         store.perf_status = f"parsing pid={pid}"
         try:
             text = await _run_perf_script(perf_bin)
