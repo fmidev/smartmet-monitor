@@ -43,8 +43,16 @@ class LiveView(CompositeView):
         # this host overall" so plugins whose last activity was 10-60
         # minutes ago should still appear; the 5m default crushed the
         # row list down to only the most recently active plugin.
+        # default_hide_idle=False so the embedded Plugins shows the
+        # full plugin list rather than vanishing down to "the only
+        # plugin active in this exact window". Live is the at-a-glance
+        # composite — every tailed plugin is there, with a flat row
+        # for those that haven't been active. The dedicated Graphs
+        # panel (`g`) keeps hide_idle=True for the focused use case.
         self._regions = [
-            ("plugins", PluginsPanel(default_window_idx=4, default_cursor=-1)),
+            ("plugins", PluginsPanel(default_window_idx=4,
+                                     default_cursor=-1,
+                                     default_hide_idle=False)),
             ("urls", UrlsPanel()),
         ]
 

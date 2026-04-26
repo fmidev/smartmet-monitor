@@ -5,6 +5,7 @@ from __future__ import annotations
 import curses
 
 from .. import theme
+from ..state.store import HISTORY_MINUTES
 from ..widgets.bars import hbar, sparkline, human_bytes, human_count, human_ms, vchart
 from .base import Panel, safe_addstr, write_row
 
@@ -71,34 +72,46 @@ class OverviewPanel(Panel):
             row += 1
 
         row += 1
-        # Four vertical mini-charts side by side, each with a small
-        # Y-axis label column so the operator can read off the value
-        # at the top, middle and bottom of every chart.
-        label_w = 7  # fits "9999.9" plus padding
-        cw = max(10, (w - 8) // 4 - label_w)
+        # Stack 4 charts vertically, each full width, spanning the full
+        # retained history (--history-minutes, default 60). Vertical
+        # stacking gives each chart enough horizontal real estate to
+        # show meaningful per-minute resolution; the previous 4-up
+        # side-by-side layout left every chart < 30 chars wide.
+        label_w = 8  # fits "99999.9 " right-padded
+        chart_w = max(20, w - label_w - 4)
+        # Available rows for the chart region:
+        #   - reserve the bottom 1 row for a time-axis label
+        #   - allocate the rest equally among 4 charts
+        chart_region = max(0, h - row - 2)
+        chart_count = 4
+        if chart_region < chart_count * 3:
+            return  # too cramped to render anything useful
+        per_chart = chart_region // chart_count
+        chart_h = max(2, per_chart - 2)  # leave 1 title row + 1 spacer
+        history = max(2, HISTORY_MINUTES)
         charts = [
-            ("req/min",   store.global_series(60, "count"),               theme.P_SPARK),
-            ("mean ms",   store.global_series(60, "mean_ms"),             theme.P_WARN),
-            ("MB/min",    [v / 1_048_576 for v in store.global_series(60, "bytes")], theme.P_GOOD),
-            ("err %",     store.global_series(60, "err_pct"),             theme.P_BAD),
+            ("req/min",   store.global_series(history, "count"),
+             theme.P_SPARK),
+            ("mean ms",   store.global_series(history, "mean_ms"),
+             theme.P_WARN),
+            ("MB/min",    [v / 1_048_576
+                           for v in store.global_series(history, "bytes")],
+             theme.P_GOOD),
+            ("err %",     store.global_series(history, "err_pct"),
+             theme.P_BAD),
         ]
-        chart_h = min(10, h - row - 4)
-        if chart_h <= 2:
-            return
-        col_x = 2
-        for title, series, color in charts:
+        for chart_idx, (title, series, color) in enumerate(charts):
+            top = row + chart_idx * per_chart
             maxv = max(series) if series else 0
-            # Title spans label + chart so the operator can read
-            # "metric  max=N" without it cramming into the chart.
-            safe_addstr(win, row, col_x,
-                        f"{title}  max={maxv:.1f}".ljust(label_w + cw),
+            # Title row carries the metric name + scale + history span.
+            safe_addstr(win, top, 2,
+                        f"{title}  max={maxv:.2f}  "
+                        f"(last {history}m)".ljust(label_w + chart_w),
                         theme.attr(theme.P_HEADER, curses.A_BOLD))
             rows = vchart(series, chart_h, cell_width=1, maxval=maxv,
-                          width=cw)
+                          width=chart_w)
             mid_row = chart_h // 2
             for j, line in enumerate(rows):
-                # Label only the top/middle/bottom rows so the column
-                # doesn't get noisy on tall charts.
                 if j == 0:
                     label_val = maxv
                 elif j == chart_h - 1:
@@ -111,19 +124,24 @@ class OverviewPanel(Panel):
                     label = " " * label_w
                 else:
                     label = f"{label_val:>{label_w - 1}.1f} "
-                safe_addstr(win, row + 1 + j, col_x, label,
+                safe_addstr(win, top + 1 + j, 2, label,
                             theme.attr(theme.P_DIM))
-                safe_addstr(win, row + 1 + j, col_x + label_w, line,
+                safe_addstr(win, top + 1 + j, 2 + label_w, line,
                             theme.attr(color))
-            col_x += label_w + cw + 2
-            if col_x + label_w + cw > w:
-                break
-
-        # sparkline of request rate across full width
-        srow = row + chart_h + 2
-        if srow < h - 2:
-            safe_addstr(win, srow, 2, "requests/min (last 60m):",
-                        theme.attr(theme.P_HEADER, curses.A_BOLD))
-            series = store.global_series(60, "count")
-            safe_addstr(win, srow + 1, 2, sparkline(series, width=min(60, w - 4)),
-                        theme.attr(theme.P_SPARK))
+            # Time-axis labels under the very last chart only — older
+            # charts share the same x-axis so labelling each is noisy.
+            if chart_idx == chart_count - 1:
+                axis_row = top + 1 + chart_h
+                if axis_row < h - 1:
+                    span_label = f"-{history}m"
+                    mid_label = f"-{history // 2}m"
+                    axis_left = 2 + label_w
+                    safe_addstr(win, axis_row, axis_left, span_label,
+                                theme.attr(theme.P_DIM))
+                    if chart_w > 30:
+                        safe_addstr(win, axis_row,
+                                    axis_left + chart_w // 2 - len(mid_label) // 2,
+                                    mid_label, theme.attr(theme.P_DIM))
+                    safe_addstr(win, axis_row,
+                                axis_left + chart_w - len("now"),
+                                "now", theme.attr(theme.P_DIM))

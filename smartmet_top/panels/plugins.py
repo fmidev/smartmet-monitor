@@ -58,7 +58,8 @@ class PluginsPanel(Panel):
     )
 
     def __init__(self, default_window_idx: int = 0,
-                 default_cursor: int = 0) -> None:
+                 default_cursor: int = 0,
+                 default_hide_idle: bool = True) -> None:
         # default_cursor=-1 suppresses the cursor highlight entirely;
         # used by the Live composite, which is display-only and where
         # an arbitrary "selected row" indicator would be misleading.
@@ -73,9 +74,12 @@ class PluginsPanel(Panel):
         # Optional name filter
         self.filter = ""
         self.filter_editing = False
-        # Hide entirely-idle rows by default — production hosts have
-        # many always-empty handler logs we don't want crowding the view.
-        self.hide_idle = True
+        # Hide entirely-idle rows by default in the dedicated Graphs
+        # panel so always-empty handler logs (favicon, default-handler,
+        # ...) don't crowd the view. The Live composite passes False
+        # so its embedded Plugins shows the full plugin list — the
+        # operator sees at a glance which plugins exist on the host.
+        self.hide_idle = default_hide_idle
         # Window selector: 60s (live), 1m, 5m, 15m, 60m. Caller can
         # override the initial window — the Live composite uses 5m so
         # it isn't empty right after --replay (the 60s window only

@@ -402,13 +402,14 @@ class Store:
         self.available_what: Dict[str, set] = {}
         self.host_role: Dict[str, str] = {}  # "frontend", "backend", or "unknown"
         # Recent log lines (raw, with [plugin] prefix) for the Logs
-        # panel. The buffer is sized for production hosts where one
-        # plugin (typically wms) can dominate write rate by 100x — at
-        # 2000 lines a 250 req/s plugin crowded out every other plugin
-        # within ~8 seconds. 20000 keeps ~80 seconds of dense traffic
-        # visible, so other plugins' lines are reliably interleaved
-        # for the operator to find with `/` or n/N source cycling.
+        # panel's "all" view that interleaves every tailed file.
         self.recent_lines: Deque[str] = deque(maxlen=20000)
+        # Per-source recent lines so the Logs panel can show a single
+        # plugin's tail without it being flushed out by a high-rate
+        # plugin's traffic. Each source has its own bounded ring; idle
+        # plugins keep their last 2000 lines forever, which is what
+        # makes "switch sources with arrow keys" actually useful.
+        self.source_lines: Dict[str, Deque[str]] = {}
         # status: data source health
         self.logtail_status: str = "(starting)"
         self.admin_status: Dict[str, str] = {}
@@ -523,15 +524,22 @@ class Store:
             g.status_counts[status] = g.status_counts.get(status, 0) + 1
 
     def record_raw_line(self, line: str, source: str = "") -> None:
-        """Append a raw access-log line to the recent ring.
+        """Append a raw access-log line to the recent rings.
 
-        With `source` set the line is prefixed with `[<plugin>] ` so
-        the Logs panel — which interleaves all tailed files into one
-        stream — shows clearly which file each line came from.
+        Stored both in the global merged ring (with a `[<plugin>]`
+        prefix so the source is visible in the merged view) and in
+        the per-source ring (raw, without the prefix — the source is
+        already implied by the ring it's in). The Logs panel uses
+        whichever the operator selected.
         """
         with self._lock:
             if source:
                 self.recent_lines.append(f"[{source}] {line}")
+                buf = self.source_lines.get(source)
+                if buf is None:
+                    buf = deque(maxlen=2000)
+                    self.source_lines[source] = buf
+                buf.append(line)
             else:
                 self.recent_lines.append(line)
 

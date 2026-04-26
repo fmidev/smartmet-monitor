@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.7.4
+Version:        0.7.5
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,38 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.5-1
+- Live composite: the embedded Plugins panel now passes
+  hide_idle=False, so every tailed plugin appears in the row list
+  even when its current-window count is zero. The previous default
+  (inherited from the dedicated Graphs panel) crushed Live down to
+  whichever single plugin happened to be active in the window —
+  reported as "shows only the trajectory plugin". The dedicated
+  Graphs panel still hides idles by default; the operator can
+  press `i` to toggle.
+
+- Overview panel: redesign. The four mini-charts now stack
+  vertically full-width instead of cramming side-by-side at ~30
+  chars each, the duplicate "requests/min" sparkline at the bottom
+  is gone (was rendering the same data as the req/min chart), and
+  the time span uses --history-minutes (was hardcoded 60). With
+  --history-minutes 10080 the Overview shows a full week of
+  per-minute trend at panel-wide resolution. Time-axis labels
+  ("-60m", "-30m", "now") appear under the bottom chart so the
+  scale is unambiguous.
+
+- Logs panel: per-source ring buffers + arrow-key navigation.
+  Each tailed plugin gets its own bounded ring (2000 lines each)
+  in the Store, plus the existing global merged ring stays for the
+  "[all]" view. The Logs panel now shows a tab bar of plugin names
+  at the top with the focused entry marked ▶plugin◀; ←↑→↓ cycle
+  the focus, Enter / End jump to the live tail of that source, /
+  filters within it, Esc clears the filter. The previous design
+  was a single merged stream where a high-rate plugin (wms at
+  ~250 req/s) flushed every other plugin's lines out of the
+  buffer within seconds, which is what manifested as "Logs panel
+  shows only one plugin's logs".
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.4-1
 - Live composite: bump the embedded Plugins panel's default window
   from 5m to 60m. The previous 5m window crushed the row list down

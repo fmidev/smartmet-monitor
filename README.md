@@ -144,7 +144,12 @@ direction; the dedicated single-panel views below remain for sortable
    smartmetd PIDs (frontend + backend) are switched via `n`/`N`. With
    `--perf`, the panel adds a live perf-top symbol view and a Braille
    flamegraph that updates each cycle (`f` toggles between them).
-11. **L**ogs — raw access-log tail with `/` filter.
+11. **L**ogs — multi-source `tail -F`. Each tailed plugin has its own
+    ring buffer; the panel shows a tab bar of plugin names with the
+    focused one marked, and ←↑→↓ switch between them. There's also
+    an `[all]` virtual entry that pulls from a merged ring across
+    every plugin. Enter / End jumps to the live tail; `/` filters
+    within the focused source.
 12. Api**k**eys — per-API-key aggregate stats; Enter drills into the
     key to see top URLs it calls.
 
