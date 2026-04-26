@@ -40,7 +40,7 @@ class UrlsPanel(Panel):
     hotkey = "u"
     help_text = (
         "Latency per URL. Sort: s cycles, [/] resize window, "
-        "Enter drills in, / filters, ↑↓ PgUp PgDn navigate."
+        "Enter drills in, / filters, ↑↓/PgUp/PgDn/Home/End navigate."
     )
 
     def __init__(self) -> None:
@@ -71,18 +71,18 @@ class UrlsPanel(Panel):
         if self.detail_url is not None:
             return self._handle_detail_key(key, store)
 
-        if key in (curses.KEY_UP, ord("k")):
+        if key == curses.KEY_UP:
             self.cursor = max(0, self.cursor - 1)
-        elif key in (curses.KEY_DOWN, ord("j")):
+        elif key == curses.KEY_DOWN:
             self.cursor += 1  # clamped in draw
         elif key == curses.KEY_PPAGE:
             self.cursor = max(0, self.cursor - 10)
         elif key == curses.KEY_NPAGE:
             self.cursor += 10
-        elif key == curses.KEY_HOME or key == ord("g"):
+        elif key == curses.KEY_HOME:
             self.cursor = 0
             self.scroll = 0
-        elif key == curses.KEY_END or key == ord("G"):
+        elif key == curses.KEY_END:
             self.cursor = 10_000_000  # clamped in draw
         elif key == ord("s"):
             self.sort_idx = (self.sort_idx + 1) % len(SORT_COLS)
@@ -116,24 +116,20 @@ class UrlsPanel(Panel):
         return True
 
     def _handle_detail_key(self, key, store=None):
-        if key in (27, curses.KEY_LEFT, ord("b")):
+        if key in (27, curses.KEY_LEFT):
             self.detail_url = None
             return True
         # step through URLs in current sort order
-        if key in (ord("j"), curses.KEY_DOWN, ord("n")):
+        if key == curses.KEY_DOWN:
             self._step_detail(+1, store)
-        elif key in (ord("k"), curses.KEY_UP, ord("p")):
+        elif key == curses.KEY_UP:
             self._step_detail(-1, store)
         elif key == ord("["):
             self.detail_window_idx = max(0, self.detail_window_idx - 1)
         elif key == ord("]"):
             self.detail_window_idx = min(len(WINDOWS) - 1, self.detail_window_idx + 1)
-        elif key == ord("h"):
-            self.detail_show_hist = not self.detail_show_hist
-        elif key == ord("t"):
-            self.detail_show_status = not self.detail_show_status
-        elif key == ord("y"):
-            self.detail_show_keys = not self.detail_show_keys
+        # `h` would conflict with the Health panel mnemonic; the
+        # histogram / status / keys sections are now always visible.
         else:
             return False
         return True
@@ -363,7 +359,7 @@ class UrlsPanel(Panel):
         if u is None:
             safe_addstr(win, 2, 2, "no data for this URL (yet)",
                         theme.attr(theme.P_DIM))
-            safe_addstr(win, h - 1, 0, " [j/k/n/p: next/prev | esc/b: back] ".ljust(w - 1),
+            safe_addstr(win, h - 1, 0, " [↑↓: prev/next URL | Esc/← : back] ".ljust(w - 1),
                         theme.attr(theme.P_TITLE))
             return
 
@@ -487,5 +483,5 @@ class UrlsPanel(Panel):
                     break
 
         safe_addstr(win, h - 1, 0,
-                    " j/k n/p next/prev | [ ] window | H T K toggle | e export | esc back ".ljust(w - 1),
+                    " ↑↓ prev/next | [ ] window | e export | Esc/← back ".ljust(w - 1),
                     theme.attr(theme.P_TITLE))

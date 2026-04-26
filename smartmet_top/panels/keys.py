@@ -48,17 +48,17 @@ class KeysPanel(Panel):
             return self._handle_filter_key(key)
         if self.detail_key is not None:
             return self._handle_detail_key(key, store)
-        if key in (curses.KEY_UP, ord("k")):
+        if key == curses.KEY_UP:
             self.cursor = max(0, self.cursor - 1)
-        elif key in (curses.KEY_DOWN, ord("j")):
+        elif key == curses.KEY_DOWN:
             self.cursor += 1
         elif key == curses.KEY_PPAGE:
             self.cursor = max(0, self.cursor - 10)
         elif key == curses.KEY_NPAGE:
             self.cursor += 10
-        elif key in (curses.KEY_HOME, ord("g")):
+        elif key == curses.KEY_HOME:
             self.cursor = 0; self.scroll = 0
-        elif key in (curses.KEY_END, ord("G")):
+        elif key == curses.KEY_END:
             self.cursor = 10_000_000
         elif key == ord("s"):
             self.sort_idx = (self.sort_idx + 1) % len(SORT_COLS)
@@ -92,12 +92,12 @@ class KeysPanel(Panel):
         return True
 
     def _handle_detail_key(self, key, store=None):
-        if key in (27, curses.KEY_LEFT, ord("b")):
+        if key in (27, curses.KEY_LEFT):
             self.detail_key = None
             return True
-        if key in (ord("j"), curses.KEY_DOWN, ord("n")):
+        if key == curses.KEY_DOWN:
             self._step_detail(+1, store)
-        elif key in (ord("k"), curses.KEY_UP, ord("p")):
+        elif key == curses.KEY_UP:
             self._step_detail(-1, store)
         else:
             return False

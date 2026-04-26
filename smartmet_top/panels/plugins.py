@@ -109,9 +109,9 @@ class PluginsPanel(Panel):
                 self.filter += chr(key)
             return True
 
-        if key in (curses.KEY_UP, ord("k")):
+        if key == curses.KEY_UP:
             self.cursor = max(0, self.cursor - 1)
-        elif key in (curses.KEY_DOWN, ord("j")):
+        elif key == curses.KEY_DOWN:
             self.cursor += 1
         elif key in (10, 13, curses.KEY_ENTER):
             # Drill into the URLs panel filtered by the selected
@@ -125,11 +125,9 @@ class PluginsPanel(Panel):
             self.cursor = max(0, self.cursor - 10)
         elif key == curses.KEY_NPAGE:
             self.cursor += 10
-        elif key in (curses.KEY_HOME, ord("g")):
-            # NOTE: `g` is also this panel's mnemonic, but delegate-first
-            # routing means in-panel `g` lands here as "go to top".
+        elif key == curses.KEY_HOME:
             self.cursor = 0; self.scroll = 0
-        elif key in (curses.KEY_END, ord("G")):
+        elif key == curses.KEY_END:
             self.cursor = 10_000_000
         elif key == ord("m"):
             self.time_metric = (

@@ -133,7 +133,7 @@ direction; the dedicated single-panel views below remain for sortable
    error %, and a per-URL latency sparkline. Press Enter to drill into
    a URL: windowed stats, 60-minute mean-latency sparkline, exponential
    histogram, status-code breakdown, and top API keys using that URL.
-   `j/k/n/p` walk through URLs without leaving the drill-in.
+   ↑/↓ walk through URLs without leaving the drill-in.
 7. **C**aches — per-cache size / hit rate / hits-per-minute bars plus
    a trend sparkline (from polled history).
 8. **S**ervices — per-handler request rate + trend sparkline.
@@ -170,14 +170,13 @@ direction; the dedicated single-panel views below remain for sortable
 | `i h f o g u c s a p l k` | jump to view / panel by mnemonic letter (highlighted red in tab) |
 | `Tab` / `Shift-Tab` | next / previous panel                            |
 | `?` / `F1`       | help overlay                                        |
-| `↑↓` `jk` `PgUp` `PgDn` `gG` | cursor and page movement                |
+| `↑` `↓` `←` `→` `PgUp` `PgDn` `Home` `End` | cursor and page movement |
 | `Enter`          | drill into selected URL / API key                   |
-| `j/k/n/p`        | next / prev entry inside a drill-in                 |
+| `↑` / `↓`        | next / prev entry inside a drill-in                 |
 | `/`              | filter (URLs / Keys / Logs)                         |
 | `s` / `S`        | cycle sort column forward / back (URLs/Keys panels) |
 | `r`              | reverse sort, or run `smaps_rollup` (Proc panel)    |
 | `[` / `]`        | shrink / grow time window (1 / 5 / 15 / 60 min)     |
-| `h` / `t` / `y`  | toggle histogram / status / API-key sections in URLs drill-in |
 | `n` / `N`        | next / prev smartmetd PID (Proc and Flame panels)   |
 | `1` – `9`        | select smartmetd PID by index in the selector at the top of Proc / Flame |
 | `f`              | toggle inline flamegraph (Proc); also the Flame view mnemonic |

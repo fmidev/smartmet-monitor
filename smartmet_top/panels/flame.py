@@ -189,9 +189,9 @@ class FlamePanel(Panel):
         # Flame navigation only meaningful when perf is on AND we have data.
         if not store.perf_enabled or not self._last_root:
             return False
-        if key in (curses.KEY_RIGHT, ord("l")):
+        if key == curses.KEY_RIGHT:
             self._move_sibling(+1)
-        elif key in (curses.KEY_LEFT, ord("h")):
+        elif key == curses.KEY_LEFT:
             self._move_sibling(-1)
         elif key == curses.KEY_DOWN:
             self._move_to_first_child()
@@ -224,9 +224,9 @@ class FlamePanel(Panel):
             )
 
     def _handle_seconds_menu_key(self, key, store) -> bool:
-        if key in (curses.KEY_UP, ord("k")):
+        if key == curses.KEY_UP:
             self._seconds_menu_idx = max(0, self._seconds_menu_idx - 1)
-        elif key in (curses.KEY_DOWN, ord("j")):
+        elif key == curses.KEY_DOWN:
             self._seconds_menu_idx = min(len(PERF_SECONDS_PRESETS) - 1,
                                           self._seconds_menu_idx + 1)
         elif key in (10, 13, curses.KEY_ENTER):

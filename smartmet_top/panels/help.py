@@ -10,21 +10,22 @@ from .base import Panel, safe_addstr
 
 KEYS = [
     ("Tab / Shift-Tab",   "cycle panels forward/back"),
-    ("o g u c s a p l k", "jump straight to panel (red letter in tab)"),
+    ("i o g u c s a p l k", "jump to view / panel by red letter in tab"),
     ("? or F1",           "toggle this help"),
     ("q / Ctrl-C",        "quit"),
-    ("↑ ↓ j k",           "move cursor"),
+    ("↑ ↓ ← →",            "move cursor / navigate (arrows only)"),
     ("PgUp / PgDn",       "page"),
-    ("Home g / End G",    "top / bottom"),
-    ("Enter",             "drill in (URLs / Keys panels)"),
-    ("Esc / b / ←",       "back from drill-in; clear filter"),
-    ("j / k  n / p",      "next / prev entry while drilled in"),
+    ("Home / End",        "top / bottom"),
+    ("Enter",             "drill in (URLs / Apikeys / Graphs)"),
+    ("Esc / ←",           "back from drill-in; clear filter"),
     ("[ / ]",             "shrink / grow time window (1/5/15/60 min)"),
-    ("h / t / y",         "toggle histogram / status / keys sections (URLs drill-in)"),
-    ("/",                 "filter (URLs / Keys / Logs)"),
-    ("s / S",             "cycle sort column forward/back (inside URLs/Keys)"),
+    ("/",                 "filter (URLs / Apikeys / Logs / Graphs)"),
+    ("s / S",             "cycle sort column forward/back"),
     ("r",                 "reverse sort"),
     ("e / E",             "export current panel as CSV / JSON"),
+    ("n / N",             "next / prev smartmetd PID (Proc / Flame)"),
+    ("1 - 9",             "select PID directly by index (Proc / Flame)"),
+    ("f",                 "toggle inline flamegraph (Proc); zoom-in (Flame)"),
 ]
 
 

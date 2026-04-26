@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.7.9
+Version:        0.7.10
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,27 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.10-1
+- Remove ALL vim-style movement bindings from every panel. Cursor
+  navigation is now arrow keys only (↑↓←→ + Home/End/PgUp/PgDn).
+  Letters that were panel-local movement keys — j, k for cursor,
+  g, G for top/bottom, h, l for left/right in the Flame view, n,
+  p for next/prev in URLs/Apikeys drill-ins — used to shadow the
+  global panel mnemonics, so pressing 'k' from inside any panel
+  with a row cursor would move the cursor instead of switching
+  to the Apikeys panel. Same for 'g' (Graphs), 'h' (Health), 'l'
+  (Logs). Now every global mnemonic letter reaches the panel
+  switcher from any panel.
+- URLs drill-in: drop the h/t/y section toggles. The 'h' binding
+  conflicted with the Health panel mnemonic; rather than remap
+  it the histogram, status and API-key sections are simply always
+  visible. The 'b' back-binding is also gone (Esc / ← still work).
+- Help overlay: rewritten to match the new arrows-only navigation
+  policy. Documents 1-9 / n / N for PID selection in Proc / Flame,
+  drops the j/k/g/G/h/t/y references.
+- Inline footers in URLs and URLs drill-in updated to advertise
+  the actual current bindings (↑↓ + [ / ] + Esc/← + e/E + Enter).
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.9-1
 - Logs panel now uses ONLY arrow keys for navigation; the vim-style
   h/j/k/l bindings are gone because they were shadowing the global

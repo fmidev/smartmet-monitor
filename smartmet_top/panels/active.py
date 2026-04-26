@@ -18,9 +18,9 @@ class ActivePanel(Panel):
         self.scroll = 0
 
     def handle_key(self, key, store):
-        if key in (curses.KEY_UP, ord("k")):
+        if key == curses.KEY_UP:
             self.scroll = max(0, self.scroll - 1)
-        elif key in (curses.KEY_DOWN, ord("j")):
+        elif key == curses.KEY_DOWN:
             self.scroll += 1
         elif key == curses.KEY_PPAGE:
             self.scroll = max(0, self.scroll - 10)
