@@ -93,8 +93,17 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     )
     p.add_argument(
         "--perf-interval", type=float, default=10.0, metavar="SEC",
-        help="Full perf cycle in seconds (record 1s + idle remainder). "
-             "Default 10.0 (≈10%% duty cycle).",
+        help="Full perf cycle in seconds (record + idle remainder). "
+             "Default 10.0.",
+    )
+    p.add_argument(
+        "--perf-record-seconds", type=int, default=3, metavar="N",
+        help="How long to record per perf cycle. Default 3 seconds. "
+             "Longer = more samples per flamegraph (denser, more "
+             "representative of typical behaviour) but proportionally "
+             "more CPU overhead on the target during the recording "
+             "window. Combined with the default --perf-interval=10 "
+             "the duty cycle is ~30%%.",
     )
     return p.parse_args(argv)
 
@@ -140,6 +149,7 @@ def main(argv=None) -> int:
             include_rotated=args.include_rotated,
             enable_perf=args.perf,
             perf_interval=args.perf_interval,
+            perf_record_seconds=args.perf_record_seconds,
         )
     except KeyboardInterrupt:
         pass

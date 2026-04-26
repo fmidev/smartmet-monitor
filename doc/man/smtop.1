@@ -120,7 +120,12 @@ installed and either root or
 .BR kernel.perf_event_paranoid \ \(<=\ 2 .
 .TP
 .BI \-\-perf\-interval \ SEC
-Full perf cycle in seconds (record 1 s + idle remainder). Default 10.0.
+Full perf cycle in seconds (record + idle remainder). Default 10.0.
+.TP
+.BI \-\-perf\-record\-seconds \ N
+How long to record per perf cycle. Default 3 seconds. Longer recording
+yields denser flamegraphs at proportionally more CPU overhead on the
+target during the recording window.
 .SH KEYS
 .TP
 .BR i " / " h " / " f " / " o " / " g " / " u " / " c " / " s " / " a " / " p " / " l " / " k

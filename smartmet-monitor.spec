@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.5.1
+Version:        0.5.2
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,23 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.5.2-1
+- Triple the default perf record duration from 1 second to 3 seconds
+  per cycle. With -F 99 the previous default produced ~99 samples per
+  CPU-second, which felt sparse on busy backends — flamegraphs had
+  many one-cell tails. The new default gives ~3x more samples per
+  flamegraph while keeping the duty cycle at ~30% (3s recording in
+  the default 10s window).
+- New --perf-record-seconds N flag exposes this for tuning. Larger
+  values give denser flamegraphs at proportionally more CPU overhead
+  on the target during the recording window.
+- Build the flame tree from the entire retained stack ring (~20000
+  samples bounded by the store) instead of the most recent 2000.
+  The 2000-sample slice was a leftover from when the ring was new
+  and we were paranoid about CPU cost; tree construction is fast,
+  and using the full ring fills out infrequent paths so they no
+  longer disappear from the flame.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.5.1-1
 - Switch perf record from frame-pointer call-graph (-g, the default)
   to `--call-graph=dwarf,32768`. SmartMet Server has deep call stacks

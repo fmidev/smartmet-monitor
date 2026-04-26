@@ -386,10 +386,11 @@ class ProcPanel(Panel):
                         "no stack samples yet — waiting for first perf cycle…",
                         theme.attr(theme.P_DIM))
             return row + 1
-        # Limit to the most recent N stacks so the tree reflects current
-        # behaviour rather than ancient history.
-        recent = stacks[-2000:]
-        tree = _build_flame_tree(recent)
+        # Use the entire retained ring (already bounded at 20000 by the
+        # store) so the tree is dense even when individual cycles are
+        # short — the operator can switch to the dedicated Flame view
+        # for a higher-fidelity rendering anyway.
+        tree = _build_flame_tree(stacks)
         if not tree:
             return row + 1
         total = sum(v[0] for v in tree.values()) or 1

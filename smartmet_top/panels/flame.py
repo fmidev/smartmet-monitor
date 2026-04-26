@@ -330,8 +330,12 @@ class FlamePanel(Panel):
             self._last_frames = []
             self._last_root = {}
             return 2
-        # Build the tree from recent stacks, then descend by zoom_path.
-        full_root = _build_flame_tree(stacks[-2000:])
+        # Build the tree from the entire retained stack ring (the store
+        # bounds it at 20000) so each rebuild reflects roughly the last
+        # ~25-60 seconds of sampling. Slicing was a leftover from when
+        # the ring was new and we were paranoid about CPU cost; tree
+        # construction is fast.
+        full_root = _build_flame_tree(stacks)
         self._last_root = full_root
         if self.zoom_path:
             visible_root = _subtree_at(full_root, self.zoom_path)

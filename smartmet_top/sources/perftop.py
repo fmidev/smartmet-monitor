@@ -23,9 +23,9 @@ import time
 from typing import List, Optional, Tuple
 
 
-PERF_FREQ = 99           # samples/sec, mirrors btop's CPU graph default
-RECORD_SECONDS = 1       # actual recording duration each cycle
-DEFAULT_INTERVAL = 10.0  # full cycle (record + idle) — keeps load ~10%
+PERF_FREQ = 99                  # samples/sec, mirrors btop's CPU graph default
+DEFAULT_RECORD_SECONDS = 3      # actual recording duration each cycle
+DEFAULT_INTERVAL = 10.0         # full cycle (record + idle)
 PERF_DATA_PATH = "/tmp/.smtop_perf.data"
 
 
@@ -70,19 +70,22 @@ def parse_perf_script(text: str) -> List[Tuple[str, ...]]:
     return stacks
 
 
-async def _run_perf_record(perf_bin: str, pid: int) -> Tuple[bool, int, str]:
+async def _run_perf_record(perf_bin: str, pid: int,
+                           record_seconds: int) -> Tuple[bool, int, str]:
     """Run perf record; return (ok, returncode, combined_diagnostic_text).
 
     Notes on the command line:
       * `--call-graph=dwarf,32768` rather than the default `-g` (which
         is `--call-graph=fp`). SmartMet Server has deep call stacks
-        whose accuracy suffers when the compiler omits frame pointers,
-        and DWARF unwinding gives correct stacks regardless. The 32 KB
-        stack-dump size (default is 8 KB) is sized for those deep
-        stacks; perf truncates anything taller. perf.data files grow
-        significantly — a few MB per second of sampling — but the
-        recording cycle is short and `/tmp/.smtop_perf.data` is
-        overwritten each cycle.
+        that the frame-pointer mode splits — partial stacks show up
+        in the flamegraph as separate trees rooted somewhere in the
+        middle of the call hierarchy. DWARF unwinding reconstructs
+        the full chain reliably. The 32 KB stack-dump size (default
+        is 8 KB) is sized for those deep stacks; perf truncates
+        anything taller. perf.data files grow significantly under
+        DWARF mode — proportional to sample count × stack-dump
+        size — but the recording cycle is bounded and the same
+        `/tmp/.smtop_perf.data` file is overwritten each cycle.
       * `-q` is deliberately omitted — it silences perf's own progress
         and error messages, which is what the operator actually needs
         when sampling fails.
@@ -98,7 +101,7 @@ async def _run_perf_record(perf_bin: str, pid: int) -> Tuple[bool, int, str]:
         "--call-graph=dwarf,32768",
         "-p", str(pid),
         "-o", PERF_DATA_PATH,
-        "--", "sleep", str(RECORD_SECONDS),
+        "--", "sleep", str(record_seconds),
     ]
     proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -126,7 +129,8 @@ async def _run_perf_script(perf_bin: str) -> str:
     return out.decode("utf-8", errors="replace")
 
 
-async def perf_loop(store, interval: float = DEFAULT_INTERVAL) -> None:
+async def perf_loop(store, interval: float = DEFAULT_INTERVAL,
+                    record_seconds: int = DEFAULT_RECORD_SECONDS) -> None:
     perf_bin = shutil.which("perf")
     if not perf_bin:
         store.perf_status = "perf not found in PATH (install linux-tools)"
@@ -139,9 +143,9 @@ async def perf_loop(store, interval: float = DEFAULT_INTERVAL) -> None:
             await asyncio.sleep(0.5)
             continue
         store.perf_target_pid = pid
-        store.perf_status = f"recording pid={pid}"
+        store.perf_status = f"recording pid={pid} ({record_seconds}s)"
         try:
-            ok, rc, diag = await _run_perf_record(perf_bin, pid)
+            ok, rc, diag = await _run_perf_record(perf_bin, pid, record_seconds)
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -174,7 +178,7 @@ async def perf_loop(store, interval: float = DEFAULT_INTERVAL) -> None:
         store.perf_status = f"ok pid={pid} samples={len(stacks)}"
         # Idle remainder of the duty cycle, but break early if the user
         # selects a different PID so the next cycle re-targets quickly.
-        target = time.time() + max(0.0, interval - RECORD_SECONDS)
+        target = time.time() + max(0.0, interval - record_seconds)
         while time.time() < target:
             if store.proc_selected() != pid:
                 break

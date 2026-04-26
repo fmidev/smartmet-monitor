@@ -41,7 +41,8 @@ class App:
                  replay_bytes: int = 256 * 1024 * 1024,
                  include_rotated: bool = False,
                  enable_perf: bool = False,
-                 perf_interval: float = 10.0) -> None:
+                 perf_interval: float = 10.0,
+                 perf_record_seconds: int = 3) -> None:
         self.store = Store()
         for host, _ in admin_urls:
             self.store.register_admin_host(host)
@@ -53,6 +54,7 @@ class App:
         self.include_rotated = include_rotated
         self.enable_perf = enable_perf
         self.perf_interval = perf_interval
+        self.perf_record_seconds = perf_record_seconds
         self.store.perf_enabled = enable_perf
         self.panels: List[Panel] = [
             LiveView(),
@@ -242,7 +244,8 @@ class App:
         tasks.append(asyncio.create_task(proc_loop(self.store)))
         if self.enable_perf:
             tasks.append(asyncio.create_task(
-                perf_loop(self.store, self.perf_interval)
+                perf_loop(self.store, self.perf_interval,
+                          self.perf_record_seconds)
             ))
 
         last_draw = 0.0
@@ -282,11 +285,13 @@ def run_app(log_paths: List[str], admin_urls: List[tuple],
             admin_interval: float, replay: bool,
             replay_bytes: int = 256 * 1024 * 1024,
             include_rotated: bool = False,
-            enable_perf: bool = False, perf_interval: float = 10.0) -> None:
+            enable_perf: bool = False, perf_interval: float = 10.0,
+            perf_record_seconds: int = 3) -> None:
     app = App(log_paths, admin_urls, admin_interval, replay,
               replay_bytes=replay_bytes,
               include_rotated=include_rotated,
-              enable_perf=enable_perf, perf_interval=perf_interval)
+              enable_perf=enable_perf, perf_interval=perf_interval,
+              perf_record_seconds=perf_record_seconds)
 
     def _curses_main(stdscr):
         # asyncio.run inside the curses wrapper keeps teardown correct
