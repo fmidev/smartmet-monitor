@@ -36,15 +36,92 @@ Each tool accepts a log file path (or reads stdin) and writes a
 Unicode-block summary to the terminal.
 
 ```sh
-bstat    [-i 1s|10s|1m|10m|1h|1d] [-w WIDTH] [--ascii] [LOG]
-bchart   [-i INTERVAL] [-m reqs|ms|kb|mb|err] [LOG]
-burls    [-n N] [-s reqs|ms|kb|mb] [LOG]
-bstatus                                   [LOG]
-bkeys    [-n N] [-s reqs|ms|mb]           [LOG]
+bstat    [-i INTERVAL] [-w WIDTH] [-H HEIGHT] [--ascii] [LOG]
+bchart   [-i INTERVAL] [-m reqs|ms|kb|mb|err] [-H HEIGHT] [-w CELLW] [--ascii] [LOG]
+burls    [-n N] [-s reqs|ms|kb|mb] [-d|-k LIST] [-L|-i] [LOG]
+bstatus  [-i INTERVAL] [-H HEIGHT] [--ascii] [LOG]
+bkeys    [-n N] [-s reqs|ms|mb] [LOG]
 ```
+
+`INTERVAL` is one of `1s | 10s | 1m | 2m | 5m | 10m | 1h | 1d`.
+Most intervals snap to a digit boundary, so they are extracted by
+truncating the ISO-8601 timestamp; `2m` and `5m` use minute-rounding
+instead. `-H HEIGHT` sets the Braille chart height (in character rows)
+consistently for `bstat`, `bchart`, and `bstatus` — defaults to `4`
+for the sparkline footer in bstat / bstatus and `12` for bchart.
 
 Default log path: anything matching `/var/log/smartmet/*-access-log` if
 you omit the argument on a SmartMet host.
+
+### `bstat` — bucketed dashboard
+
+```sh
+bstat -i 1h          wms-access-log         # default sparkline height (4)
+bstat -i 1h -H 1     wms-access-log         # compact, single-row sparklines
+bstat -i 1h -H 5     wms-access-log         # taller multi-row sparklines
+```
+
+Per-row half-height bars for requests / latency / size / bandwidth,
+with multi-row Braille sparklines underneath that show each metric
+as a time series. `-H` tunes the sparkline height: `-H 1` collapses
+to a single dot-ramp row that fits short terminals, while higher
+values give 4 dot rows of vertical resolution per char-row.
+
+Compact form (`-H 1`):
+
+![bstat -i 1h -H 1: compact single-row sparkline mode on a 24-hour WMS log](doc/images/bstat_1h_H1.png)
+
+Taller form (`-H 5`) on the same data — the sparkline shape becomes
+much easier to read:
+
+![bstat -H 5: taller multi-row Braille sparklines for screens with vertical room](doc/images/bstat_H5.png)
+
+### `bchart` — single-metric vertical chart
+
+```sh
+bchart -i 10m -m reqs    wms-access-log
+bchart -i 10m -m ms      timeseries-access-log
+```
+
+Braille vertical chart, two buckets per character cell, levels 0-4
+per char-row. Latency varies more than request count and shows the
+encoding's vertical resolution:
+
+![bchart -m reqs: requests-per-bucket bar chart](doc/images/bchart_requests.png)
+![bchart -m ms: mean-latency bar chart over the same window](doc/images/bchart_latency.png)
+
+### `burls` — top URLs with query-string filtering
+
+```sh
+burls -L wms-access-log                       # discover query params
+burls    wms-access-log                       # full URL grouping
+burls -d bbox,time wms-access-log             # collapse noisy params
+burls -i wms-access-log                       # interactive: list, prompt, run
+```
+
+Per-service access logs share a path prefix (`/wms`, `/timeseries`
+…), so the query string is what distinguishes traffic. By default
+`burls` groups on the full URL — different parameter sets become
+separate rows. `-L` prints a frequency table of every distinct
+parameter name in the log; pick noisy ones (typically `bbox`,
+`time`, `latlon`) and pass them via `-d` to collapse otherwise
+identical entries. `-i` runs `-L`, prompts for a comma-separated
+drop-list on stdin, and re-runs the analysis with that filter.
+
+![burls -L: query-string parameter frequency table](doc/images/burls_list.png)
+![burls (full-URL grouping): GetMap variants vs GetCapabilities visible as separate rows](doc/images/burls_full.png)
+
+### `bstatus` — HTTP status code distribution
+
+```sh
+bstatus -i 1h wms-access-log
+```
+
+Aggregate code distribution + per-class breakdown. With `-i`,
+prepends a per-class Braille sparkline showing how each class
+(2xx / 3xx / 4xx / 5xx) moved over time:
+
+![bstatus -i 1h: per-class Braille sparkline + aggregate distribution](doc/images/bstatus.png)
 
 ### Legacy compatibility aliases
 
@@ -62,15 +139,18 @@ continue to work during a gradual rollout:
 | `bstat24`   | `bstat -i 1d`     |
 
 All six forward their arguments to `bstat`, so you can still pass
-`--ascii` / `-w` / a log file path. New scripts should prefer the
-`bstat -i X` form directly.
+`--ascii` / `-w` / `-H` / a log file path. New scripts should prefer
+the `bstat -i X` form directly.
 
 ### `--ascii` mode
 
-Pass `--ascii` to any `bstat*` invocation to render bars with `=`
-instead of Unicode eighth-blocks, and skip the sparkline footer.
-Useful for scripts that grep the output, or for terminals without
-reliable UTF-8 support.
+Pass `--ascii` to `bstat`, `bchart`, or `bstatus` to render with
+plain ASCII (`=` bars, `. : | #` sparkline ramp) instead of
+half-height Unicode and Braille. The sparkline footer collapses to
+a single dot-ramp row regardless of `-H`. Useful for scripts that
+grep the output, or for terminals without reliable UTF-8 support.
+
+![bstat --ascii: pure-ASCII layout for grep-friendly output](doc/images/bstat_ascii.png)
 
 The tools parse the SmartMet access-log format produced by
 `spine/AccessLogger.cpp`:
