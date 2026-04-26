@@ -73,6 +73,51 @@ def _flame_color(sym: str) -> int:
     return theme.attr(pair, curses.A_BOLD | curses.A_REVERSE)
 
 
+# ---- shared PID selector ---------------------------------------------------
+
+def draw_pid_selector(win, store, top: int, max_show: int = 9) -> int:
+    """Render a numbered list of smartmetd PIDs starting at row `top`.
+
+    Each row carries the index ([1]..[9] in red as the keyboard
+    shortcut), the PID, the detected role, and the full cmdline so the
+    operator can tell frontend from backend without having to know the
+    port. The currently-selected PID is drawn with reverse video.
+    Returns the first row index below the selector.
+    """
+    h, w = win.getmaxyx()
+    procs = store.proc_list()
+    if not procs:
+        return top
+    showing = procs[:max_show]
+    selected = store.proc_selected()
+    for i, info in enumerate(showing):
+        y = top + i
+        if y >= h - 1:
+            break
+        is_sel = (info.pid == selected)
+        # Selected row: reverse video across the whole line so the
+        # operator can see at a glance which process is being graphed.
+        sel_attr = curses.A_REVERSE | curses.A_BOLD if is_sel else 0
+        idx_attr = (curses.A_REVERSE | curses.A_BOLD if is_sel
+                    else theme.attr(theme.P_MNEMONIC,
+                                    curses.A_BOLD | curses.A_UNDERLINE))
+        # [N]
+        idx_str = f"[{i + 1}]"
+        safe_addstr(win, y, 0, idx_str, idx_attr)
+        # PID + role + cmdline, all in the row's base attribute so the
+        # selected highlight covers the whole line uniformly.
+        prefix = f" smartmetd[{info.pid}] {info.role:<9} "
+        avail = max(0, w - len(idx_str) - len(prefix) - 1)
+        cmdline = (info.cmdline or "")[:avail]
+        rest = prefix + cmdline
+        safe_addstr(win, y, len(idx_str), rest, sel_attr)
+        # Pad selected row to end so the reverse-video bar runs full-width.
+        used = len(idx_str) + len(rest)
+        if is_sel and used < w - 1:
+            safe_addstr(win, y, used, " " * (w - used - 1), sel_attr)
+    return top + len(showing)
+
+
 # ---- flamegraph tree builder + renderer ------------------------------------
 
 def _build_flame_tree(stacks) -> Dict[str, list]:
@@ -149,6 +194,12 @@ class ProcPanel(Panel):
         elif key in (ord("N"), ord("P")):
             i = pids.index(selected)
             store.proc_select(pids[(i - 1) % len(pids)])
+        elif ord("1") <= key <= ord("9"):
+            idx = key - ord("1")
+            if idx < len(pids):
+                store.proc_select(pids[idx])
+            else:
+                return False
         elif key == ord("r"):
             self._run_rollup(store)
         elif key == ord("f"):
@@ -214,7 +265,10 @@ class ProcPanel(Panel):
             store.proc_select(selected)
         info = next((p for p in procs if p.pid == selected), procs[0])
 
-        row = self._draw_header(win, info, len(procs))
+        # PID list at the very top: numbered, with each cmdline visible
+        # so frontend / backend / other can be picked apart at a glance.
+        sel_bottom = draw_pid_selector(win, store, top=0)
+        row = self._draw_header(win, info, len(procs), top=sel_bottom)
         row = self._draw_memory(win, info, row)
         row = self._draw_io(win, info, row)
         if store.perf_enabled:
@@ -223,7 +277,12 @@ class ProcPanel(Panel):
             row = self._draw_rollup(win, info, row)
         self._draw_footer(win, n_procs=len(procs), perf_enabled=store.perf_enabled)
 
-    def _draw_header(self, win, info: ProcInfo, n_procs: int) -> int:
+    def _draw_header(self, win, info: ProcInfo, n_procs: int,
+                     top: int = 0) -> int:
+        """Status line for the focused PID. The PID list above already
+        carries the cmdline + role, so this row is just live numbers
+        (uptime, threads) that wouldn't fit there.
+        """
         h, w = win.getmaxyx()
         latest = info.samples[-1] if info.samples else None
         threads = latest.threads if latest else 0
@@ -232,16 +291,12 @@ class ProcPanel(Panel):
             if info.started_at > 0 else "?"
         )
         header = (
-            f" Proc — smartmetd[{info.pid}]  role={info.role}  "
-            f"uptime={uptime}  threads={threads}  "
-            f"({n_procs} smartmetd PID{'s' if n_procs != 1 else ''})"
+            f" Proc — pid={info.pid}  uptime={uptime}  "
+            f"threads={threads}  ({n_procs} PID{'s' if n_procs != 1 else ''})"
         )
-        safe_addstr(win, 0, 0, header.ljust(w - 1),
+        safe_addstr(win, top, 0, header.ljust(w - 1),
                     theme.attr(theme.P_TAB_ACTIVE))
-        if info.cmdline:
-            safe_addstr(win, 1, 2, info.cmdline[:max(0, w - 4)],
-                        theme.attr(theme.P_DIM))
-        return 3
+        return top + 2
 
     def _section_divider(self, win, y: int, label: str) -> None:
         h, w = win.getmaxyx()

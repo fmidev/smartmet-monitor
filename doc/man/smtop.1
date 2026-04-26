@@ -168,7 +168,16 @@ Toggle histogram / status / API\-key sections in the URLs drill\-in.
 .BR n " / " N
 Next / previous
 .B smartmetd
-PID in the Proc panel.
+PID in the Proc and Flame panels.
+.TP
+.BR 1 " \- " 9
+Select the
+.B smartmetd
+PID at that index in the numbered selector at the top of the Proc
+and Flame panels. The selector lists every running
+.B smartmetd
+process with its PID, role and full command line so frontend and
+backend are distinguishable without knowing port numbers.
 .TP
 .BR m " / " b " / " i
 Toggle time spark mean\(<>p95 / size spark mean\(<>throughput / idle

@@ -30,7 +30,7 @@ from .. import theme
 from ..state.store import ProcInfo
 from ..widgets.bars import human_count, sparkline
 from .base import Panel, safe_addstr, write_label, write_row
-from .proc import _build_flame_tree, _flame_color
+from .proc import _build_flame_tree, _flame_color, draw_pid_selector
 
 
 # Preset record durations offered by the `s` selection overlay. Picked
@@ -170,6 +170,14 @@ class FlamePanel(Panel):
             if key == ord("N"):
                 store.proc_select(pids[(pids.index(selected) - 1) % len(pids)])
                 return True
+            # Direct selection by number — matches the [N] index shown
+            # in the top-of-panel PID selector. Only digits 1-9 fit on
+            # a row, so anything beyond the 9th PID needs n/N cycling.
+            if ord("1") <= key <= ord("9"):
+                idx = key - ord("1")
+                if idx < len(pids):
+                    store.proc_select(pids[idx])
+                    return True
 
         # `s` opens the record-duration overlay even when there's no
         # data yet — the operator may want to reduce overhead before
@@ -328,8 +336,11 @@ class FlamePanel(Panel):
             store.proc_select(selected)
         info = next((p for p in procs if p.pid == selected), procs[0])
 
-        self._draw_header(win, info, store, len(procs))
-        flame_bottom = self._draw_flame_section(win, store, info)
+        # PID selector at the very top so the operator can see all
+        # smartmetd PIDs and switch between them with a number key.
+        sel_bottom = draw_pid_selector(win, store, top=0)
+        self._draw_header(win, info, store, len(procs), sel_bottom)
+        flame_bottom = self._draw_flame_section(win, store, info, sel_bottom + 1)
         self._draw_top_symbols(win, store, info, flame_bottom)
         self._draw_footer(win, n_procs=len(procs))
         # Draw the modal overlay last so it sits on top of the flame.
@@ -357,36 +368,38 @@ class FlamePanel(Panel):
                     "* kernel.perf_event_paranoid > 2 and smtop wasn't run as root",
                     theme.attr(theme.P_DIM))
 
-    def _draw_header(self, win, info: ProcInfo, store, n_procs: int) -> None:
+    def _draw_header(self, win, info: ProcInfo, store, n_procs: int,
+                     row: int) -> None:
         h, w = win.getmaxyx()
         sample_count = store.perf_last_sample_count(info.pid)
         breadcrumb = " > ".join(self.zoom_path) if self.zoom_path else "(root)"
         header = (
-            f" Flame — smartmetd[{info.pid}]  {info.role}  "
-            f"status={store.perf_status}  last={sample_count}  "
-            f"zoom={breadcrumb}"
+            f" Flame — pid={info.pid}  status={store.perf_status}  "
+            f"last={sample_count}  zoom={breadcrumb}"
         )
-        safe_addstr(win, 0, 0, header.ljust(w - 1),
+        safe_addstr(win, row, 0, header.ljust(w - 1),
                     theme.attr(theme.P_TAB_ACTIVE))
 
-    def _draw_flame_section(self, win, store, info: ProcInfo) -> int:
-        """Render the flame tree. Returns the bottom row index it used so
-        the top-symbols list knows where to start."""
+    def _draw_flame_section(self, win, store, info: ProcInfo,
+                            top: int) -> int:
+        """Render the flame tree starting at row `top`. Returns the
+        bottom row index it used so the top-symbols list knows where
+        to start."""
         h, w = win.getmaxyx()
         # If a previous cycle failed, surface that in place of the flame.
         if store.perf_last_error:
-            self._draw_perf_error(win, 1, h - 2, store.perf_last_error)
+            self._draw_perf_error(win, top, h - 2, store.perf_last_error)
             self._last_frames = []
             self._last_root = {}
             return h - 2
         stacks = store.perf_recent_stacks(info.pid)
         if not stacks:
-            safe_addstr(win, 1, 2,
+            safe_addstr(win, top, 2,
                         "no stack samples yet — waiting for first perf cycle…",
                         theme.attr(theme.P_DIM))
             self._last_frames = []
             self._last_root = {}
-            return 2
+            return top + 1
         # Build the tree from the entire retained stack ring (the store
         # bounds it at 20000) so each rebuild reflects roughly the last
         # ~25-60 seconds of sampling. Slicing was a leftover from when
@@ -411,7 +424,7 @@ class FlamePanel(Panel):
             visible_root = full_root
 
         # Cap flame to half the screen so the symbol list always has room.
-        flame_top = 1
+        flame_top = top
         flame_max_y = max(flame_top + 2, h - 12)
         self._ensure_cursor()
         frames = _render_flame(

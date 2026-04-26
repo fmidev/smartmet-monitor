@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.5.6
+Version:        0.6.0
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,21 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.6.0-1
+- Flame and Proc panels now show a numbered PID selector at the very
+  top, one row per smartmetd process, displaying the PID, the
+  detected role and the FULL command line. Operators can tell
+  frontend from backend at a glance (the cmdline reveals which
+  config file each process is using) instead of having to know
+  port assignments. The currently-selected process is drawn with
+  reverse video.
+- Direct PID selection: keys 1-9 jump straight to the PID at that
+  index in the list (the [N] markers are highlighted red as the
+  shortcut). n/N still cycle. Beyond 9 PIDs (very unusual on a
+  smartmet host), n/N is the only way.
+- Drop the redundant cmdline-on-row-1 in the Proc panel since the
+  cmdline is now shown for every PID in the selector at the top.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.5.6-1
 - Live view: the embedded Plugins panel now defaults to the 5-minute
   window instead of 60s. The 60s window can only be filled from live

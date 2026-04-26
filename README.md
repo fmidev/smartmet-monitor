@@ -174,6 +174,7 @@ direction; the dedicated single-panel views below remain for sortable
 | `[` / `]`        | shrink / grow time window (1 / 5 / 15 / 60 min)     |
 | `h` / `t` / `y`  | toggle histogram / status / API-key sections in URLs drill-in |
 | `n` / `N`        | next / prev smartmetd PID (Proc and Flame panels)   |
+| `1` – `9`        | select smartmetd PID by index in the selector at the top of Proc / Flame |
 | `f`              | toggle inline flamegraph (Proc); also the Flame view mnemonic |
 | `↑↓←→` `Enter` `Esc/u` `0` | navigate / zoom in / zoom out / reset (Flame view) |
 | `m` / `b` / `i`  | toggle time spark / size spark / idle handlers (Graphs panel) |
