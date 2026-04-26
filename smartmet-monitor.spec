@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.7.6
+Version:        0.7.7
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,22 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.7-1
+- Caches and Services panels: horizontal bars now render with `▄`
+  (lower half block) instead of `█` (full block), so adjacent rows
+  of bars no longer fuse into one solid wall vertically. ASCII mode
+  uses `=` for the same effect. Sub-cell horizontal precision goes
+  from eighth-blocks to whole-cells, but the indicators these bars
+  represent (cache hit %, share-of-load) read fine at cell-level.
+- Graphs panel: tall layout. When there's enough room per plugin
+  (≥ 3 rows), each plugin's row expands into a multi-row block:
+  the name + numeric stats sit on the top row, two vertical Braille
+  charts (response time + response size) span all `per_plugin` rows
+  on the right. Each plugin's pattern is far more readable than
+  the previous one-row-per-plugin layout. With many plugins (e.g.
+  the Live composite's 22 sources) per_plugin drops to 1 and the
+  panel falls back to the compact single-row layout.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.6-1
 - Plugins panel: fix the cursor=-1 case in Live composite. The
   embedded panel passes default_cursor=-1 to suppress the highlight,

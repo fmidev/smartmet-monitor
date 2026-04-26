@@ -30,6 +30,14 @@ EIGHTH = " ▏▎▍▌▋▊▉█"      # 0/8 .. 8/8 — horizontal
 SPARK = " ▁▂▃▄▅▆▇█"        # 0..8 — vertical spark (eighth-block)
 FULL = "█"
 
+# Horizontal bars use a half-height glyph (lower-half block) so
+# stacked rows of bars (Caches, Services) don't visually merge into
+# one solid wall. The reduced sub-cell precision (one position per
+# cell instead of eight) is fine for the percentage-style indicators
+# these panels show.
+HBAR_FILL = "▄"
+HBAR_FILL_ASCII = "="
+
 # Unicode Braille pattern bit-to-dot mapping (verified against the
 # Unicode standard and btop's graph_symbols table):
 #   bit 0 = dot 1 (top-left)        bit 3 = dot 4 (top-right)
@@ -115,22 +123,23 @@ def downsample_avg(values: Sequence[float], target_count: int) -> List[float]:
 
 
 def hbar(value: float, maxval: float, width: int) -> str:
-    """Horizontal eighth-block bar of exactly `width` visual columns."""
+    """Horizontal half-height bar of exactly `width` visual columns.
+
+    Uses `▄` (lower-half block) by default — narrower vertically than
+    `█`, so stacked rows of bars in the Caches / Services panels don't
+    fuse into one solid wall. ASCII mode uses `=` for the same reason.
+    Sub-cell horizontal precision (the previous eighth-block ramps at
+    the right edge) is dropped: the indicators these bars represent
+    (cache hit %, share-of-load) read fine at cell-level precision.
+    """
     if width <= 0:
         return ""
     if maxval <= 0:
         return " " * width
     ratio = max(0.0, min(1.0, value / maxval))
-    eighths = int(round(ratio * width * 8))
-    full = eighths // 8
-    rem = eighths - full * 8
-    out = FULL * full
-    if rem > 0 and full < width:
-        out += EIGHTH[rem]
-        full += 1
-    if full < width:
-        out += " " * (width - full)
-    return out
+    cells = int(round(ratio * width))
+    fill = HBAR_FILL_ASCII if _ASCII else HBAR_FILL
+    return fill * cells + " " * (width - cells)
 
 
 # ---- vertical spark / chart ------------------------------------------------

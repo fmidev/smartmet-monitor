@@ -18,7 +18,9 @@ from typing import List, Optional, Tuple
 
 from .. import theme
 from ..state.store import HISTORY_MINUTES, HISTORY_SECONDS, SourceStats
-from ..widgets.bars import human_bytes, human_count, human_ms, sparkline
+from ..widgets.bars import (
+    human_bytes, human_count, human_ms, sparkline, vchart,
+)
 from .base import Panel, safe_addstr, write_row
 
 
@@ -311,37 +313,38 @@ class PluginsPanel(Panel):
             self._draw_footer(win)
             return
 
+        # Decide compact (1 row per plugin) vs tall (N rows per plugin)
+        # based on how much vertical room each plugin gets. Tall mode
+        # turns each plugin row into a multi-row vchart for both sparks
+        # — each plugin's pattern is much more readable, but only when
+        # there are few enough plugins that they fit. Cap tall height
+        # at 8 rows per plugin so a small plugin list doesn't waste
+        # the whole screen on one row.
         if rows:
-            # cursor < 0 means "no cursor highlight" (Live composite
-            # mode). Don't let it pull `scroll` negative, which would
-            # turn the slice rows[-1 : -1+body_h] into an empty slice
-            # and the panel into a blank pane below the header.
+            n_total = len(rows)
+            max_per_plugin = max(1, body_h // n_total)
+            per_plugin = min(max_per_plugin, 8) if max_per_plugin >= 3 else 1
+        else:
+            per_plugin = 1
+        plugins_per_screen = max(1, body_h // per_plugin)
+
+        if rows:
             if self.cursor >= 0:
                 if self.cursor >= len(rows):
                     self.cursor = len(rows) - 1
                 if self.cursor < self.scroll:
                     self.scroll = self.cursor
-                if self.cursor >= self.scroll + body_h:
-                    self.scroll = self.cursor - body_h + 1
-            # Always clamp scroll into [0, max_scroll] regardless of
-            # cursor — protects against any other path that left it
-            # in a weird state.
-            max_scroll = max(0, len(rows) - body_h)
+                if self.cursor >= self.scroll + plugins_per_screen:
+                    self.scroll = self.cursor - plugins_per_screen + 1
+            max_scroll = max(0, len(rows) - plugins_per_screen)
             self.scroll = max(0, min(self.scroll, max_scroll))
         else:
             self.scroll = 0
             if self.cursor >= 0:
                 self.cursor = 0
 
-        visible = rows[self.scroll : self.scroll + body_h]
+        visible = rows[self.scroll : self.scroll + plugins_per_screen]
 
-        # Pull `spark_samples` data points per row so each spark fills
-        # its column instead of being mostly zero-padding. Each row's
-        # spark is then scaled to its OWN max (not a column-wide max),
-        # which is essential here: a high-traffic plugin like wms can
-        # have 100x the request rate of a low-traffic one, and a
-        # column-wide max would crush every other plugin's spark to
-        # near-zero.
         time_series_cache: List[List[float]] = []
         size_series_cache: List[List[float]] = []
         for src, _ in visible:
@@ -352,12 +355,10 @@ class PluginsPanel(Panel):
                 time_series_cache.append(src.minute_series(self.time_metric, spark_samples))
                 size_series_cache.append(src.minute_series(self.size_metric, spark_samples))
 
-        # req/s normalisation: in second-mode, snap.count is over
-        # `span` seconds; in minute-mode, over `span` minutes.
         rps_divisor = (float(eff_span) if eff_resolution == "second"
                        else float(eff_span * 60))
         for i, (src, snap) in enumerate(visible):
-            y = body_top + i
+            y_top = body_top + i * per_plugin
             row_attr = curses.A_REVERSE if (self.scroll + i == self.cursor) else 0
             req_per_s = snap.count / rps_divisor if rps_divisor else 0.0
             mean_ms = snap.hist.mean()
@@ -376,23 +377,40 @@ class PluginsPanel(Panel):
                 (f"{err_pct:>{num_cols-1}.1f}%  ",
                  theme.err_color(err_pct)),
             ]
-            x = write_row(win, y, 0, cells, row_attr=row_attr)
+            x = write_row(win, y_top, 0, cells, row_attr=row_attr)
 
-            # maxval=0 → sparkline auto-scales to this row's own data,
-            # so every plugin's pattern stays visible regardless of
-            # absolute magnitude.
-            time_spark = sparkline(
-                time_series_cache[i], maxval=0.0, width=time_w
-            )
-            safe_addstr(win, y, x, time_spark,
-                        theme.attr(theme.P_WARN) | row_attr)
-            x += time_w + 2
-
-            size_spark = sparkline(
-                size_series_cache[i], maxval=0.0, width=size_w
-            )
-            safe_addstr(win, y, x, size_spark,
-                        theme.attr(theme.P_GOOD) | row_attr)
+            if per_plugin == 1:
+                # Compact: one Braille sparkline per metric.
+                time_spark = sparkline(
+                    time_series_cache[i], maxval=0.0, width=time_w
+                )
+                safe_addstr(win, y_top, x, time_spark,
+                            theme.attr(theme.P_WARN) | row_attr)
+                x += time_w + 2
+                size_spark = sparkline(
+                    size_series_cache[i], maxval=0.0, width=size_w
+                )
+                safe_addstr(win, y_top, x, size_spark,
+                            theme.attr(theme.P_GOOD) | row_attr)
+            else:
+                # Tall: vertical chart for each metric, occupying
+                # all `per_plugin` rows of this plugin's block. The
+                # numeric stats sit on the top row; the chart fills
+                # the rest of the right side.
+                time_lines = vchart(
+                    time_series_cache[i], per_plugin, width=time_w,
+                    maxval=0.0,
+                )
+                for j, line in enumerate(time_lines):
+                    safe_addstr(win, y_top + j, x, line,
+                                theme.attr(theme.P_WARN))
+                size_lines = vchart(
+                    size_series_cache[i], per_plugin, width=size_w,
+                    maxval=0.0,
+                )
+                for j, line in enumerate(size_lines):
+                    safe_addstr(win, y_top + j, x + time_w + 2, line,
+                                theme.attr(theme.P_GOOD))
 
         self._draw_footer(win)
 
