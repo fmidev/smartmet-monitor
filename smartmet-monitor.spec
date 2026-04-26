@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.26
-Release:        8%{?dist}.fmi
+Release:        9%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -112,6 +112,34 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.26-9.fmi
+- Cross-panel alert system. Detectors run against every metric
+  source (majflt, biolatency, runqlat, perfstat, netstats, perf
+  failures); when a threshold is met, an Alert is raised into a
+  central Store and surfaced everywhere at once:
+    * always-visible severity-coloured badge in the tab bar,
+    * blinking global "NEW ALERT" strip above the active panel
+      until the operator acknowledges with `!`,
+    * per-panel banner above the panel content when an alert
+      names that panel as the place to investigate (no
+      per-panel wiring — App carves a row above the panel
+      sub-window),
+    * `!` opens a modal overlay listing every active alert with
+      severity, age, suggested next panel, and the multi-line
+      "Detected / Likely causes / What to look at next" body
+      already used in the README.
+- Each alert carries a stable id, a docs_anchor pointing at the
+  matching README "Reading the live monitors" subsection, a
+  suggested_panel, and a suggested_action. Enter in the overlay
+  jumps to that panel AND dismisses; `d` dismisses without
+  jumping; Esc closes. Auto-GC drops alerts whose detector has
+  not refired for 60 s, so resolved problems disappear from the
+  UI without operator action.
+- README gains a "Cross-panel alerts" chapter that documents
+  the lifecycle (raised → refreshed → viewed → dismissed →
+  cleared), the UI surfaces, and a table of every detector id
+  shipping today.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.26-8.fmi
 - CPU efficiency in the Proc panel via `perf stat`. Records
   cycles, instructions, cache-references, cache-misses,

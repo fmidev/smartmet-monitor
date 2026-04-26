@@ -29,7 +29,7 @@ import shutil
 import time
 from typing import List, Optional, Tuple
 
-from . import profile_caps
+from . import detectors, profile_caps
 
 
 # A bucket line looks like: "         8 -> 15         : 173      |***...|"
@@ -176,6 +176,7 @@ async def biolat_loop(store, window_seconds: float = 5.0) -> None:
         buckets, unit = parse_biolatency(output)
         p50, p95, p99, total = percentiles_us(buckets, unit)
         store.biolat_record_sample(time.time(), p50, p95, p99, total)
+        detectors.detect_biolat_slow(store)
         if total > 0:
             iops = total / win_int
             store.biolat_status = (

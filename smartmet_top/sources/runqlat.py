@@ -35,7 +35,7 @@ import time
 from functools import lru_cache
 from typing import Optional, Tuple
 
-from . import profile_caps
+from . import detectors, profile_caps
 from .biolat import parse_biolatency, percentiles_us
 
 
@@ -105,4 +105,5 @@ async def runqlat_loop(store, window_seconds: float = 5.0) -> None:
         buckets, unit = parse_biolatency(output)
         p50, p95, p99, total = percentiles_us(buckets, unit)
         store.runqlat_record_sample(time.time(), p50, p95, p99, total)
+        detectors.detect_runqlat_stalls(store)
         store.runqlat_status = f"ok p95={p95}us p99={p99}us"

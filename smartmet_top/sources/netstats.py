@@ -26,6 +26,8 @@ import re
 import time
 from typing import Dict, List, Optional, Tuple
 
+from . import detectors
+
 
 def _read_text(path: str) -> str:
     with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -143,6 +145,8 @@ async def netstats_loop(store, interval: float = 2.0) -> None:
             orate = max(0, overflows - last_tcp[1]) / dt
             drate = max(0, drops - last_tcp[2]) / dt
             store.netstats_record_tcp(now, rrate, orate, drate)
+            detectors.detect_netstats_retrans(store)
+            detectors.detect_netstats_listen_drops(store)
             for iface, (rx, tx) in dev.items():
                 last_rx_tx = last_dev.get(iface)
                 if last_rx_tx is None:

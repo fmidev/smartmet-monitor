@@ -594,6 +594,72 @@ look at the on-CPU flame for stalls in the accept loop, then
 saturates, the URL panel ranks the bandwidth-heaviest endpoints
 that you may want to throttle or cache.
 
+### Cross-panel alerts
+
+smtop runs a small set of detectors against each metric source. When
+a detector's threshold is met, an `Alert` is raised into a central
+list that every panel reads on redraw. The result is a single
+operator-facing surface for "something is wrong somewhere", visible
+no matter which panel you happen to be on:
+
+- **Tab-bar badge**, top right of every screen. `⚠ N alert(s)`,
+  coloured by the highest severity present (red = `crit`, yellow =
+  `warn`, dim = `info`). Always visible.
+- **Global notification strip**, drawn in **bold blinking red /
+  yellow** above the active panel as soon as a *new* alert is
+  raised. Disappears the moment the operator presses `!` (which
+  acknowledges every active alert simultaneously). Shows the
+  highest-severity title plus a count of additional unviewed
+  alerts.
+- **Per-panel banner**, drawn just above the panel content when
+  an alert names this panel as the place to investigate. Same
+  one-row reverse-video bar regardless of which panel is showing
+  it — wired through the App, no per-panel code.
+- **Modal alerts overlay**, opened with `!` from any panel. Shows
+  every active alert with its severity, age, suggested next
+  panel, and the full multi-line "Detected / Likely causes /
+  What to look at next" body. Keys: `↑/↓` select, `Enter` jump
+  to the suggested panel and dismiss the alert in one stroke,
+  `d` dismiss without jumping, `Esc` close.
+
+#### Alert lifecycle
+
+1. **Raised** by a detector while its trouble pattern holds —
+   e.g. major page-fault rate has been > 100 / s for three
+   consecutive samples.
+2. **Refreshed** every cycle the condition still holds. The
+   alert's `raised_ts` is preserved; only `last_seen_ts`
+   advances. Re-firing detectors do not multiply alerts: the
+   same `id` is updated in place.
+3. **Viewed** when the operator opens the `!` overlay. The
+   global strip stops blinking; the alert stays in the badge.
+4. **Dismissed** by `Enter` or `d` in the overlay. The alert
+   goes silent (badge, banner, overlay all hide it) but the
+   detector keeps measuring.
+5. **Cleared** automatically when the detector stops re-firing
+   for 60 seconds (`STALE_AFTER_SECONDS` in `state/alerts.py`).
+   After that the next detector firing creates a fresh,
+   non-dismissed alert — so a recurring problem after a quiet
+   period re-attracts attention rather than staying silently
+   dismissed.
+
+#### Alerts that ship today
+
+| Detector id              | Severity | Suggested panel | What it means |
+|--------------------------|----------|-----------------|---------------|
+| `majflt-storm`           | warn     | Proc            | Major page faults > 100/s for ≥ 3 consecutive samples on a smartmetd PID. Working set lost from page cache. |
+| `biolat-slow`            | warn     | Proc            | Block-device p95 over 10 ms for ≥ 3 consecutive 5 s windows. Storage saturation or major-fault knock-on. |
+| `runqlat-stalls`         | warn     | Proc            | Run-queue p95 ≥ 1 ms for ≥ 3 windows. Scheduler-side latency, usually CFS throttling or noisy-neighbour VM. |
+| `perfstat-low-ipc`       | warn     | Flame           | IPC < 0.3 for ≥ 2 perf-stat cycles. CPU is stalling on memory or cross-core sync. |
+| `netstats-retrans`       | warn     | Proc            | TCP retransmits > 1/s for ≥ 3 cycles. Lossy network path or peer ring-buffer overflow. |
+| `netstats-listen-drops`  | crit     | Flame           | Listen-queue overflow / drops at any positive rate. The application is failing to accept connections fast enough. |
+| `perf-record-failed`     | warn     | Flame           | perf record returned a non-zero exit. Usually `perf_event_paranoid` or missing `linux-tools`. |
+
+Every `id` above doubles as a README anchor — the overlay lists
+the matching `doc/README.md#<id>` link so an operator unsure
+about a specific detector's threshold can jump straight to the
+"Reading the live monitors" entry that explains it.
+
 ### Memory model
 
 * Per-URL stats are kept as one exponential-bin histogram (40 bins,

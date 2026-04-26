@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from threading import RLock
 from typing import Deque, Dict, Iterable, List, Optional, Tuple
 
+from .alerts import Alert, STALE_AFTER_SECONDS
 from .histogram import Histogram
 
 # Mutable retention window for minute-bucketed history. Defaults to
@@ -522,6 +523,11 @@ class Store:
         self.perfstat_enabled: bool = False
         self.perfstat_status: str = "(perfstat sampler not started)"
         self.perfstat_last_error: str = ""
+        # Cross-panel alerts. Detectors in each source upsert into this
+        # dict by stable `id`; the UI (tab-bar badge, per-panel banner,
+        # `!`-overlay) reads from it on every redraw. See state/alerts.py
+        # for the full lifecycle description.
+        self.alerts: Dict[str, Alert] = {}
 
     def register_admin_host(self, host: str) -> None:
         with self._lock:
@@ -987,3 +993,98 @@ class Store:
     def perfstat_cache_miss_series(self) -> List[float]:
         with self._lock:
             return [s[3] for s in self.perfstat_samples]
+
+    # -- alerts (cross-panel) ----------------------------------------------
+
+    def upsert_alert(self, alert: Alert) -> None:
+        """Insert a new alert or refresh an existing one with the same id.
+
+        Re-firing detectors call this every cycle while their
+        condition holds. The dismissed flag is preserved on update so
+        the operator's "I saw it" choice sticks for the lifetime of
+        the alert. raised_ts is preserved on update; last_seen_ts is
+        always advanced.
+        """
+        with self._lock:
+            now = time.time()
+            existing = self.alerts.get(alert.id)
+            if existing is None:
+                if alert.raised_ts == 0.0:
+                    alert.raised_ts = now
+                alert.last_seen_ts = now
+                self.alerts[alert.id] = alert
+                return
+            existing.last_seen_ts = now
+            # Refresh the human-readable fields in case the title or
+            # detail carries live numbers (e.g. "{rate} faults/s").
+            existing.title = alert.title
+            existing.detail = alert.detail
+            existing.severity = alert.severity
+            existing.suggested_panel = alert.suggested_panel
+            existing.suggested_action = alert.suggested_action
+            existing.docs_anchor = alert.docs_anchor
+
+    def gc_alerts(self, now: Optional[float] = None) -> int:
+        """Drop alerts whose detector has not refired for STALE_AFTER_SECONDS.
+
+        Returns the number of alerts dropped. Called from the redraw
+        loop so stale alerts disappear from the UI naturally without a
+        dedicated background task.
+        """
+        if now is None:
+            now = time.time()
+        with self._lock:
+            stale = [aid for aid, a in self.alerts.items()
+                     if (now - a.last_seen_ts) > STALE_AFTER_SECONDS]
+            for aid in stale:
+                del self.alerts[aid]
+            return len(stale)
+
+    def alert_dismiss(self, alert_id: str) -> None:
+        with self._lock:
+            a = self.alerts.get(alert_id)
+            if a is not None:
+                a.dismissed = True
+
+    def alerts_active(self) -> List[Alert]:
+        """All alerts not yet dismissed, sorted by severity desc then age desc."""
+        with self._lock:
+            active = [a for a in self.alerts.values() if not a.dismissed]
+            active.sort(
+                key=lambda a: (-a.severity_rank(), -a.raised_ts)
+            )
+            return active
+
+    def alerts_for(self, panel_letter: str) -> List[Alert]:
+        """Active alerts whose `suggested_panel` matches this panel's
+        mnemonic. Used by the panel-banner helper on each redraw."""
+        with self._lock:
+            return [a for a in self.alerts.values()
+                    if not a.dismissed and a.suggested_panel == panel_letter]
+
+    def alerts_summary(self) -> Tuple[int, str]:
+        """(count, highest_severity) for the tab-bar badge.
+        highest_severity is '' when count is 0."""
+        with self._lock:
+            active = [a for a in self.alerts.values() if not a.dismissed]
+            if not active:
+                return 0, ""
+            top = max(active, key=lambda a: a.severity_rank())
+            return len(active), top.severity
+
+    def alerts_unviewed(self) -> List[Alert]:
+        """Alerts the operator has not yet acknowledged. The global
+        notification strip at the top of the screen reads from this
+        list; it disappears the moment the list is empty."""
+        with self._lock:
+            return [a for a in self.alerts.values()
+                    if not a.dismissed and not a.viewed]
+
+    def mark_alerts_viewed(self) -> None:
+        """Flip every active alert's `viewed` flag. Called by the app
+        when the operator opens the `!` overlay (acknowledgement of
+        existence) or dismisses the global strip with Esc."""
+        with self._lock:
+            for a in self.alerts.values():
+                if not a.dismissed:
+                    a.viewed = True

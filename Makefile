@@ -122,7 +122,27 @@ check:
 	    cx2 = parse_perf_stat_x("<not supported>,,cycles\n50,,instructions\n"); \
 	    assert cx2 == {"cycles":0,"instructions":50}, cx2; \
 	    ipc2, _, _ = derive_ratios(cx2); \
-	    assert ipc2 == 0.0'
+	    assert ipc2 == 0.0; \
+	    from smartmet_top.state.alerts import Alert; \
+	    from smartmet_top.state.store import Store; \
+	    from smartmet_top.panels.alerts_overlay import handle_alerts_key, _format_age; \
+	    st = Store(); \
+	    st.upsert_alert(Alert(id="t1", severity="warn", detector="t", title="A", detail="d", suggested_panel="p")); \
+	    st.upsert_alert(Alert(id="t2", severity="crit", detector="t", title="B", detail="d", suggested_panel="f")); \
+	    summary = st.alerts_summary(); \
+	    assert summary == (2, "crit"), summary; \
+	    active = st.alerts_active(); \
+	    assert [a.id for a in active] == ["t2", "t1"], [a.id for a in active]; \
+	    unviewed = st.alerts_unviewed(); \
+	    assert len(unviewed) == 2; \
+	    st.mark_alerts_viewed(); \
+	    assert st.alerts_unviewed() == []; \
+	    assert len(st.alerts_active()) == 2; \
+	    st.alert_dismiss("t1"); \
+	    assert [a.id for a in st.alerts_active()] == ["t2"]; \
+	    assert st.alerts_for("p") == []; \
+	    assert [a.id for a in st.alerts_for("f")] == ["t2"]; \
+	    assert _format_age(45) == "45s" and _format_age(120) == "2m" and _format_age(3700) == "1h"'
 	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
 	bash -n share/smartmet/bstat.sh
 	for t in $(BTOOLS) $(LEGACY); do bash -n bin/$$t; done

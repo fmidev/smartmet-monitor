@@ -33,7 +33,7 @@ import shutil
 import time
 from typing import Dict, Optional, Tuple
 
-from . import profile_caps
+from . import detectors, profile_caps
 
 
 # perf stat formats numbers with locale-dependent separators (commas
@@ -213,6 +213,7 @@ async def perfstat_loop(store, interval: float = 10.0,
         ipc, cm_rate, bm_rate = derive_ratios(counters)
         store.perfstat_record_sample(time.time(), pid, ipc, cm_rate, bm_rate,
                                      counters)
+        detectors.detect_perfstat_low_ipc(store)
         store.perfstat_status = (
             f"ok pid={pid} IPC={ipc:.2f} cache_miss={cm_rate*100:.1f}%"
         )

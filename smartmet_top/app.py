@@ -21,6 +21,7 @@ from .panels.plugins import PluginsPanel
 from .panels.proc import ProcPanel
 from .panels.services import ServicesPanel
 from .panels.urls import UrlsPanel
+from .panels.alerts_overlay import draw_alerts_overlay, handle_alerts_key
 from .views.admin import AdminView
 from .views.live import LiveView
 from .sources.adminapi import poll_all
@@ -81,6 +82,11 @@ class App:
         self.running = True
         self.last_error = ""
         self.toast: Optional[tuple] = None  # (expires_at, message, attr)
+        # Alerts overlay (`!` to open). State lives here rather than on
+        # any single Panel because the overlay is drawn on top of
+        # whichever panel happens to be active.
+        self._alerts_open: bool = False
+        self._alerts_cursor: int = 0
 
     @property
     def current_panel(self) -> Panel:
@@ -116,10 +122,25 @@ class App:
                             p.mnemonic_pos, base_attr, hot_attr)
             safe_addstr(stdscr, 1, x, " ", base_attr)
             x += 2  # one space gap between tabs
-        # right-aligned hint
-        hint = " ? help   q quit   Tab next "
+        # Right-aligned: alert badge + standard hint. Badge colours
+        # carry severity: red on crit, yellow on warn, dim otherwise.
+        # Always visible regardless of which panel is active so the
+        # operator notices a problem detected by another sampler
+        # without having to switch view.
+        n_alerts, top_sev = self.store.alerts_summary()
+        hint = " ? help   q quit   ! alerts   Tab next "
+        right_x = w - len(hint) - 2
+        if n_alerts > 0:
+            badge_attr = (curses.A_BOLD | (
+                theme.attr(theme.P_BAD) if top_sev == "crit"
+                else theme.attr(theme.P_WARN) if top_sev == "warn"
+                else theme.attr(theme.P_HEADER)))
+            badge = f" ⚠ {n_alerts} alert{'s' if n_alerts != 1 else ''} "
+            badge_x = right_x - len(badge)
+            if badge_x > x:
+                safe_addstr(stdscr, 1, badge_x, badge, badge_attr)
         if x + len(hint) < w:
-            safe_addstr(stdscr, 1, w - len(hint) - 2, hint, theme.attr(theme.P_DIM))
+            safe_addstr(stdscr, 1, right_x, hint, theme.attr(theme.P_DIM))
 
         # status line (or toast if one is active)
         p = self.current_panel
@@ -136,25 +157,112 @@ class App:
     def draw(self, stdscr) -> None:
         stdscr.erase()
         h, w = stdscr.getmaxyx()
+        # GC stale alerts each redraw so detectors that stopped firing
+        # do not leave dead entries cluttering the badge / overlay.
+        self.store.gc_alerts()
         self.draw_chrome(stdscr)
+
+        # Carve out room for the global notification strip and the
+        # per-panel banner BEFORE the panel sub-window. The panel
+        # itself does not need to know they are there.
+        panel_top = 2
+        unviewed = self.store.alerts_unviewed()
+        if unviewed:
+            self._draw_global_strip(stdscr, unviewed, panel_top)
+            panel_top += 1
+        active_panel = self.current_panel
+        panel_letter = getattr(active_panel, "hotkey", "")
+        panel_alerts = self.store.alerts_for(panel_letter) if panel_letter else []
+        if panel_alerts:
+            self._draw_panel_banner(stdscr, panel_alerts, panel_top)
+            panel_top += 1
 
         # panel content drawn into a sub-window so panels don't need to
         # reserve chrome rows themselves.
-        if h > 4 and w > 4:
+        if h > panel_top + 2 and w > 4:
             try:
-                sub = stdscr.derwin(h - 3, w - 1, 2, 0)
+                sub = stdscr.derwin(h - panel_top - 1, w - 1, panel_top, 0)
             except curses.error:
                 sub = stdscr
             try:
                 self.current_panel.draw(sub, self.store)
             except Exception as e:
                 self.last_error = f"{type(e).__name__}: {e}"
-                safe_addstr(stdscr, 2, 2, f"draw error: {self.last_error}")
+                safe_addstr(stdscr, panel_top, 2,
+                            f"draw error: {self.last_error}")
+
+        # Modal overlay sits on top of everything.
+        if self._alerts_open:
+            self._alerts_cursor = draw_alerts_overlay(
+                stdscr, self.store, self._alerts_cursor
+            )
 
         stdscr.noutrefresh()
         curses.doupdate()
 
+    def _draw_global_strip(self, stdscr, unviewed, row: int) -> None:
+        """Bright row above the panel announcing brand-new alerts.
+        Visible regardless of which panel is active. Vanishes the
+        moment every active alert has been viewed."""
+        h, w = stdscr.getmaxyx()
+        # Pick the highest-severity unviewed alert as the headline.
+        head = max(unviewed, key=lambda a: a.severity_rank())
+        sev_color = (theme.P_BAD if head.severity == "crit"
+                     else theme.P_WARN if head.severity == "warn"
+                     else theme.P_HEADER)
+        attr = theme.attr(sev_color, curses.A_BOLD | curses.A_BLINK)
+        n = len(unviewed)
+        msg = (f" ⚠ NEW ALERT — {head.title} "
+               f"  press '!' to view "
+               f"{('(+' + str(n - 1) + ' more)') if n > 1 else ''}")
+        safe_addstr(stdscr, row, 0, msg.ljust(w - 1), attr)
+
+    def _close_alerts_overlay(self) -> None:
+        self._alerts_open = False
+        self._alerts_cursor = 0
+
+    def _draw_panel_banner(self, stdscr, alerts, row: int) -> None:
+        """One-row banner above the panel content when an alert
+        suggests THIS panel as the place to investigate. Same per
+        panel — no special wiring per Panel subclass."""
+        h, w = stdscr.getmaxyx()
+        a = alerts[0]
+        sev_color = (theme.P_BAD if a.severity == "crit"
+                     else theme.P_WARN if a.severity == "warn"
+                     else theme.P_HEADER)
+        attr = theme.attr(sev_color, curses.A_REVERSE | curses.A_BOLD)
+        msg = f" [!] {a.title} — {a.suggested_action or 'investigate here'}  press '!' for full alert "
+        safe_addstr(stdscr, row, 0, msg.ljust(w - 1), attr)
+
     def handle_key(self, key: int) -> None:
+        # The alerts overlay, when open, owns every keystroke: arrows,
+        # Enter (jump), d (dismiss), Esc (close). We route to it first
+        # so the underlying panel never sees the keys.
+        if self._alerts_open:
+            self._alerts_cursor, action = handle_alerts_key(
+                key, self.store, self._alerts_cursor
+            )
+            if action == "close":
+                self._close_alerts_overlay()
+            elif action and action.startswith("jump:"):
+                target = action.split(":", 1)[1]
+                self._close_alerts_overlay()
+                for i, panel in enumerate(self.panels):
+                    if panel.hotkey == target:
+                        self.show_help = False
+                        self.panel_idx = i
+                        break
+            return
+
+        # `!` opens the overlay. Mark every active alert "viewed" the
+        # moment we open — the global blinking strip should disappear
+        # the instant the operator acknowledges.
+        if key == ord("!"):
+            self._alerts_open = True
+            self._alerts_cursor = 0
+            self.store.mark_alerts_viewed()
+            return
+
         # Delegate to the active panel first. Panels return True if they
         # consumed the key. Anything they don't consume falls through to
         # the global keys below.

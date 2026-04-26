@@ -19,6 +19,8 @@ import re
 import time
 from typing import Dict, List, Optional
 
+from . import detectors
+
 
 SMARTMETD_COMM = "smartmetd"
 PROC_POLL_INTERVAL = 2.0     # status/statm/io are O(1) — safe at 2 s
@@ -268,6 +270,13 @@ async def proc_loop(store) -> None:
                 fds=pids[pid].get("fds", 0),
                 majflt=majflt,
             )
+            # Run the page-fault-storm detector against the freshly
+            # updated sample ring. Detectors live in detectors.py so
+            # the threshold rationale is co-located with every other
+            # alert's threshold.
+            info = store.procs.get(pid)
+            if info is not None:
+                detectors.detect_majflt_storm(store, info, list(info.samples))
         if do_fd:
             last_fd = now
 
