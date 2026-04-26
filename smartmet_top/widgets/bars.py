@@ -28,17 +28,40 @@ from typing import List, Sequence
 
 EIGHTH = " ▏▎▍▌▋▊▉█"      # 0/8 .. 8/8 — horizontal
 SPARK = " ▁▂▃▄▅▆▇█"        # 0..8 — vertical spark (eighth-block)
-FULL = "█"                  # solid block, no inter-dot whitespace
-LEFT_HALF = "▌"             # left column solid, right column empty
-RIGHT_HALF = "▐"            # right column solid, left column empty
-BLANK_BRAILLE = chr(0x2800)
+FULL = "█"
 
-# Braille dot bits per Unicode standard. Counted from the bottom of the
-# cell up; level k means "k dots filled from the bottom":
-#   left  column: 0x08, 0x04, 0x02, 0x01
-#   right column: 0x80, 0x40, 0x20, 0x10
-_LEFT_LEVELS = (0x00, 0x08, 0x0C, 0x0E, 0x0F)
-_RIGHT_LEVELS = (0x00, 0x80, 0xC0, 0xE0, 0xF0)
+# Unicode Braille pattern bit-to-dot mapping (verified against the
+# Unicode standard and btop's graph_symbols table):
+#   bit 0 = dot 1 (top-left)        bit 3 = dot 4 (top-right)
+#   bit 1 = dot 2                   bit 4 = dot 5
+#   bit 2 = dot 3                   bit 5 = dot 6
+#   bit 6 = dot 7 (bottom-left)     bit 7 = dot 8 (bottom-right)
+#
+# Level k means "k dots filled from the bottom of that column":
+#   LEFT  level 1 = dot 7 (bit 6)              = 0x40
+#         level 2 = dots 7, 3 (bits 6, 2)      = 0x44
+#         level 3 = dots 7, 3, 2 (bits 6, 2, 1)= 0x46
+#         level 4 = dots 7, 3, 2, 1            = 0x47
+#   RIGHT level 1 = dot 8 (bit 7)              = 0x80
+#         level 2 = dots 8, 6 (bits 7, 5)      = 0xA0
+#         level 3 = dots 8, 6, 5 (bits 7, 5, 4)= 0xB0
+#         level 4 = dots 8, 6, 5, 4            = 0xB8
+#
+# An earlier version of this table had bit 3 mapped to dot 7 instead
+# of dot 4, which put partial-fill dots at the top-right of the cell
+# instead of the bottom-left — every partial cell rendered the wrong
+# silhouette, which is what manifested as "vertical gaps" in the
+# bar charts.
+_LEFT_LEVELS = (0x00, 0x40, 0x44, 0x46, 0x47)
+_RIGHT_LEVELS = (0x00, 0x80, 0xA0, 0xB0, 0xB8)
+
+# btop uses a regular space for fully-empty cells rather than the
+# Braille blank (U+2800) — fonts that substitute a fallback glyph for
+# missing Braille codepoints render those substitutes at slightly
+# different vertical extents than the populated Braille cells, which
+# manifests as visible vertical alignment artifacts. Using plain " "
+# keeps "empty" pixel-identical across the row.
+EMPTY_CELL = " "
 
 _ASCII = False
 
@@ -54,24 +77,14 @@ def is_ascii() -> bool:
 
 
 def _braille_cell(left_lev: int, right_lev: int) -> str:
-    """Pick the densest glyph available for the (left, right) levels.
+    """Render one Braille cell for (left_lev, right_lev) in [0..4].
 
-    A "full" Braille character (⣿) renders as four dots stacked with
-    visible whitespace between each pair, which makes a fully-filled
-    bar look like a column of dots rather than a solid bar. For the
-    saturating levels we fall through to solid blocks instead:
-        (4, 4) → █  (no inter-dot gaps anywhere)
-        (4, 0) → ▌  (left column solid, right empty)
-        (0, 4) → ▐  (right column solid, left empty)
-    Partial fills (1-3) keep the Braille rendering since blocks can't
-    represent sub-cell vertical resolution.
+    Same encoding btop uses (its `braille_up` table at index
+    left*5 + right). Fully-empty cells render as a regular space
+    rather than the Braille blank — see EMPTY_CELL above.
     """
-    if left_lev == 4 and right_lev == 4:
-        return FULL
-    if left_lev == 4 and right_lev == 0:
-        return LEFT_HALF
-    if left_lev == 0 and right_lev == 4:
-        return RIGHT_HALF
+    if left_lev == 0 and right_lev == 0:
+        return EMPTY_CELL
     return chr(0x2800 + _LEFT_LEVELS[left_lev] + _RIGHT_LEVELS[right_lev])
 
 
@@ -132,7 +145,7 @@ def _spark_braille(values: Sequence[float], maxval: float, width: int) -> str:
     if maxval <= 0:
         m = max(vals) if vals else 0.0
         if m <= 0:
-            return BLANK_BRAILLE * width
+            return EMPTY_CELL * width
         maxval = m
     levels = [max(0, min(4, int(round(v / maxval * 4)))) for v in vals]
     return "".join(_braille_cell(levels[i], levels[i + 1])
@@ -190,7 +203,7 @@ def _chart_braille(values: Sequence[float], height: int,
                    maxval: float, width: int = 0) -> List[str]:
     vals = list(values)
     if not vals:
-        return [BLANK_BRAILLE * max(0, width)] * height
+        return [EMPTY_CELL * max(0, width)] * height
     if width <= 0:
         # Each rendered char is a transition (vals[i], vals[i+1]); n
         # values produce n-1 chars. Prepend a leading 0 so the first
@@ -206,7 +219,7 @@ def _chart_braille(values: Sequence[float], height: int,
     if maxval <= 0:
         maxval = max(vals) if vals else 0.0
     if maxval <= 0:
-        return [BLANK_BRAILLE * width] * height
+        return [EMPTY_CELL * width] * height
     total_dots = 4 * height
     levels = [
         max(0, min(total_dots, int(round(v / maxval * total_dots))))

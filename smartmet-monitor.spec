@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.7.0
+Version:        0.7.1
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,27 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.1-1
+- Fix the Braille bit-to-dot mapping. The previous tables had bit 3
+  mapped to dot 7 (bottom-left) and bit 6 mapped to dot 4 (top-right),
+  which is the OPPOSITE of the Unicode standard. Every partial Braille
+  cell rendered the wrong silhouette — "level 1 left" placed a single
+  dot at the *top-right* of the cell instead of the bottom-left.
+  Fully-filled cells (4,4) happened to render correctly because all
+  bits get set regardless of which position they map to, which is why
+  the bug went unnoticed during early testing of constant-maximum
+  data but appeared as "vertical gaps" once partial fills became
+  common.
+- The cell encoding is now verified to match btop's graph_symbols
+  table exactly (all 25 (left, right) combinations); a unit-style
+  comparison runs in `make check`. Bar charts and sparklines now
+  render the silhouette they should: dots fill from the bottom of
+  each column upward, transitions read as smooth rising/falling
+  ramps, and fully-filled bars look continuous.
+- Drop the experimental block-character fallback (0.7.0). It was
+  introduced to compensate for the incorrect Braille rendering and
+  is unnecessary now that the Braille itself is correct.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.0-1
 - Three issues you flagged in one testing session:
 

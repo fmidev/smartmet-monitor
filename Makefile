@@ -69,6 +69,11 @@ check:
 	           smartmet_top.widgets.bars, \
 	           smartmet_top.views.live, smartmet_top.views.admin, \
 	           smartmet_top.views.composite; \
+	    from smartmet_top.widgets.bars import _braille_cell; \
+	    btop = [" ","⢀","⢠","⢰","⢸","⡀","⣀","⣠","⣰","⣸", \
+	            "⡄","⣄","⣤","⣴","⣼","⡆","⣆","⣦","⣶","⣾", \
+	            "⡇","⣇","⣧","⣷","⣿"]; \
+	    [_braille_cell(l,r)==btop[l*5+r] or (_ for _ in ()).throw(SystemExit(f"Braille (l={l},r={r}): {_braille_cell(l,r)!r}!={btop[l*5+r]!r}")) for l in range(5) for r in range(5)]; \
 	    from smartmet_top.widgets.bars import sparkline, vchart, set_ascii; \
 	    set_ascii(False); assert sparkline([0,1,2,3,4,5,6,7,8], width=4); \
 	    set_ascii(True);  assert sparkline([0,1,2,3,4,5,6,7,8], width=4); \
