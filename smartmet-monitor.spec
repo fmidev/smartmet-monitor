@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.7.5
+Version:        0.7.6
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,28 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.6-1
+- Plugins panel: fix the cursor=-1 case in Live composite. The
+  embedded panel passes default_cursor=-1 to suppress the highlight,
+  but the cursor-keeps-the-scroll-in-view math wasn't checking for
+  this sentinel and pulled `scroll` negative — Python slicing
+  rows[-1 : -1+body_h] on a 22-row list evaluates to rows[21:18],
+  i.e. empty. Result: the Live panel showed no plugin rows even
+  with hide_idle=False. Now the cursor adjustment is gated on
+  `cursor >= 0` and `scroll` is clamped into [0, max_scroll]
+  regardless.
+- Default --history-minutes raised from 60 to 1440 (24 hours).
+  ~17 MB extra retention on a 20-plugin host. The Overview chart
+  now has a day's worth of data to draw on by default; for less
+  memory use --history-minutes 60 (or smaller), for a week
+  --history-minutes 10080.
+- Overview panel: average-downsamples the full retained history
+  into chart_w + 1 samples so the WHOLE retention is visible
+  compressed to fit the terminal, rather than only the last
+  chart_w + 1 minutes. New widgets/bars.downsample_avg() helper.
+  Title and time-axis labels now read "(last 24h)", "-12h" etc.
+  when history is in hours.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.5-1
 - Live composite: the embedded Plugins panel now passes
   hide_idle=False, so every tailed plugin appears in the row list

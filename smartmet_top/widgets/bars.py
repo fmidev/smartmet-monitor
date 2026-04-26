@@ -90,6 +90,30 @@ def _braille_cell(left_lev: int, right_lev: int) -> str:
 
 # ---- horizontal eighth-block bar (mode-independent) ------------------------
 
+def downsample_avg(values: Sequence[float], target_count: int) -> List[float]:
+    """Average-downsample `values` to exactly `target_count` samples.
+
+    If `values` is already shorter than `target_count`, returned as-is.
+    Otherwise consecutive chunks of size `len(values)/target_count` are
+    averaged into single samples — used by the Overview panel to make
+    24h of per-minute history fit a terminal-width chart without
+    silently truncating older data.
+    """
+    n = len(values)
+    if target_count <= 0 or n <= target_count:
+        return list(values)
+    out: List[float] = []
+    bucket = n / target_count
+    for i in range(target_count):
+        start = int(i * bucket)
+        end = int((i + 1) * bucket)
+        if end <= start:
+            end = start + 1
+        chunk = values[start:end]
+        out.append(sum(chunk) / len(chunk) if chunk else 0.0)
+    return out
+
+
 def hbar(value: float, maxval: float, width: int) -> str:
     """Horizontal eighth-block bar of exactly `width` visual columns."""
     if width <= 0:

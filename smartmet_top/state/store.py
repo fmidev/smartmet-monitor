@@ -18,13 +18,12 @@ from typing import Deque, Dict, Iterable, List, Optional, Tuple
 
 from .histogram import Histogram
 
-# Mutable retention window for minute-bucketed history. Defaults to 60
-# minutes; raise via `set_history_minutes()` (the smtop CLI exposes this
-# as `--history-minutes`) to keep multiple hours, a day or a week of
-# data — useful with `--include-rotated`. Memory grows roughly linearly:
-# ~600 B per source per minute × 20 sources ≈ 12 KB per minute, so 24h
-# ≈ 17 MB and 7 days ≈ 120 MB.
-HISTORY_MINUTES = 60
+# Mutable retention window for minute-bucketed history. Defaults to
+# 24 hours; raise via `set_history_minutes()` (the smtop CLI exposes
+# this as `--history-minutes`) to keep a week. Memory grows roughly
+# linearly: ~600 B per source per minute × 20 sources ≈ 12 KB per
+# minute, so 24 h ≈ 17 MB and 7 days ≈ 120 MB.
+HISTORY_MINUTES = 1440
 
 
 def set_history_minutes(n: int) -> None:

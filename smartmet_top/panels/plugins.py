@@ -312,14 +312,26 @@ class PluginsPanel(Panel):
             return
 
         if rows:
-            if self.cursor >= len(rows):
-                self.cursor = len(rows) - 1
-            if self.cursor < self.scroll:
-                self.scroll = self.cursor
-            if self.cursor >= self.scroll + body_h:
-                self.scroll = self.cursor - body_h + 1
+            # cursor < 0 means "no cursor highlight" (Live composite
+            # mode). Don't let it pull `scroll` negative, which would
+            # turn the slice rows[-1 : -1+body_h] into an empty slice
+            # and the panel into a blank pane below the header.
+            if self.cursor >= 0:
+                if self.cursor >= len(rows):
+                    self.cursor = len(rows) - 1
+                if self.cursor < self.scroll:
+                    self.scroll = self.cursor
+                if self.cursor >= self.scroll + body_h:
+                    self.scroll = self.cursor - body_h + 1
+            # Always clamp scroll into [0, max_scroll] regardless of
+            # cursor — protects against any other path that left it
+            # in a weird state.
+            max_scroll = max(0, len(rows) - body_h)
+            self.scroll = max(0, min(self.scroll, max_scroll))
         else:
-            self.cursor = 0; self.scroll = 0
+            self.scroll = 0
+            if self.cursor >= 0:
+                self.cursor = 0
 
         visible = rows[self.scroll : self.scroll + body_h]
 

@@ -68,12 +68,12 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
              "data instead of pruning it back to 60 minutes.",
     )
     p.add_argument(
-        "--history-minutes", type=int, default=60, metavar="N",
-        help="Per-minute history retention. Default 60 minutes. Raise "
-             "to keep multiple hours, a day (1440) or a week (10080) "
-             "of bucketed history visible in the panels. Memory grows "
-             "roughly linearly: ~12 KB per minute on a 20-plugin host, "
-             "so 24h ≈ 17 MB and 7 days ≈ 120 MB.",
+        "--history-minutes", type=int, default=1440, metavar="N",
+        help="Per-minute history retention. Default 1440 minutes "
+             "(24 hours). Raise to 10080 for a full week, lower for "
+             "less memory on very tight hosts. Memory grows roughly "
+             "linearly: ~12 KB per minute on a 20-plugin host, so "
+             "24 h ≈ 17 MB and 7 days ≈ 120 MB.",
     )
     p.add_argument(
         "--ascii", action="store_true",
@@ -127,8 +127,7 @@ def main(argv=None) -> int:
 
     if args.ascii:
         set_ascii(True)
-    if args.history_minutes != 60:
-        set_history_minutes(args.history_minutes)
+    set_history_minutes(args.history_minutes)
 
     # Without log files and admin URLs the access-log panels stay empty,
     # but the Proc panel still works against any local smartmetd process.
