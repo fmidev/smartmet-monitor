@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import curses
+import time
 
 from .. import theme
-from ..state.store import HISTORY_MINUTES
+# Import the module rather than the constant so we read the *current*
+# HISTORY_MINUTES — set_history_minutes() at startup modifies the
+# module attribute, but `from .store import HISTORY_MINUTES` would
+# bind the panel's local name to the value at import time and never
+# update.
+from ..state import store as _store
 from ..widgets.bars import (
     downsample_avg, hbar, human_bytes, human_count, human_ms, sparkline, vchart,
 )
@@ -90,7 +96,7 @@ class OverviewPanel(Panel):
             return  # too cramped to render anything useful
         per_chart = chart_region // chart_count
         chart_h = max(2, per_chart - 2)  # leave 1 title row + 1 spacer
-        history = max(2, HISTORY_MINUTES)
+        history = max(2, _store.HISTORY_MINUTES)
         # The chart can show `chart_w + 1` samples (one per spark cell
         # plus the overlap point). Average-downsample the full retained
         # history into that many buckets so the WHOLE history is always
@@ -118,6 +124,12 @@ class OverviewPanel(Panel):
             span_label = f"{history // 60}h" if history % 60 == 0 else f"{history}m"
         else:
             span_label = f"{history}m"
+        # Compute clock-time labels for the chart x-axis. The chart's
+        # right edge is "now" and the left edge is "now - history".
+        now_ts = time.time()
+        right_ts = now_ts
+        left_ts = now_ts - history * 60
+        mid_ts = now_ts - history * 30  # half the history
         for chart_idx, (title, series, color) in enumerate(charts):
             top = row + chart_idx * per_chart
             maxv = max(series) if series else 0
@@ -151,11 +163,15 @@ class OverviewPanel(Panel):
             if chart_idx == chart_count - 1:
                 axis_row = top + 1 + chart_h
                 if axis_row < h - 1:
-                    left_label = f"-{span_label}"
-                    if history >= 1440 and history % 60 == 0:
-                        mid_label = f"-{history // 120}h"
-                    else:
-                        mid_label = f"-{history // 2}m"
+                    # Clock-time axis: HH:MM at the left edge, midpoint
+                    # and right edge of the chart. Anchored to local
+                    # time so they line up with what the operator sees
+                    # when looking at SmartMet log timestamps.
+                    fmt = lambda t: time.strftime("%H:%M",
+                                                  time.localtime(t))
+                    left_label = fmt(left_ts)
+                    mid_label = fmt(mid_ts)
+                    right_label = fmt(right_ts)
                     axis_left = 2 + label_w
                     safe_addstr(win, axis_row, axis_left, left_label,
                                 theme.attr(theme.P_DIM))
@@ -164,5 +180,5 @@ class OverviewPanel(Panel):
                                     axis_left + chart_w // 2 - len(mid_label) // 2,
                                     mid_label, theme.attr(theme.P_DIM))
                     safe_addstr(win, axis_row,
-                                axis_left + chart_w - len("now"),
-                                "now", theme.attr(theme.P_DIM))
+                                axis_left + chart_w - len(right_label),
+                                right_label, theme.attr(theme.P_DIM))

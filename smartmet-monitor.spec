@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.7.7
+Version:        0.7.8
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,24 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.8-1
+- Fix the "title says 'last 60 min' but data spans 24 hours" bug.
+  Both the Overview and Plugins panels were doing
+  `from ..state.store import HISTORY_MINUTES`, which binds the
+  panel's local name at import time and never updates when
+  `set_history_minutes()` is called. Switched to
+  `from ..state import store as _store` and read
+  `_store.HISTORY_MINUTES` dynamically. Same fix applied to
+  HISTORY_SECONDS in the Plugins panel.
+- Overview panel: time axis now shows clock-time HH:MM labels
+  at the left, midpoint and right edges of each chart instead
+  of relative offsets. Anchored to local time so axis labels
+  match the SmartMet log timestamps.
+- Graphs panel: added a shared HH:MM time axis row at the bottom
+  of the panel under both the response-time and response-size
+  spark columns. Uses HH:MM:SS for sub-minute (60s) windows so
+  the labels remain meaningful at second resolution.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.7-1
 - Caches and Services panels: horizontal bars now render with `▄`
   (lower half block) instead of `█` (full block), so adjacent rows

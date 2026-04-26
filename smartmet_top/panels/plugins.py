@@ -14,10 +14,15 @@ size and bytes/sec throughput with `b`.
 from __future__ import annotations
 
 import curses
+import time
 from typing import List, Optional, Tuple
 
 from .. import theme
-from ..state.store import HISTORY_MINUTES, HISTORY_SECONDS, SourceStats
+# Import the module rather than the constants so live changes from
+# `set_history_minutes()` are picked up. `from .store import X` would
+# bind the panel's local name at import time and never update.
+from ..state import store as _store
+from ..state.store import SourceStats
 from ..widgets.bars import (
     human_bytes, human_count, human_ms, sparkline, vchart,
 )
@@ -286,11 +291,16 @@ class PluginsPanel(Panel):
         # is filled instead of leaving 80% of the bar as zero-padding.
         # The column header advertises the actual span being drawn.
         if eff_resolution == "second":
-            spark_samples = min(spark_w + 1, HISTORY_SECONDS)
-            spark_span_label = f"{spark_samples - 1}s"
+            spark_samples = min(spark_w + 1, _store.HISTORY_SECONDS)
+            spark_span_seconds = spark_samples - 1
+            spark_span_label = f"{spark_span_seconds}s"
         else:
-            spark_samples = min(spark_w + 1, HISTORY_MINUTES)
-            spark_span_label = f"{spark_samples - 1}m"
+            spark_samples = min(spark_w + 1, _store.HISTORY_MINUTES)
+            spark_span_seconds = (spark_samples - 1) * 60
+            if spark_samples - 1 >= 60 and (spark_samples - 1) % 60 == 0:
+                spark_span_label = f"{(spark_samples - 1) // 60}h"
+            else:
+                spark_span_label = f"{spark_samples - 1}m"
         time_hdr = f"resp-{time_label} ({spark_span_label})"
         size_hdr = (f"resp-bytes/s ({spark_span_label})" if self.size_metric == "bytes"
                     else f"resp-size ({spark_span_label})")
@@ -308,7 +318,10 @@ class PluginsPanel(Panel):
         safe_addstr(win, 3, 0, "─" * (w - 1), theme.attr(theme.P_DIM))
 
         body_top = 4
-        body_h = h - body_top - 1
+        # Reserve one row at the bottom of the body for a shared time
+        # axis (HH:MM clock labels under the spark columns).
+        axis_h = 1
+        body_h = h - body_top - 1 - axis_h
         if body_h <= 0:
             self._draw_footer(win)
             return
@@ -412,7 +425,57 @@ class PluginsPanel(Panel):
                     safe_addstr(win, y_top + j, x + time_w + 2, line,
                                 theme.attr(theme.P_GOOD))
 
+        # Shared time axis under the spark columns: HH:MM at the left
+        # edge, midpoint and right edge of each spark, anchored to
+        # local clock time so axis labels match the timestamps in the
+        # underlying access logs.
+        axis_row = body_top + body_h
+        if axis_row < h - 1 and visible:
+            now_ts = time.time()
+            right_ts = now_ts
+            left_ts = now_ts - spark_span_seconds
+            mid_ts = now_ts - spark_span_seconds / 2
+            fmt = (lambda t: time.strftime("%H:%M:%S", time.localtime(t))
+                   if eff_resolution == "second" and spark_span_seconds < 60
+                   else lambda t: time.strftime("%H:%M", time.localtime(t)))
+            left_label = fmt(left_ts)
+            mid_label = fmt(mid_ts)
+            right_label = fmt(right_ts)
+            # First spark column starts at the x where the rendering
+            # loop placed it (after the header cells); we recover it
+            # by reusing the same write_row positions on a dummy
+            # cell row. Easier: take the last visible row's `x`
+            # value (we stored it in the loop). For simplicity, we
+            # recompute it from the column widths used above.
+            x_chart = (name_col + 1
+                       + (num_cols + 1) * 3
+                       + (num_cols + 1) + 1)
+            # Layout: time chart [x_chart .. x_chart+time_w]
+            #         gap (2 cols)
+            #         size chart [.. + size_w]
+            attr_dim = theme.attr(theme.P_DIM)
+            self._draw_axis_for_chart(win, axis_row, x_chart, time_w,
+                                      left_label, mid_label, right_label,
+                                      attr_dim)
+            self._draw_axis_for_chart(win, axis_row,
+                                      x_chart + time_w + 2, size_w,
+                                      left_label, mid_label, right_label,
+                                      attr_dim)
+
         self._draw_footer(win)
+
+    def _draw_axis_for_chart(self, win, y: int, x: int, width: int,
+                             left_label: str, mid_label: str,
+                             right_label: str, attr: int) -> None:
+        """Place left/mid/right HH:MM labels under one spark column."""
+        if width < len(left_label) + len(right_label) + 1:
+            return  # too narrow, skip
+        safe_addstr(win, y, x, left_label, attr)
+        if width >= 30:
+            mid_x = x + width // 2 - len(mid_label) // 2
+            safe_addstr(win, y, mid_x, mid_label, attr)
+        safe_addstr(win, y, x + width - len(right_label),
+                    right_label, attr)
 
     def _draw_footer(self, win) -> None:
         h, w = win.getmaxyx()
