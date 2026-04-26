@@ -149,9 +149,11 @@ class ServicesPanel(Panel):
                               theme.attr(theme.P_ACCENT)))
             cells += [
                 (f"{handler[:40]:<40} ", 0),
-                (f"{m1:>8.1f} ", 0),
-                (f"{m60:>8.1f} ", 0),
-                (f"{d24:>10.1f} ", 0),
+                # req/min, req/h, req/d are integer counts upstream;
+                # the .1f formatting was just noise.
+                (f"{int(m1):>8d} ", 0),
+                (f"{int(m60):>8d} ", 0),
+                (f"{int(d24):>10d} ", 0),
                 (f"{human_ms(avg):>8}  ", theme.latency_color(avg)),
                 (hbar(m1, mx1, bar_w), theme.attr(theme.P_SPARK)),
                 ("  ", 0),

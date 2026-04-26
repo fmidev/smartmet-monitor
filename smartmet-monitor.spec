@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.6.0
+Version:        0.6.1
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,15 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.6.1-1
+- Services panel (and the Health composite that embeds it): the
+  req/min, req/h and req/d columns are integer counts upstream from
+  the admin plugin, so render them as integers. Previously the
+  one-decimal formatting added a trailing ".0" to every value, which
+  was visual noise without conveying any extra information. The
+  CSV/JSON export already used the floats unchanged so this is a
+  display-only change.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.6.0-1
 - Flame and Proc panels now show a numbered PID selector at the very
   top, one row per smartmetd process, displaying the PID, the
