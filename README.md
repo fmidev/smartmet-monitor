@@ -134,8 +134,7 @@ bkeys -n 20 -s mb  wms-access-log          # top 20 by bandwidth
 
 Per-API-key aggregate stats (request count, mean latency, total
 megabytes) with a horizontal half-height bar scaled to the top
-key. Sort key chosen with `-s`. No screenshot in the repository
-because the output reveals customer API keys verbatim.
+key. Sort key chosen with `-s`.
 
 ### Legacy compatibility aliases
 
@@ -286,8 +285,7 @@ direction; the dedicated single-panel views below remain for sortable
     ![Logs panel: per-source tab bar with the focused log's tail bottom-anchored below](doc/images/monitor_logs.png)
 
 12. Api**k**eys — per-API-key aggregate stats; Enter drills into the
-    key to see top URLs it calls. *(No screenshot — would reveal
-    customer API keys.)*
+    key to see top URLs it calls.
 
 ### Data sources
 
