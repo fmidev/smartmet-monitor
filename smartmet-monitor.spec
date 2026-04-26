@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.5.3
+Version:        0.5.4
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,17 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.5.4-1
+- Braille graphs (sparkline + vchart) now use overlapping pairs, the
+  same trick btop's graphs use: each character's right column equals
+  the next character's left column, so adjacent cells share a data
+  point and the graph reads as a continuous shape rather than a
+  sequence of stepped pairs. The previous non-overlap encoding
+  produced visible gaps and zigzags at every other character
+  boundary; you flagged those as suspicious. The trade is that
+  width=W now displays W+1 samples instead of 2*W, but visual
+  smoothness is the right priority for a live dashboard.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.5.3-1
 - Flame view: pressing `s` now opens a centered modal overlay
   listing six preset perf record durations (1, 3, 5, 10, 20, 30

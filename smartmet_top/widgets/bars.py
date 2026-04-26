@@ -2,10 +2,16 @@
 
 Default rendering uses Braille (U+2800..U+28FF), which packs 2×4 dots
 per cell, giving 2× horizontal density and 4× vertical resolution
-compared to the eighth-block trick btop calls "block_up". Each Braille
-character encodes two consecutive data points stacked side-by-side, so
-a `width=W` graph displays `2W` samples — callers still pass width as
-visual columns and don't need to know which mode is active.
+compared to the eighth-block trick btop calls "block_up".
+
+Each Braille character encodes a *transition* between two consecutive
+samples — left column = previous value, right column = current value.
+Adjacent characters share a data point (right of `char[i]` is the same
+as left of `char[i+1]`), so the graph reads as a continuous line/bar
+instead of a sequence of stepped pairs. This means a `width=W` graph
+displays `W + 1` samples rather than `2*W`; the trade is half the
+horizontal density for a graph that actually looks smooth. btop uses
+the same overlap trick.
 
 Horizontal bars (`hbar`) stay on eighth-blocks because horizontally an
 eighth-block has 8 sub-cell positions, while a Braille cell only has 2
@@ -94,35 +100,39 @@ def _spark_eighth(values: Sequence[float], maxval: float, width: int) -> str:
 def _spark_braille(values: Sequence[float], maxval: float, width: int) -> str:
     if width <= 0:
         return ""
-    target = 2 * width
+    # Overlapping pairs: `width` chars need `width + 1` data points,
+    # so each char's right column equals the next char's left column
+    # and the rendered graph stays continuous.
+    n_values = width + 1
     vals = list(values)
-    if len(vals) > target:
-        vals = vals[-target:]
-    elif len(vals) < target:
-        vals = [0.0] * (target - len(vals)) + vals
+    if len(vals) > n_values:
+        vals = vals[-n_values:]
+    elif len(vals) < n_values:
+        vals = [0.0] * (n_values - len(vals)) + vals
     if maxval <= 0:
         m = max(vals) if vals else 0.0
         if m <= 0:
             return BLANK_BRAILLE * width
         maxval = m
-    chars = []
-    for i in range(0, target, 2):
-        lv = max(0, min(4, int(round(vals[i] / maxval * 4))))
-        rv = max(0, min(4, int(round(vals[i + 1] / maxval * 4))))
-        chars.append(_braille_cell(lv, rv))
-    return "".join(chars)
+    levels = [max(0, min(4, int(round(v / maxval * 4)))) for v in vals]
+    return "".join(_braille_cell(levels[i], levels[i + 1])
+                   for i in range(width))
 
 
 def sparkline(values: Sequence[float], maxval: float = 0.0, width: int = 0) -> str:
     """Single-row spark line of `width` visual chars.
 
-    In Braille mode each char encodes two values, so a `width=W` spark
-    spans `2W` samples of history. In --ascii mode it falls back to one
-    eighth-block char per value.
+    In Braille mode adjacent chars share a data point (overlapping
+    pairs), so a `width=W` spark needs `W + 1` samples and renders as
+    a continuous line. In --ascii mode it falls back to one eighth-block
+    char per value.
     """
     if width <= 0:
         n = len(list(values))
-        width = n if _ASCII else (n + 1) // 2
+        # Braille: one char per (prev, curr) pair → width = n-1 ; but
+        # the chart prepends a leading 0 if needed, so width = n is
+        # also fine and keeps the visual width predictable.
+        width = n if _ASCII else max(0, n - 1)
     if _ASCII:
         return _spark_eighth(values, maxval, width)
     return _spark_braille(values, maxval, width)
@@ -162,15 +172,17 @@ def _chart_braille(values: Sequence[float], height: int,
     if not vals:
         return [BLANK_BRAILLE * max(0, width)] * height
     if width <= 0:
-        if len(vals) % 2 == 1:
-            vals.append(0.0)
-        width = len(vals) // 2
+        # Each rendered char is a transition (vals[i], vals[i+1]); n
+        # values produce n-1 chars. Prepend a leading 0 so the first
+        # rendered char ramps up from baseline cleanly.
+        vals = [0.0] + vals
+        width = len(vals) - 1
     else:
-        target = 2 * width
-        if len(vals) > target:
-            vals = vals[-target:]
-        elif len(vals) < target:
-            vals = [0.0] * (target - len(vals)) + vals
+        n_values = width + 1
+        if len(vals) > n_values:
+            vals = vals[-n_values:]
+        elif len(vals) < n_values:
+            vals = [0.0] * (n_values - len(vals)) + vals
     if maxval <= 0:
         maxval = max(vals) if vals else 0.0
     if maxval <= 0:
@@ -184,9 +196,9 @@ def _chart_braille(values: Sequence[float], height: int,
     for r in range(height):  # 0 = top
         bottom_offset = 4 * (height - 1 - r)
         chars = []
-        for c in range(0, len(vals), 2):
-            lv = max(0, min(4, levels[c] - bottom_offset))
-            rv = max(0, min(4, levels[c + 1] - bottom_offset))
+        for i in range(width):
+            lv = max(0, min(4, levels[i] - bottom_offset))
+            rv = max(0, min(4, levels[i + 1] - bottom_offset))
             chars.append(_braille_cell(lv, rv))
         rows.append("".join(chars))
     return rows
