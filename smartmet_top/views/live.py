@@ -38,8 +38,13 @@ class LiveView(CompositeView):
         # embedded Plugins panel — a "selected" indicator is misleading
         # in the display-only Live composite where the operator can't
         # actually select anything from this view.
+        # default_window_idx=4 (60m) is wider than the dedicated Graphs
+        # panel's default — Live is meant to show "what's happening on
+        # this host overall" so plugins whose last activity was 10-60
+        # minutes ago should still appear; the 5m default crushed the
+        # row list down to only the most recently active plugin.
         self._regions = [
-            ("plugins", PluginsPanel(default_window_idx=2, default_cursor=-1)),
+            ("plugins", PluginsPanel(default_window_idx=4, default_cursor=-1)),
             ("urls", UrlsPanel()),
         ]
 

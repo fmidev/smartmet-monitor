@@ -14,7 +14,8 @@ class LogsPanel(Panel):
     help_text = (
         "Live `tail -F` over every tailed access log, merged into "
         "one stream. Each line is prefixed with [<plugin>] so the "
-        "source is visible. / filters, End jumps to newest."
+        "source is visible. n/N cycle the filter through plugins, "
+        "/ types an arbitrary substring filter, End jumps to live."
     )
 
     def __init__(self):
@@ -53,9 +54,44 @@ class LogsPanel(Panel):
         elif key in (curses.KEY_HOME, ord("g")):
             self.scroll = 10_000_000
             self.follow = False
+        elif key == ord("n"):
+            self._cycle_source(store, +1)
+        elif key == ord("N"):
+            self._cycle_source(store, -1)
         else:
             return False
         return True
+
+    def _cycle_source(self, store, delta: int) -> None:
+        """Cycle the filter through the tailed source labels — quicker
+        than typing each plugin's name, and bypasses the issue of one
+        busy plugin dominating the merged stream."""
+        sources = [s.label for s in store.snapshot_sources()]
+        if not sources:
+            return
+        # An empty filter means "no source narrowing"; we put it as a
+        # virtual entry at index 0 so the cycle visits "all" too.
+        choices = [""] + sources
+        # Match the bracketed prefix used in record_raw_line.
+        current = self.filter
+        bracketed = f"[{current}]" if current and not current.startswith("[") else current
+        try:
+            idx = choices.index(current)
+        except ValueError:
+            try:
+                # Operator may have typed a bare plugin name; treat that
+                # as the same selection.
+                idx = choices.index(bracketed.strip("[]"))
+            except ValueError:
+                idx = 0
+        new_idx = (idx + delta) % len(choices)
+        chosen = choices[new_idx]
+        # Use the bracketed form so the filter matches the line prefix
+        # exactly — `/wms` would also match URLs that happen to contain
+        # "wms" in the path, but `[wms]` only matches the source.
+        self.filter = f"[{chosen}]" if chosen else ""
+        self.scroll = 0
+        self.follow = True
 
     def draw(self, win, store):
         h, w = win.getmaxyx()
@@ -63,9 +99,9 @@ class LogsPanel(Panel):
         hdr = (
             f" Logs — tail -F across {n_sources} log file"
             f"{'s' if n_sources != 1 else ''}  "
-            f"filter:{self.filter or '<none>'}  "
+            f"filter:{self.filter or '<all>'}  "
             f"{'FOLLOW' if self.follow else 'scrolled'}  "
-            "(/ filters by [plugin] or substring, End jumps to live)"
+            "(n/N cycle source, / type filter, End → live)"
         )
         safe_addstr(win, 0, 0, hdr.ljust(w - 1),
                     theme.attr(theme.P_TAB_ACTIVE))

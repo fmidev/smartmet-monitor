@@ -401,8 +401,14 @@ class Store:
         # auto-detected endpoint availability & role per host
         self.available_what: Dict[str, set] = {}
         self.host_role: Dict[str, str] = {}  # "frontend", "backend", or "unknown"
-        # recent log lines (raw) for the Logs panel
-        self.recent_lines: Deque[str] = deque(maxlen=2000)
+        # Recent log lines (raw, with [plugin] prefix) for the Logs
+        # panel. The buffer is sized for production hosts where one
+        # plugin (typically wms) can dominate write rate by 100x — at
+        # 2000 lines a 250 req/s plugin crowded out every other plugin
+        # within ~8 seconds. 20000 keeps ~80 seconds of dense traffic
+        # visible, so other plugins' lines are reliably interleaved
+        # for the operator to find with `/` or n/N source cycling.
+        self.recent_lines: Deque[str] = deque(maxlen=20000)
         # status: data source health
         self.logtail_status: str = "(starting)"
         self.admin_status: Dict[str, str] = {}

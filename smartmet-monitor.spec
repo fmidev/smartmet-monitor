@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.7.3
+Version:        0.7.4
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,27 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.4-1
+- Live composite: bump the embedded Plugins panel's default window
+  from 5m to 60m. The previous 5m window crushed the row list down
+  to whichever plugin had the most recent activity (often just
+  `textgen`); 60m surfaces every plugin that has had any activity
+  in the last hour, which is what the Live overview is for. The
+  dedicated Graphs panel still defaults to 60s for live monitoring.
+- Logs panel: bump the recent-lines ring from 2000 to 20000.
+  On a busy production host one plugin (typically wms at ~250
+  req/s) used to crowd out every other plugin's lines from the
+  buffer within ~8 seconds, so the panel effectively showed
+  one-plugin output. 20000 keeps ~80 seconds of dense traffic
+  visible, so other plugins' lines are reliably interleaved.
+- Logs panel: add `n` / `N` keys to cycle the filter through the
+  tailed plugin labels (uses the bracketed `[plugin]` form so it
+  doesn't accidentally match URLs containing the same substring).
+  Cycle includes a virtual "all" entry so the operator can clear
+  the filter by cycling. Esc still clears it directly. The header
+  reads "filter:<all>" instead of "filter:<none>" when no filter
+  is active, to be consistent with the cycle-through-all UX.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.3-1
 - Per-plugin sparks in Plugins/Live panels now scale to each row's
   own data range, not a column-wide max. The previous shared max
