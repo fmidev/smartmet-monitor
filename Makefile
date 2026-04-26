@@ -74,6 +74,8 @@ check:
 	            "⡄","⣄","⣤","⣴","⣼","⡆","⣆","⣦","⣶","⣾", \
 	            "⡇","⣇","⣧","⣷","⣿"]; \
 	    [_braille_cell(l,r)==btop[l*5+r] or (_ for _ in ()).throw(SystemExit(f"Braille (l={l},r={r}): {_braille_cell(l,r)!r}!={btop[l*5+r]!r}")) for l in range(5) for r in range(5)]; \
+	    from smartmet_top.sources.logparse import parse_iso; \
+	    assert parse_iso("2026-04-25T19:57:49,567645") == parse_iso("2026-04-25T19:57:49.567645"), "parse_iso must accept SmartMet`s comma decimal separator"; \
 	    from smartmet_top.widgets.bars import sparkline, vchart, set_ascii; \
 	    set_ascii(False); assert sparkline([0,1,2,3,4,5,6,7,8], width=4); \
 	    set_ascii(True);  assert sparkline([0,1,2,3,4,5,6,7,8], width=4); \

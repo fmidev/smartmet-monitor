@@ -32,9 +32,20 @@ _LINE_RE = re.compile(
 
 
 def parse_iso(s: str) -> float:
-    """Parse an ISO-8601 local timestamp like '2026-04-23T07:00:00.125' to epoch."""
-    # fromisoformat in 3.9 accepts 'YYYY-MM-DDTHH:MM:SS[.ffffff]'
-    # but SmartMet logs use fractional seconds with 3 digits; that's fine.
+    """Parse an ISO-8601 local timestamp to epoch.
+
+    SmartMet's AccessLogger emits the fractional second with a COMMA
+    decimal separator (`2026-04-25T19:57:49,567645`). Python's
+    `datetime.fromisoformat` only accepted dot before 3.11, so we
+    normalise here. The bug this fixes: on RHEL 8 (Python 3.9, the
+    target build) the ValueError fell through to `time.time()`,
+    which meant every replayed line got the *current* wall-clock
+    instant as its timestamp — they all crowded into a single
+    minute bucket and the Overview / Graphs panels looked like the
+    last 60 minutes were empty.
+    """
+    if "," in s:
+        s = s.replace(",", ".", 1)
     try:
         dt = datetime.fromisoformat(s)
     except ValueError:

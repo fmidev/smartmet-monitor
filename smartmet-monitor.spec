@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.7.1
+Version:        0.7.2
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,21 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.2-1
+- parse_iso: handle SmartMet's comma decimal separator. The
+  AccessLogger emits timestamps like `2026-04-25T19:57:49,567645`,
+  but Python <3.11's `datetime.fromisoformat` only accepts dot
+  separators, so on the RHEL 8 build (Python 3.9) every replayed
+  line hit the ValueError branch and fell back to `time.time()`.
+  Result: every replayed request got assigned the current wall-clock
+  instant, all crowded into one minute bucket, and the Overview /
+  Graphs panels looked like the last 60 minutes were empty even
+  with --replay. Now we normalise the comma to a dot before
+  parsing, so the timestamp from the log line is used.
+- make check: assert parse_iso parses the comma form identically
+  to the dot form, so a future regression on this would fail the
+  build.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.1-1
 - Fix the Braille bit-to-dot mapping. The previous tables had bit 3
   mapped to dot 7 (bottom-left) and bit 6 mapped to dot 4 (top-right),
