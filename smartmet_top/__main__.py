@@ -89,7 +89,11 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
              "and a live flamegraph. Adds ~10%% CPU overhead to the "
              "target during the recording second of each cycle. "
              "Requires perf installed and either root or "
-             "kernel.perf_event_paranoid <= 2.",
+             "kernel.perf_event_paranoid <= 2. "
+             "Also auto-starts the off-CPU sampler — press 'o' in the "
+             "Flame view to switch between on-CPU and off-CPU "
+             "flamegraphs (off-CPU needs bcc-tools / offcputime-bpfcc; "
+             "the panel surfaces an install hint when missing).",
     )
     p.add_argument(
         "--perf-interval", type=float, default=10.0, metavar="SEC",

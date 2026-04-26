@@ -121,16 +121,32 @@ def draw_pid_selector(win, store, top: int, max_show: int = 9) -> int:
 # ---- flamegraph tree builder + renderer ------------------------------------
 
 def _build_flame_tree(stacks) -> Dict[str, list]:
-    """{symbol: [count, children_dict]} — root → leaf accumulation."""
+    """{symbol: [count, children_dict]} — root → leaf accumulation.
+
+    Each item in `stacks` may be either a bare frame tuple (counted as
+    1 sample, the on-CPU case) or a `(frame_tuple, weight)` 2-tuple
+    where the weight is added instead of 1 (the off-CPU case, where
+    weight = microseconds spent blocked). The shape is detected per
+    item — calling code does not need to know which branch will fire.
+    """
     root: Dict[str, list] = {}
-    for stack in stacks:
+    for item in stacks:
+        # (stack, weight) form: a 2-tuple whose first element is itself
+        # a tuple of frames and second element a number. Anything else
+        # is interpreted as a plain frame tuple.
+        if (isinstance(item, tuple) and len(item) == 2
+                and isinstance(item[0], tuple)
+                and isinstance(item[1], (int, float))):
+            stack, weight = item
+        else:
+            stack, weight = item, 1
         node = root
         for sym in stack:
             entry = node.get(sym)
             if entry is None:
                 entry = [0, {}]
                 node[sym] = entry
-            entry[0] += 1
+            entry[0] += weight
             node = entry[1]
     return root
 

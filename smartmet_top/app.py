@@ -26,6 +26,7 @@ from .views.live import LiveView
 from .sources.adminapi import poll_all
 from .sources.logtail import bulk_load, tail_many
 from .sources.perftop import perf_loop
+from .sources.offcpu import offcpu_loop
 from .sources.proc import proc_loop
 from .state.store import Store
 
@@ -259,6 +260,15 @@ class App:
             tasks.append(asyncio.create_task(
                 perf_loop(self.store, self.perf_interval,
                           self.perf_record_seconds)
+            ))
+            # Off-CPU sampler runs alongside the on-CPU perf sampler so
+            # the Flame view's `o` toggle has data to switch into. The
+            # loop probes its backend internally and exits cleanly with
+            # an install hint in offcpu_status if neither bcc-tools nor
+            # the perf fallback is available — no overhead in that case.
+            tasks.append(asyncio.create_task(
+                offcpu_loop(self.store, self.perf_interval,
+                            self.perf_record_seconds)
             ))
 
         last_draw = 0.0

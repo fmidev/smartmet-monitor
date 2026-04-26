@@ -309,6 +309,30 @@ class PerfData:
 
 
 @dataclass
+class OffCpuData:
+    """Aggregated off-CPU samples for one PID.
+
+    Different from PerfData: each entry in `recent_stacks` is a
+    (stack, microseconds) pair rather than a bare stack, because
+    off-CPU profiling weights stacks by *time spent blocked* rather
+    than sample-count. The flame view multiplies counts by these
+    weights when building the tree.
+
+    Bounded at 4000 entries (vs 20 000 for on-CPU): off-CPU output is
+    aggregated by the bcc tool already, so a single recording yields
+    one entry per unique (thread, stack), typically dozens not
+    thousands. 4000 holds many recording cycles without churn.
+    """
+
+    pid: int
+    recent_stacks: Deque[Tuple[Tuple[str, ...], int]] = field(
+        default_factory=lambda: deque(maxlen=4000)
+    )
+    last_sample_ts: float = 0.0
+    last_total_us: int = 0
+
+
+@dataclass
 class ProcInfo:
     """Static metadata + ring of samples + last on-demand smaps_rollup."""
 
@@ -447,6 +471,16 @@ class Store:
         # view's `s`-keyed selection overlay; perf_loop reads it on
         # each iteration so changes take effect on the next cycle.
         self.perf_record_seconds: int = 3
+        # Off-CPU profiling state — populated when the off-CPU loop is
+        # running. Probed lazily; if no backend (bcc-tools / perf-fallback)
+        # is available, offcpu_enabled stays False and offcpu_status
+        # carries the install hint to display in the Flame view.
+        self.offcpu_data: Dict[int, OffCpuData] = {}
+        self.offcpu_enabled: bool = False
+        self.offcpu_status: str = "(off-CPU sampler not started)"
+        self.offcpu_last_error: str = ""
+        self.offcpu_target_pid: Optional[int] = None
+        self.offcpu_backend: str = ""  # 'bcc' | 'perf' | ''
 
     def register_admin_host(self, host: str) -> None:
         with self._lock:
@@ -784,3 +818,40 @@ class Store:
         with self._lock:
             pd = self.perfdata.get(pid)
             return pd.last_sample_count if pd else 0
+
+    # -- off-CPU data -------------------------------------------------------
+
+    def offcpu_record_samples(
+        self, pid: int, ts: float,
+        stacks_with_us: Iterable[Tuple[Tuple[str, ...], int]],
+    ) -> None:
+        """Append a batch of (stack, microseconds) pairs to the off-CPU
+        ring for `pid`. Each call corresponds to one recording cycle of
+        offcputime-bpfcc."""
+        with self._lock:
+            od = self.offcpu_data.get(pid)
+            if od is None:
+                od = OffCpuData(pid=pid)
+                self.offcpu_data[pid] = od
+            total = 0
+            for stack, us in stacks_with_us:
+                if not stack or us <= 0:
+                    continue
+                od.recent_stacks.append((stack, us))
+                total += us
+            od.last_sample_ts = ts
+            od.last_total_us = total
+
+    def offcpu_recent_stacks(
+        self, pid: int,
+    ) -> List[Tuple[Tuple[str, ...], int]]:
+        with self._lock:
+            od = self.offcpu_data.get(pid)
+            if od is None:
+                return []
+            return list(od.recent_stacks)
+
+    def offcpu_last_total_us(self, pid: int) -> int:
+        with self._lock:
+            od = self.offcpu_data.get(pid)
+            return od.last_total_us if od else 0

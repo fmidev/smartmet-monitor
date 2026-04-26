@@ -234,6 +234,18 @@ direction; the dedicated single-panel views below remain for sortable
    restarting smtop. The lower portion of the screen carries the
    perf-top symbol list so nothing is wasted on shallow stacks.
 
+   Press **`o`** to toggle between the on-CPU flamegraph (default)
+   and a parallel **off-CPU** flamegraph that shows where threads
+   are blocked: futex / mutex waits, I/O, sleeps. Off-CPU stacks
+   come from `bcc-tools`' `offcputime-bpfcc -p PID -f SECS`,
+   weighted by microseconds-blocked per stack. The Flame view
+   surfaces an install hint inline when `bcc-tools` is missing
+   (`sudo dnf install bcc-tools` on RHEL 8 / Fedora). The "Top
+   blocked-on functions" list at the bottom of the panel
+   replaces the on-CPU top-symbols list when in this mode. This
+   is the canonical answer to "the request is slow but on-CPU
+   shows nothing".
+
    ![Flame view: live flamegraph for smartmetd plus perf-top symbol list](doc/images/monitor_flame.png)
 
 **Single-panel views**:

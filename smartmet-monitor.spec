@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.26
-Release:        2%{?dist}.fmi
+Release:        3%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -33,6 +33,17 @@ Requires:       gawk
 # panel still works for memory/IO. Operators who need flamegraphs are
 # expected to dnf install perf separately.
 Recommends:     perf
+# bcc-tools provides offcputime-bpfcc, biolatency-bpfcc and friends
+# used by the off-CPU profiler in the Flame view (toggle with `o`)
+# and the planned block-I/O / lock-contention panels. RHEL 8 ships
+# bcc-tools in the base repos; on Fedora / RHEL 10+ it lives in
+# bcc-tools too. The Flame view detects the tool at runtime and
+# renders an install hint when it is missing.
+Recommends:     bcc-tools
+# bpftrace is the scripting alternative used for futex / lock-wait
+# stack traces. Optional; the off-CPU view falls back to bcc-tools
+# alone when bpftrace is missing.
+Recommends:     bpftrace
 
 %description
 Two companion tools for operating a SmartMet Server:
@@ -101,6 +112,31 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.26-3.fmi
+- Off-CPU flamegraph in the Flame view. Press `o` while the panel
+  is open to switch between the existing on-CPU flamegraph and a
+  new off-CPU one weighted by microseconds-blocked per stack.
+  Stacks come from bcc-tools' `offcputime-bpfcc -p PID -f SECS`,
+  parsed in folded form so the same flamegraph renderer can build
+  the tree from (stack, weight) pairs. Identifies threads
+  parked on futex / mutex waits, sleeping on I/O, etc. — the
+  classic answer to "the request is slow but on-CPU shows
+  nothing".
+- The bottom of the Flame view now shows a "Top blocked-on
+  functions" list when in off-CPU mode, summing leaf-symbol
+  microseconds across the retained stack ring. On-CPU mode keeps
+  its existing top-symbols + sparkline list.
+- Capability detection added in
+  smartmet_top/sources/profile_caps.py: probes for perf, the
+  sched_switch tracepoint, offcputime-bpfcc, biolatency-bpfcc,
+  and bpftrace, all cached and side-effect-free. Off-CPU loop
+  picks bcc by preference, falls back to perf, falls back to a
+  panel install hint if neither is available.
+- Spec gains Recommends: bcc-tools and Recommends: bpftrace
+  alongside the existing Recommends: perf. None are hard requires
+  — the off-CPU view degrades gracefully and the rest of the
+  smtop / bstat-family functionality is unaffected.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.26-2.fmi
 - Rename the Braille-chart height option from -H back to -h across
   bstat, bchart and bstatus. Lowercase is the conventional case for

@@ -83,7 +83,14 @@ check:
 	    set_ascii(True);  assert sparkline([0,1,2,3,4,5,6,7,8], width=4); \
 	    set_ascii(False); assert len(vchart([0,1,2,3,4,5,6,7,8], 3)) == 3; \
 	    from smartmet_top.sources.perftop import parse_perf_script; \
-	    assert parse_perf_script("smartmetd 1 [0] 1.0:    99 cycles:\n    deadbeef foo+0x0 (lib.so)\n\n")[0] == ("foo",)'
+	    assert parse_perf_script("smartmetd 1 [0] 1.0:    99 cycles:\n    deadbeef foo+0x0 (lib.so)\n\n")[0] == ("foo",); \
+	    from smartmet_top.sources.offcpu import parse_offcputime_folded; \
+	    folded = parse_offcputime_folded("smartmetd;__libc_start_main;main;futex_wait 1234567\nsmartmetd;io_schedule 555\nbroken line\n"); \
+	    assert folded == [(("smartmetd","__libc_start_main","main","futex_wait"), 1234567), (("smartmetd","io_schedule"), 555)], folded; \
+	    import smartmet_top.sources.offcpu, smartmet_top.sources.profile_caps; \
+	    from smartmet_top.panels.proc import _build_flame_tree; \
+	    tree = _build_flame_tree([(("a","b","c"), 100), (("a","b","d"), 50), ("a","b","e")]); \
+	    assert tree["a"][0] == 151 and tree["a"][1]["b"][0] == 151 and tree["a"][1]["b"][1]["c"][0] == 100 and tree["a"][1]["b"][1]["d"][0] == 50 and tree["a"][1]["b"][1]["e"][0] == 1, tree'
 	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
 	bash -n share/smartmet/bstat.sh
 	for t in $(BTOOLS) $(LEGACY); do bash -n bin/$$t; done

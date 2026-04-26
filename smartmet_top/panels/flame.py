@@ -19,6 +19,8 @@ The view is interactive:
     Esc/u   zoom out one level
     0/Home  zoom all the way out
     n/N     next / previous smartmetd PID (same as Proc panel)
+    o       toggle on-CPU ↔ off-CPU flamegraph (stacks weighted by
+            microseconds blocked; needs bcc-tools / perf access)
 """
 
 from __future__ import annotations
@@ -147,6 +149,10 @@ class FlamePanel(Panel):
         # `s`-keyed record-duration selection overlay state.
         self._seconds_menu_open: bool = False
         self._seconds_menu_idx: int = 0
+        # `o` toggles between on-CPU (default) and off-CPU views. State
+        # is per-panel so switching to another view and back doesn't
+        # jump back to on-CPU unexpectedly.
+        self.mode: str = "on-cpu"  # 'on-cpu' | 'off-cpu'
 
     # ---- key handling ------------------------------------------------------
 
@@ -184,6 +190,17 @@ class FlamePanel(Panel):
         # the first cycle starts.
         if key == ord("s") and store.perf_enabled:
             self._open_seconds_menu(store)
+            return True
+
+        # `o` toggles between on-CPU and off-CPU. Reset cursor and zoom
+        # because the two views have completely different stack sets;
+        # carrying the path across modes leads to "no selection" states.
+        if key == ord("o"):
+            self.mode = "off-cpu" if self.mode == "on-cpu" else "on-cpu"
+            self.zoom_path = ()
+            self.cursor_path = ()
+            self._last_root = {}
+            self._last_frames = []
             return True
 
         # Flame navigation only meaningful when perf is on AND we have data.
@@ -371,12 +388,21 @@ class FlamePanel(Panel):
     def _draw_header(self, win, info: ProcInfo, store, n_procs: int,
                      row: int) -> None:
         h, w = win.getmaxyx()
-        sample_count = store.perf_last_sample_count(info.pid)
         breadcrumb = " > ".join(self.zoom_path) if self.zoom_path else "(root)"
-        header = (
-            f" Flame — pid={info.pid}  status={store.perf_status}  "
-            f"last={sample_count}  zoom={breadcrumb}"
-        )
+        if self.mode == "off-cpu":
+            total_us = store.offcpu_last_total_us(info.pid)
+            ms = total_us // 1000
+            header = (
+                f" Flame off-CPU — pid={info.pid}  "
+                f"status={store.offcpu_status}  "
+                f"last_off={ms} ms  zoom={breadcrumb}"
+            )
+        else:
+            sample_count = store.perf_last_sample_count(info.pid)
+            header = (
+                f" Flame on-CPU — pid={info.pid}  status={store.perf_status}  "
+                f"last={sample_count}  zoom={breadcrumb}"
+            )
         safe_addstr(win, row, 0, header.ljust(w - 1),
                     theme.attr(theme.P_TAB_ACTIVE))
 
@@ -386,6 +412,8 @@ class FlamePanel(Panel):
         bottom row index it used so the top-symbols list knows where
         to start."""
         h, w = win.getmaxyx()
+        if self.mode == "off-cpu":
+            return self._draw_off_cpu_flame(win, store, info, top)
         # If a previous cycle failed, surface that in place of the flame.
         if store.perf_last_error:
             self._draw_perf_error(win, top, h - 2, store.perf_last_error)
@@ -448,10 +476,96 @@ class FlamePanel(Panel):
         bottom = _max_depth(frames) if frames else flame_top
         return bottom + 1
 
+    def _draw_off_cpu_flame(self, win, store, info: ProcInfo,
+                            top: int) -> int:
+        """Off-CPU flame: stacks weighted by microseconds blocked.
+
+        Same renderer as the on-CPU path; the only differences are
+        which ring we pull from, what error we surface on failure,
+        and what message we show when there is no data yet.
+        """
+        h, w = win.getmaxyx()
+        if not store.offcpu_enabled:
+            self._draw_offcpu_unavailable(win, store, top)
+            self._last_frames = []
+            self._last_root = {}
+            return min(top + 6, h - 2)
+        if store.offcpu_last_error:
+            self._draw_perf_error(win, top, h - 2, store.offcpu_last_error)
+            self._last_frames = []
+            self._last_root = {}
+            return h - 2
+        weighted = store.offcpu_recent_stacks(info.pid)
+        if not weighted:
+            safe_addstr(win, top, 2,
+                        "no off-CPU samples yet — waiting for first cycle…",
+                        theme.attr(theme.P_DIM))
+            self._last_frames = []
+            self._last_root = {}
+            return top + 1
+        full_root = _build_flame_tree(weighted)
+        self._last_root = full_root
+        if self.zoom_path:
+            visible_root = _subtree_at(full_root, self.zoom_path)
+            if visible_root is None or not visible_root:
+                while self.zoom_path:
+                    self.zoom_path = self.zoom_path[:-1]
+                    visible_root = (_subtree_at(full_root, self.zoom_path)
+                                    if self.zoom_path else full_root)
+                    if visible_root:
+                        break
+                if not visible_root:
+                    visible_root = full_root
+        else:
+            visible_root = full_root
+        flame_top = top
+        flame_max_y = max(flame_top + 2, h - 12)
+        self._ensure_cursor()
+        frames = _render_flame(
+            win, flame_top, flame_max_y, 0, w - 1,
+            visible_root, self.zoom_path, self.cursor_path,
+        )
+        self._last_frames = frames
+        if not self._frame_at(self.cursor_path):
+            self._ensure_cursor()
+            target = self._frame_at(self.cursor_path)
+            if target is not None:
+                y, xs, xe, sym, _cnt, _path = target
+                cw = xe - xs
+                label = sym[:cw] if len(sym) > cw else sym + " " * (cw - len(sym))
+                safe_addstr(win, y, xs, label,
+                            theme.attr(theme.P_HIGHLIGHT,
+                                       curses.A_BOLD | curses.A_UNDERLINE))
+        bottom = _max_depth(frames) if frames else flame_top
+        return bottom + 1
+
+    def _draw_offcpu_unavailable(self, win, store, top: int) -> None:
+        """Surface the install hint inline when no off-CPU backend is
+        present. The hint comes from profile_caps.offcpu_backend()
+        and lands in store.offcpu_status."""
+        h, w = win.getmaxyx()
+        safe_addstr(win, top, 2,
+                    "off-CPU profiling unavailable on this host",
+                    theme.attr(theme.P_BAD, curses.A_BOLD))
+        safe_addstr(win, top + 1, 4, store.offcpu_status[:max(0, w - 6)],
+                    theme.attr(theme.P_BAD))
+        safe_addstr(win, top + 3, 2,
+                    "Install bcc-tools for the preferred eBPF backend, e.g.:",
+                    theme.attr(theme.P_DIM))
+        safe_addstr(win, top + 4, 4,
+                    "sudo dnf install bcc-tools",
+                    theme.attr(theme.P_DIM))
+        safe_addstr(win, top + 5, 2,
+                    "Then restart smtop. Press 'o' to switch back to on-CPU.",
+                    theme.attr(theme.P_DIM))
+
     def _draw_top_symbols(self, win, store, info: ProcInfo,
                           start_row: int) -> None:
         h, w = win.getmaxyx()
         if start_row >= h - 2:
+            return
+        if self.mode == "off-cpu":
+            self._draw_top_off_cpu_leaves(win, store, info, start_row)
             return
         # Divider
         safe_addstr(win, start_row, 0,
@@ -486,6 +600,53 @@ class FlamePanel(Panel):
                 safe_addstr(win, y, x, sparkline(series, width=spark_w),
                             theme.attr(theme.P_SPARK))
 
+    def _draw_top_off_cpu_leaves(self, win, store, info: ProcInfo,
+                                 start_row: int) -> None:
+        """Top blocked-on functions = leaf-symbol weights summed across
+        the off-CPU stack ring. Per-minute history isn't tracked for
+        off-CPU (not yet) so the row carries time-blocked instead of a
+        sparkline."""
+        h, w = win.getmaxyx()
+        safe_addstr(win, start_row, 0,
+                    "─ Top blocked-on functions (off-CPU, retained ring) "
+                    + "─" * max(0, w - 53),
+                    theme.attr(theme.P_DIM))
+        body_top = start_row + 1
+        avail = h - body_top - 1
+        if avail < 1:
+            return
+        weighted = store.offcpu_recent_stacks(info.pid)
+        if not weighted:
+            safe_addstr(win, body_top, 2,
+                        "no off-CPU samples yet",
+                        theme.attr(theme.P_DIM))
+            return
+        # Aggregate microseconds-blocked per leaf symbol.
+        leaf_us: Dict[str, int] = {}
+        total_us = 0
+        for stack, us in weighted:
+            if not stack:
+                continue
+            leaf = stack[-1]
+            leaf_us[leaf] = leaf_us.get(leaf, 0) + us
+            total_us += us
+        if total_us <= 0:
+            return
+        rows = sorted(leaf_us.items(), key=lambda kv: -kv[1])[:avail]
+        for i, (sym, us) in enumerate(rows):
+            y = body_top + i
+            if y >= h - 1:
+                break
+            pct = us / total_us * 100
+            ms = us / 1000.0
+            label = sym[:max(0, w - 30)]
+            cells = [
+                (f"  {pct:>5.1f}%  ", theme.attr(theme.P_HEADER)),
+                (f"{ms:>10.1f} ms  ", theme.attr(theme.P_ACCENT)),
+                (label, 0),
+            ]
+            write_row(win, y, 0, cells)
+
     def _draw_perf_error(self, win, top: int, max_y: int, msg: str) -> None:
         h, w = win.getmaxyx()
         safe_addstr(win, top, 2,
@@ -516,7 +677,9 @@ class FlamePanel(Panel):
         x = write_label(win, h - 1, x, "0", 0, base, hot)
         x = write_label(win, h - 1, x, " reset  ", 0, base, base)
         x = write_label(win, h - 1, x, "s", 0, base, hot)
-        x = write_label(win, h - 1, x, " seconds", 0, base, base)
+        x = write_label(win, h - 1, x, " seconds  ", 0, base, base)
+        x = write_label(win, h - 1, x, "o", 0, base, hot)
+        x = write_label(win, h - 1, x, " on/off-CPU", 0, base, base)
         if n_procs > 1:
             x = write_label(win, h - 1, x, "  ", 0, base, base)
             x = write_label(win, h - 1, x, "n", 0, base, hot)
