@@ -171,7 +171,7 @@ async def tail_many(paths: Iterable[str], store, poll_interval: float = 0.25) ->
                 continue
             for line in lines:
                 any_data = True
-                store.record_raw_line(line)
+                store.record_raw_line(line, source=f.label)
                 rec = parse(line)
                 if rec is None:
                     continue
@@ -222,7 +222,7 @@ async def bulk_load(paths: Iterable[str], store,
                         fh.readline()  # skip partial line
                     for line in fh:
                         line = line.rstrip("\n")
-                        store.record_raw_line(line)
+                        store.record_raw_line(line, source=label)
                         rec = parse(line)
                         if rec is None:
                             continue

@@ -17,7 +17,7 @@ import curses
 from typing import List, Optional, Tuple
 
 from .. import theme
-from ..state.store import SourceStats
+from ..state.store import HISTORY_MINUTES, HISTORY_SECONDS, SourceStats
 from ..widgets.bars import human_bytes, human_count, human_ms, sparkline
 from .base import Panel, safe_addstr, write_row
 
@@ -230,7 +230,7 @@ class PluginsPanel(Panel):
         idle_state = "hidden" if self.hide_idle else "shown"
         sort_name = SORT_COLS[self.sort_idx][0]
         win_label, _, win_res = WINDOWS[self.window_idx]
-        eff_label, _, eff_res = WINDOWS[self._effective_window_idx]
+        eff_label, eff_span, eff_resolution = WINDOWS[self._effective_window_idx]
         # If we auto-widened, show both the user's selection and what's
         # actually rendered so nobody is left wondering why the spark
         # column doesn't match the window picker.
@@ -263,13 +263,19 @@ class PluginsPanel(Panel):
             self._draw_footer(win)
             return
 
-        # Header row — sparks span the active window, auto-scaled
-        # column-wide. Use the effective window so the column label
-        # matches the data (e.g., when the panel auto-widened from 60s
-        # to 5m the spark column header should read "(5m)" too).
-        time_hdr = f"resp-{time_label} ({eff_label})"
-        size_hdr = (f"resp-bytes/s ({eff_label})" if self.size_metric == "bytes"
-                    else f"resp-size ({eff_label})")
+        # The spark always shows the longest history available at the
+        # active resolution — `spark_w + 1` samples — so a wide column
+        # is filled instead of leaving 80% of the bar as zero-padding.
+        # The column header advertises the actual span being drawn.
+        if eff_resolution == "second":
+            spark_samples = min(spark_w + 1, HISTORY_SECONDS)
+            spark_span_label = f"{spark_samples - 1}s"
+        else:
+            spark_samples = min(spark_w + 1, HISTORY_MINUTES)
+            spark_span_label = f"{spark_samples - 1}m"
+        time_hdr = f"resp-{time_label} ({spark_span_label})"
+        size_hdr = (f"resp-bytes/s ({spark_span_label})" if self.size_metric == "bytes"
+                    else f"resp-size ({spark_span_label})")
         col_hdr = (
             f"{'plugin':<{name_col}} "
             f"{'req/s':>{num_cols}} "
@@ -303,25 +309,22 @@ class PluginsPanel(Panel):
 
         # Compute per-column max across visible rows so each spark
         # auto-scales to its own data range, independent of the others.
-        # Read from the *effective* window — when _sorted_rows
-        # auto-widened, sparks need to follow the same window.
-        _, span, resolution = WINDOWS[self._effective_window_idx]
+        # Pull `spark_samples` data points so the spark column is
+        # filled rather than mostly leading zeros.
         time_series_cache: List[List[float]] = []
         size_series_cache: List[List[float]] = []
         for src, _ in visible:
-            if resolution == "second":
-                time_series_cache.append(src.second_series(self.time_metric, span))
-                size_series_cache.append(src.second_series(self.size_metric, span))
+            if eff_resolution == "second":
+                time_series_cache.append(src.second_series(self.time_metric, spark_samples))
+                size_series_cache.append(src.second_series(self.size_metric, spark_samples))
             else:
-                time_series_cache.append(src.minute_series(self.time_metric, span))
-                size_series_cache.append(src.minute_series(self.size_metric, span))
+                time_series_cache.append(src.minute_series(self.time_metric, spark_samples))
+                size_series_cache.append(src.minute_series(self.size_metric, spark_samples))
         time_max = max((max(s, default=0.0) for s in time_series_cache), default=0.0)
         size_max = max((max(s, default=0.0) for s in size_series_cache), default=0.0)
 
         # req/s normalisation: in second-mode, snap.count is over
-        # `span` seconds; in minute-mode, over `span` minutes. Use the
-        # effective window so the rate matches the bucket.
-        _, eff_span, eff_resolution = WINDOWS[self._effective_window_idx]
+        # `span` seconds; in minute-mode, over `span` minutes.
         rps_divisor = (float(eff_span) if eff_resolution == "second"
                        else float(eff_span * 60))
         for i, (src, snap) in enumerate(visible):

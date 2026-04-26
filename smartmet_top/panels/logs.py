@@ -11,7 +11,11 @@ from .base import Panel, safe_addstr
 class LogsPanel(Panel):
     name = "Logs"
     hotkey = "l"
-    help_text = "Raw access-log tail. / to filter, End jumps to newest."
+    help_text = (
+        "Live `tail -F` over every tailed access log, merged into "
+        "one stream. Each line is prefixed with [<plugin>] so the "
+        "source is visible. / filters, End jumps to newest."
+    )
 
     def __init__(self):
         self.filter = ""
@@ -55,7 +59,14 @@ class LogsPanel(Panel):
 
     def draw(self, win, store):
         h, w = win.getmaxyx()
-        hdr = f" Logs — filter:{self.filter or '<none>'}  {'FOLLOW' if self.follow else 'scrolled'}"
+        n_sources = len(store.snapshot_sources())
+        hdr = (
+            f" Logs — tail -F across {n_sources} log file"
+            f"{'s' if n_sources != 1 else ''}  "
+            f"filter:{self.filter or '<none>'}  "
+            f"{'FOLLOW' if self.follow else 'scrolled'}  "
+            "(/ filters by [plugin] or substring, End jumps to live)"
+        )
         safe_addstr(win, 0, 0, hdr.ljust(w - 1),
                     theme.attr(theme.P_TAB_ACTIVE))
 

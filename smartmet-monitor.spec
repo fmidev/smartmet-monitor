@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.6.1
+Version:        0.7.0
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,36 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.0-1
+- Three issues you flagged in one testing session:
+
+  * Graphs panel showed only numeric stats, no graphs. The panel was
+    asking for `span` data points (e.g. 5 for a 5m window) but the
+    spark column was ~35 chars wide, so the visible spark was 5 chars
+    of data and 30 chars of leading-zero padding, which can render as
+    invisible Braille on some fonts. The panel now asks for
+    `spark_w + 1` samples (capped at HISTORY_SECONDS / HISTORY_MINUTES)
+    so the column is filled, and the column header advertises the
+    actual span being drawn ("(35m)" instead of "(5m)").
+
+  * "Vertical gaps" in Braille graphs. Even a fully-filled Braille
+    cell (⣿) renders as four dots stacked with whitespace between
+    each dot pair — never a solid bar. _braille_cell now falls
+    through to solid block characters when both halves of a cell are
+    saturated: (4,4) → █, (4,0) → ▌, (0,4) → ▐. Partial fills (1-3)
+    keep the Braille rendering for sub-cell vertical resolution.
+    Fully-filled bars now look like solid bars without internal
+    whitespace; tall bars in vchart and the Plugins/Overview sparks
+    benefit immediately.
+
+  * Logs panel looked like one log was being shown. It actually was
+    `tail -F` over every tailed access log merged into a single
+    stream, but the lines weren't labelled with their source. Each
+    line is now prefixed with `[<plugin>]` so the multi-log nature
+    is visible, and the panel header reads "tail -F across N log
+    files". The existing `/` filter can be used to narrow to one
+    plugin (`/[wms]` or just `/wms`).
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.6.1-1
 - Services panel (and the Health composite that embeds it): the
   req/min, req/h and req/d columns are integer counts upstream from

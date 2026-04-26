@@ -511,9 +511,18 @@ class Store:
                 g.errors += 1
             g.status_counts[status] = g.status_counts.get(status, 0) + 1
 
-    def record_raw_line(self, line: str) -> None:
+    def record_raw_line(self, line: str, source: str = "") -> None:
+        """Append a raw access-log line to the recent ring.
+
+        With `source` set the line is prefixed with `[<plugin>] ` so
+        the Logs panel — which interleaves all tailed files into one
+        stream — shows clearly which file each line came from.
+        """
         with self._lock:
-            self.recent_lines.append(line)
+            if source:
+                self.recent_lines.append(f"[{source}] {line}")
+            else:
+                self.recent_lines.append(line)
 
     # -- readers ------------------------------------------------------------
 

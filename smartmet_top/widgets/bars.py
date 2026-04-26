@@ -28,7 +28,9 @@ from typing import List, Sequence
 
 EIGHTH = " ▏▎▍▌▋▊▉█"      # 0/8 .. 8/8 — horizontal
 SPARK = " ▁▂▃▄▅▆▇█"        # 0..8 — vertical spark (eighth-block)
-FULL = "█"
+FULL = "█"                  # solid block, no inter-dot whitespace
+LEFT_HALF = "▌"             # left column solid, right column empty
+RIGHT_HALF = "▐"            # right column solid, left column empty
 BLANK_BRAILLE = chr(0x2800)
 
 # Braille dot bits per Unicode standard. Counted from the bottom of the
@@ -52,6 +54,24 @@ def is_ascii() -> bool:
 
 
 def _braille_cell(left_lev: int, right_lev: int) -> str:
+    """Pick the densest glyph available for the (left, right) levels.
+
+    A "full" Braille character (⣿) renders as four dots stacked with
+    visible whitespace between each pair, which makes a fully-filled
+    bar look like a column of dots rather than a solid bar. For the
+    saturating levels we fall through to solid blocks instead:
+        (4, 4) → █  (no inter-dot gaps anywhere)
+        (4, 0) → ▌  (left column solid, right empty)
+        (0, 4) → ▐  (right column solid, left empty)
+    Partial fills (1-3) keep the Braille rendering since blocks can't
+    represent sub-cell vertical resolution.
+    """
+    if left_lev == 4 and right_lev == 4:
+        return FULL
+    if left_lev == 4 and right_lev == 0:
+        return LEFT_HALF
+    if left_lev == 0 and right_lev == 4:
+        return RIGHT_HALF
     return chr(0x2800 + _LEFT_LEVELS[left_lev] + _RIGHT_LEVELS[right_lev])
 
 
