@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.5.4
+Version:        0.5.5
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,17 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.5.5-1
+- Services and Caches panels: horizontal bar widths now adapt to the
+  available terminal width instead of being hardcoded. The previous
+  fixed widths (25 for Services, 20 for Caches) wasted ~15+ columns
+  on a 140-col terminal and crushed bars for low-traffic services
+  down to invisible against the high-traffic ones. Fixed columns
+  on the left (handler/cache name + numeric stats) keep their
+  widths; the bar absorbs whatever's left after reserving 20 cols
+  for the trend sparkline and a 4-col margin. Bars have a 10-col
+  minimum to stay readable on narrow terminals.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.5.4-1
 - Braille graphs (sparkline + vchart) now use overlapping pairs, the
   same trick btop's graphs use: each character's right column equals

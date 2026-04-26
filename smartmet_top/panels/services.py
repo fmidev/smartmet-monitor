@@ -99,10 +99,18 @@ class ServicesPanel(Panel):
 
         mx1 = max((_f(r.get("LastMinute")) for _, r in flat), default=0.0)
         host_col = 18 if multi else 0
+        # Layout math: fixed columns on the left, then the bar absorbs
+        # whatever's left (after reserving 20 cols for the trend spark).
+        # Without this, on a 140-col terminal the previous fixed-25 bar
+        # left ~15 cols of whitespace and crushed bars for low-traffic
+        # handlers down to nothing.
+        fixed_left = (host_col + 1 if multi else 0) + 80
+        trend_w = 20
+        bar_w = max(10, w - fixed_left - trend_w - 4)
         hdr_line = (
             (f"{'host':<{host_col}} " if multi else "")
             + f"{'handler':<40} {'req/min':>8} {'req/h':>8} {'req/d':>10} "
-            f"{'avg_ms':>8}  {'last min':<25}  {'trend':<20}"
+            f"{'avg_ms':>8}  {'last min':<{bar_w}}  {'trend':<{trend_w}}"
         )
         safe_addstr(win, 2, 0, hdr_line, theme.attr(theme.P_HEADER, curses.A_BOLD))
         safe_addstr(win, 3, 0, "─" * (w - 1), theme.attr(theme.P_DIM))
@@ -128,8 +136,13 @@ class ServicesPanel(Panel):
             avg = _f(r.get("AverageDuration"))
             row_attr = curses.A_REVERSE if self.scroll + i == self.cursor else 0
             hist = store.service_history.get(host)
-            trend = hist.series(handler, "req_per_min", samples=20) if hist else []
-            trend_str = sparkline(trend, width=20) if trend else " " * 20
+            # Pull as many trend samples as the spark is wide so it
+            # actually fills its allocated columns; HistorySeries holds
+            # up to 300 samples so we won't run out.
+            trend = hist.series(handler, "req_per_min",
+                                samples=trend_w + 1) if hist else []
+            trend_str = (sparkline(trend, width=trend_w) if trend
+                         else " " * trend_w)
             cells = []
             if multi:
                 cells.append((f"{host[:host_col-1]:<{host_col}} ",
@@ -140,7 +153,7 @@ class ServicesPanel(Panel):
                 (f"{m60:>8.1f} ", 0),
                 (f"{d24:>10.1f} ", 0),
                 (f"{human_ms(avg):>8}  ", theme.latency_color(avg)),
-                (hbar(m1, mx1, 25), theme.attr(theme.P_SPARK)),
+                (hbar(m1, mx1, bar_w), theme.attr(theme.P_SPARK)),
                 ("  ", 0),
                 (trend_str, theme.attr(theme.P_SPARK)),
             ]

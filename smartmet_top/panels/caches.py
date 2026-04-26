@@ -106,10 +106,15 @@ class CachesPanel(Panel):
 
         # header
         host_col = 18 if multi else 0
+        # Fixed left columns: host(opt) + cache(34+sp) + 4 numbers(9+sp each)
+        # + hit%(5.1f+%+2sp) = (host_col+1) + 35 + 40 + 8.
+        fixed_left = (host_col + 1 if multi else 0) + 35 + 40 + 8
+        trend_w = 20
+        bar_w = max(10, w - fixed_left - trend_w - 4)
         hdr_line = (
             (f"{'host':<{host_col}} " if multi else "")
             + f"{'cache':<34} {'size':>9} {'max':>9} {'hits/m':>9} {'ins/m':>9} "
-            f"{'hit%':>6}  {'hitrate':<20}  {'hit/m trend':<20}"
+            f"{'hit%':>6}  {'hitrate':<{bar_w}}  {'hit/m trend':<{trend_w}}"
         )
         safe_addstr(win, 2, 0, hdr_line, theme.attr(theme.P_HEADER, curses.A_BOLD))
         safe_addstr(win, 3, 0, "─" * (w - 1), theme.attr(theme.P_DIM))
@@ -136,8 +141,10 @@ class CachesPanel(Panel):
             hr = _as_float(str(r.get("hitrate") or "0").rstrip("%"))
             row_attr = curses.A_REVERSE if self.scroll + i == self.cursor else 0
             hist = store.cache_history.get(host)
-            trend = hist.series(name, "hits_per_min", samples=20) if hist else []
-            trend_str = sparkline(trend, width=20) if trend else " " * 20
+            trend = hist.series(name, "hits_per_min",
+                                samples=trend_w + 1) if hist else []
+            trend_str = (sparkline(trend, width=trend_w) if trend
+                         else " " * trend_w)
             cells = []
             if multi:
                 cells.append((f"{host[:host_col-1]:<{host_col}} ",
@@ -149,7 +156,7 @@ class CachesPanel(Panel):
                 (f"{hpm:>9.1f} ", 0),
                 (f"{ipm:>9.1f} ", 0),
                 (f"{hr:>5.1f}%  ", theme.hitrate_color(hr)),
-                (hbar(hr, 100, 20), theme.hitrate_color(hr)),
+                (hbar(hr, 100, bar_w), theme.hitrate_color(hr)),
                 ("  ", 0),
                 (trend_str, theme.attr(theme.P_SPARK)),
             ]
