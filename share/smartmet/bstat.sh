@@ -28,15 +28,22 @@
 # helpers
 # -----------------------------------------------------------------------------
 
-# Convert an interval name to the number of ISO-8601 chars to keep as bucket key.
+# Convert an interval name to "PREC MOD" for the bucket-key extractor:
+#   PREC = number of leading ISO-8601 chars to keep as substring.
+#   MOD  = if non-zero, round the minute (or second) field down to the
+#          nearest MOD-multiple instead of truncating between digits.
+# Most intervals work with substring truncation alone; 2m and 5m need
+# real arithmetic since they don't align to a digit boundary.
 _bstat_prec() {
     case "$1" in
-        1s)  echo 19 ;;  # 2026-04-23T03:00:00
-        10s) echo 18 ;;  # 2026-04-23T03:00:0
-        1m)  echo 16 ;;  # 2026-04-23T03:00
-        10m) echo 15 ;;  # 2026-04-23T03:0
-        1h)  echo 13 ;;  # 2026-04-23T03
-        1d)  echo 10 ;;  # 2026-04-23
+        1s)  echo "19 0" ;;  # 2026-04-23T03:00:00
+        10s) echo "18 0" ;;  # 2026-04-23T03:00:0
+        1m)  echo "16 0" ;;  # 2026-04-23T03:00
+        2m)  echo "16 2" ;;  # 2026-04-23T03:MM rounded to /2
+        5m)  echo "16 5" ;;  # 2026-04-23T03:MM rounded to /5
+        10m) echo "15 0" ;;  # 2026-04-23T03:0
+        1h)  echo "13 0" ;;  # 2026-04-23T03
+        1d)  echo "10 0" ;;  # 2026-04-23
         *)   return 1 ;;
     esac
 }
@@ -77,7 +84,8 @@ bstat() {
         cat <<EOF
 Usage: bstat [-i INTERVAL] [-w WIDTH] [-H HEIGHT] [--ascii] [LOG-FILE]
 
-  -i INTERVAL   bucket width: 1s, 10s, 1m, 10m, 1h, 1d  (default: 1h)
+  -i INTERVAL   bucket width: 1s, 10s, 1m, 2m, 5m, 10m, 1h, 1d
+                                                       (default: 1h)
   -w WIDTH      horizontal bar width in columns         (default: 20)
   -H HEIGHT     Braille sparkline height in char-rows   (default: 4)
                 Vertical resolution per sparkline = HEIGHT * 4 dots.
@@ -91,13 +99,14 @@ EOF
         return 0
     fi
 
-    local prec
-    if ! prec=$(_bstat_prec "$BSTAT_INTERVAL"); then
-        echo "bstat: unknown interval '$BSTAT_INTERVAL' (use 1s|10s|1m|10m|1h|1d)" >&2
+    local prec mod spec
+    if ! spec=$(_bstat_prec "$BSTAT_INTERVAL"); then
+        echo "bstat: unknown interval '$BSTAT_INTERVAL' (use 1s|10s|1m|2m|5m|10m|1h|1d)" >&2
         return 1
     fi
+    read -r prec mod <<<"$spec"
 
-    gawk -v PREC="$prec" -v BW="$BSTAT_WIDTH" -v SH="$BSTAT_HEIGHT" -v ASCII="$BSTAT_ASCII" '
+    gawk -v PREC="$prec" -v MOD="$mod" -v BW="$BSTAT_WIDTH" -v SH="$BSTAT_HEIGHT" -v ASCII="$BSTAT_ASCII" '
     BEGIN {
         if (ASCII) {
             FULL = "="
@@ -120,7 +129,21 @@ EOF
     }
     {
         # $9 is "[2026-04-23T07:00:00.125]" — strip the leading [.
-        t = substr($9, 2, PREC)
+        # When MOD>0, round the minute (PREC=16) or second (PREC=19)
+        # field down to a MOD-multiple instead of plain truncation;
+        # this is how 2m / 5m buckets are formed since they do not
+        # align to a digit boundary.
+        if (MOD == 0) {
+            t = substr($9, 2, PREC)
+        } else if (PREC == 16) {
+            mm = substr($9, 16, 2) + 0
+            t = substr($9, 2, 14) sprintf("%02d", int(mm/MOD)*MOD)
+        } else if (PREC == 19) {
+            ss = substr($9, 19, 2) + 0
+            t = substr($9, 2, 17) sprintf("%02d", int(ss/MOD)*MOD)
+        } else {
+            t = substr($9, 2, PREC)
+        }
         dur = $10 + 0
         bytes = $11 + 0
         status = $8 + 0
@@ -154,17 +177,17 @@ EOF
             if (sumbytes[t] > gB) gB = sumbytes[t]
         }
 
-        # 10m and 10s intervals truncate ISO-8601 between digits (e.g.
-        # "13:0" for 10m, "13:00:0" for 10s). Append a "0" when
-        # rendering so "13:0" → "13:00" makes the bucket boundary
-        # visually unambiguous. DISPLEN is the rendered width of a
-        # bucket label.
+        # 10m (PREC=15) and 10s (PREC=18) still use plain substring
+        # truncation between digits ("13:0", "13:00:0"); append a "0"
+        # when rendering so the bucket boundary reads as "13:00".
+        # 2m and 5m use minute-rounding (MOD>0) and produce a clean
+        # 16-char key directly, so no padding is needed for them.
         TPAD = (PREC==15 || PREC==18) ? "0" : ""
         DISPLEN = PREC + length(TPAD)
 
         # title
         printf "┌─ SmartMet access-log summary  (bucket: %s, %d rows) ─┐\n",
-            iname(PREC), n
+            iname(PREC, MOD), n
         printf "│\n"
         # header
         bwL = BW
@@ -374,9 +397,13 @@ EOF
         }
     }
 
-    function iname(p) {
+    function iname(p, m) {
+        if (p==19 && m==10) return "10s"
         if (p==19) return "1s"
         if (p==18) return "10s"
+        if (p==16 && m==2) return "2m"
+        if (p==16 && m==5) return "5m"
+        if (p==16 && m==10) return "10m"
         if (p==16) return "1m"
         if (p==15) return "10m"
         if (p==13) return "1h"
@@ -389,7 +416,7 @@ EOF
 # -----------------------------------------------------------------------------
 # bchart: vertical btop-style chart for one metric
 # -----------------------------------------------------------------------------
-# Usage: bchart [-i 1h] [-m metric] [-h height] [-w cell-width] [log-file]
+# Usage: bchart [-i INTERVAL] [-m METRIC] [-H HEIGHT] [-w CELLW] [log-file]
 #   metric = reqs | ms | kb | mb | err   (default reqs)
 
 bchart() {
@@ -403,22 +430,24 @@ bchart() {
         case "$1" in
             -i) interval="$2"; shift 2 ;;
             -m) metric="$2";  shift 2 ;;
-            -h) height="$2";  shift 2 ;;
+            -H) height="$2";  shift 2 ;;
             -w) cellw="$2";   shift 2 ;;
             --ascii) ascii=1; shift ;;
-            --help)
+            -h|--help)
                 cat <<EOF
-Usage: bchart [-i INTERVAL] [-m METRIC] [-h HEIGHT] [-w CELLW] [--ascii] [LOG-FILE]
+Usage: bchart [-i INTERVAL] [-m METRIC] [-H HEIGHT] [-w CELLW] [--ascii] [LOG-FILE]
 
-  -i INTERVAL   1s, 10s, 1m, 10m, 1h, 1d    (default: 1h)
-  -m METRIC     reqs | ms | kb | mb | err   (default: reqs)
+  -i INTERVAL   1s, 10s, 1m, 2m, 5m, 10m, 1h, 1d   (default: 1h)
+  -m METRIC     reqs | ms | kb | mb | err          (default: reqs)
                   reqs = requests per bucket
                   ms   = mean latency (ms)
                   kb   = mean response size (KB)
                   mb   = total bandwidth (MB)
                   err  = error rate (%)
-  -h HEIGHT     chart height in rows        (default: 12)
-  -w CELLW      cells per data unit         (default: 1)
+  -H HEIGHT     chart height in char-rows          (default: 12)
+                  Vertical resolution = HEIGHT * 4 dots in Braille
+                  mode, HEIGHT * 8 in --ascii mode.
+  -w CELLW      cells per data unit                (default: 1)
                   Default Braille mode renders 2 buckets per cell, so
                   one CELLW = one Braille cell = 2 buckets. ASCII mode
                   renders 1 bucket per cell.
@@ -429,13 +458,14 @@ EOF
         esac
     done
 
-    local prec
-    if ! prec=$(_bstat_prec "$interval"); then
-        echo "bchart: unknown interval '$interval'" >&2
+    local prec mod spec
+    if ! spec=$(_bstat_prec "$interval"); then
+        echo "bchart: unknown interval '$interval' (use 1s|10s|1m|2m|5m|10m|1h|1d)" >&2
         return 1
     fi
+    read -r prec mod <<<"$spec"
 
-    gawk -v PREC="$prec" -v METRIC="$metric" -v H="$height" -v CW="$cellw" -v ASCII="$ascii" '
+    gawk -v PREC="$prec" -v MOD="$mod" -v METRIC="$metric" -v H="$height" -v CW="$cellw" -v ASCII="$ascii" '
     BEGIN {
         if (ASCII) {
             sp[0]=" "; sp[1]="."; sp[2]="."; sp[3]=":"; sp[4]=":"
@@ -452,7 +482,17 @@ EOF
         TPAD = (PREC==15 || PREC==18) ? "0" : ""
     }
     {
-        t = substr($9, 2, PREC)
+        if (MOD == 0) {
+            t = substr($9, 2, PREC)
+        } else if (PREC == 16) {
+            mm = substr($9, 16, 2) + 0
+            t = substr($9, 2, 14) sprintf("%02d", int(mm/MOD)*MOD)
+        } else if (PREC == 19) {
+            ss = substr($9, 19, 2) + 0
+            t = substr($9, 2, 17) sprintf("%02d", int(ss/MOD)*MOD)
+        } else {
+            t = substr($9, 2, PREC)
+        }
         dur = $10 + 0
         bytes = $11 + 0
         status = $8 + 0
@@ -481,7 +521,7 @@ EOF
 
         label = label_for(METRIC)
         # title + scale legend
-        printf "┌─ %s by %s  (max %.2f) ─\n", label, intname(PREC), mx
+        printf "┌─ %s by %s  (max %.2f) ─\n", label, intname(PREC, MOD), mx
 
         # y-axis label width
         lw = 8
@@ -558,10 +598,17 @@ EOF
         if (m=="err")  return "Error rate (%)"
         return m
     }
-    function intname(p) {
-        if (p==19) return "1s"; if (p==18) return "10s"
-        if (p==16) return "1m"; if (p==15) return "10m"
-        if (p==13) return "1h"; if (p==10) return "1d"
+    function intname(p, m) {
+        if (p==19 && m==10) return "10s"
+        if (p==19) return "1s"
+        if (p==18) return "10s"
+        if (p==16 && m==2)  return "2m"
+        if (p==16 && m==5)  return "5m"
+        if (p==16 && m==10) return "10m"
+        if (p==16) return "1m"
+        if (p==15) return "10m"
+        if (p==13) return "1h"
+        if (p==10) return "1d"
         return "?"
     }
     function fmtnum(x) {
@@ -814,19 +861,26 @@ EOF
 
 bstatus() {
     local interval=""
+    local height=4
     local ascii=0
     local args=()
     while (( $# )); do
         case "$1" in
             -i) interval="$2"; shift 2 ;;
+            -H) height="$2"; shift 2 ;;
             --ascii) ascii=1; shift ;;
             -h|--help)
                 cat <<EOF
-Usage: bstatus [-i INTERVAL] [--ascii] [LOG-FILE]
+Usage: bstatus [-i INTERVAL] [-H HEIGHT] [--ascii] [LOG-FILE]
 
-  -i INTERVAL  if given, additionally show a per-class sparkline
-               over time. Bucket widths: 1s, 10s, 1m, 10m, 1h, 1d.
-  --ascii      use ASCII bars and dot-ramp sparklines.
+  -i INTERVAL  if given, additionally show a per-class Braille
+               sparkline over time. Bucket widths:
+                  1s, 10s, 1m, 2m, 5m, 10m, 1h, 1d.
+  -H HEIGHT    Braille sparkline height in char-rows  (default: 4)
+               Vertical resolution per sparkline = HEIGHT * 4 dots.
+               Same option used by bstat and bchart for the same
+               purpose.
+  --ascii      use ASCII bars and a single-row dot-ramp sparkline.
 
 Always prints the aggregate code distribution and the per-class
 breakdown; -i prepends a time-bucketed view.
@@ -836,15 +890,16 @@ EOF
         esac
     done
 
-    local prec=0
+    local prec=0 mod=0 spec
     if [ -n "$interval" ]; then
-        if ! prec=$(_bstat_prec "$interval"); then
-            echo "bstatus: unknown interval '$interval' (use 1s|10s|1m|10m|1h|1d)" >&2
+        if ! spec=$(_bstat_prec "$interval"); then
+            echo "bstatus: unknown interval '$interval' (use 1s|10s|1m|2m|5m|10m|1h|1d)" >&2
             return 1
         fi
+        read -r prec mod <<<"$spec"
     fi
 
-    gawk -v PREC="$prec" -v ASCII="$ascii" '
+    gawk -v PREC="$prec" -v MOD="$mod" -v SH="$height" -v ASCII="$ascii" '
     BEGIN {
         if (ASCII) {
             FULL = "="
@@ -866,7 +921,17 @@ EOF
         cls = int(s/100) * 100
         clscnt[cls]++
         if (PREC > 0) {
-            t = substr($9, 2, PREC)
+            if (MOD == 0) {
+                t = substr($9, 2, PREC)
+            } else if (PREC == 16) {
+                mm = substr($9, 16, 2) + 0
+                t = substr($9, 2, 14) sprintf("%02d", int(mm/MOD)*MOD)
+            } else if (PREC == 19) {
+                ss = substr($9, 19, 2) + 0
+                t = substr($9, 2, 17) sprintf("%02d", int(ss/MOD)*MOD)
+            } else {
+                t = substr($9, 2, PREC)
+            }
             tkey[t] = 1
             bcls[t SUBSEP cls]++
             if (bcls[t SUBSEP cls] > clsmax[cls]) clsmax[cls] = bcls[t SUBSEP cls]
@@ -882,7 +947,7 @@ EOF
             # widen sparkline column to at least the header label width
             spw = (sw > 9) ? sw : 9
             printf "┌─ HTTP status by %s  (%d buckets, %d requests) ─\n",
-                iname(PREC), tn, tot
+                iname(PREC, MOD), tn, tot
             printf "│ %5s %8s %6s  %-*s\n", "class", "total", "pct", spw, "sparkline"
             printf "│ %5s %8s %6s  ", "─────", "────────", "──────"
             for (i=0; i<spw; i++) printf "─"
@@ -891,12 +956,14 @@ EOF
             k = 0
             for (c in clscnt) tmpc[++k] = c + 0
             m = asort(tmpc, cks)
+            # Sparkline height per class. ASCII mode collapses to 1 row.
+            CLS_H = ASCII ? 1 : (SH+0 > 0 ? SH+0 : 4)
+            CLS_IND = sprintf("│ %5s %8s %6s  ", "", "", "")
             for (i=1; i<=m; i++) {
                 c = cks[i]
-                printf "│ %3dxx %8d %5.1f%%  ",
-                    c/100, clscnt[c], clscnt[c]/tot*100
-                spark_class(c)
-                printf "\n"
+                lbl = sprintf("│ %3dxx %8d %5.1f%%  ",
+                              c/100, clscnt[c], clscnt[c]/tot*100)
+                spark_class(c, lbl, CLS_IND, CLS_H)
             }
             # time axis under sparklines
             if (tn > 0) {
@@ -937,34 +1004,53 @@ EOF
         }
         printf "└" ; for (i=0; i<72; i++) printf "─" ; printf "\n"
     }
-    function spark_class(c,   i, mx, l1, l2, v1, v2) {
-        # Same level-3 cap as bstat sparklines so stacked per-class
-        # rows do not visually touch.
+    # Multi-row Braille sparkline for one HTTP class: H char-rows tall
+    # (ASCII mode collapses to a single dot-ramp row regardless of H).
+    # Within a sparkline, levels go 0..4 except the topmost char-row
+    # which caps at 3 so adjacent class sparklines retain a 1/4-cell
+    # gap above each one. Same encoding as the bstat footer.
+    function spark_class(c, LBL, IND, H,    r, i, mx, v1, v2, pL, pR, lL, lR, prefix) {
         mx = clsmax[c]
-        if (mx <= 0) {
-            if (ASCII) for (i=1; i<=tn; i++) printf " "
-            else       for (i=0; i<int((tn+1)/2); i++) printf " "
-            return
-        }
         if (ASCII) {
-            for (i=1; i<=tn; i++) {
-                v1 = bcls[tks[i] SUBSEP c] + 0
-                l1 = int(v1 / mx * 3 + 0.5)
-                if (l1 < 0) l1 = 0; if (l1 > 3) l1 = 3
-                printf "%s", sp[l1]
+            printf "%s", LBL
+            if (mx <= 0) {
+                for (i=1; i<=tn; i++) printf " "
+            } else {
+                for (i=1; i<=tn; i++) {
+                    v1 = bcls[tks[i] SUBSEP c] + 0
+                    lL = int(v1 / mx * 3 + 0.5)
+                    if (lL < 0) lL = 0; if (lL > 3) lL = 3
+                    printf "%s", sp[lL]
+                }
             }
+            printf "\n"
             return
         }
-        for (i=1; i<=tn; i+=2) {
-            v1 = bcls[tks[i] SUBSEP c] + 0
-            l1 = int(v1 / mx * 3 + 0.5)
-            if (l1 < 0) l1 = 0; if (l1 > 3) l1 = 3
-            if (i+1 <= tn) {
-                v2 = bcls[tks[i+1] SUBSEP c] + 0
-                l2 = int(v2 / mx * 3 + 0.5)
-                if (l2 < 0) l2 = 0; if (l2 > 3) l2 = 3
-            } else l2 = 0
-            printf "%s", B[l1*5 + l2]
+        if (mx <= 0) {
+            for (r=0; r<H; r++) printf "%s\n", (r == 0 ? LBL : IND)
+            return
+        }
+        for (r = H-1; r >= 0; r--) {
+            prefix = (r == H-1) ? LBL : IND
+            printf "%s", prefix
+            for (i=1; i<=tn; i+=2) {
+                v1 = bcls[tks[i] SUBSEP c] + 0
+                pL = int(v1 / mx * H * 4 + 0.5)
+                lL = pL - 4 * r
+                if (lL < 0) lL = 0
+                if (lL > 4) lL = 4
+                if (r == H-1 && lL > 3) lL = 3
+                if (i+1 <= tn) {
+                    v2 = bcls[tks[i+1] SUBSEP c] + 0
+                    pR = int(v2 / mx * H * 4 + 0.5)
+                    lR = pR - 4 * r
+                    if (lR < 0) lR = 0
+                    if (lR > 4) lR = 4
+                    if (r == H-1 && lR > 3) lR = 3
+                } else lR = 0
+                printf "%s", B[lL*5 + lR]
+            }
+            printf "\n"
         }
     }
     function vbar(val, maxval, width,   ratio, n, s, i) {
@@ -977,10 +1063,17 @@ EOF
         for (i=n; i<width; i++) s = s " "
         return s
     }
-    function iname(p) {
-        if (p==19) return "1s";  if (p==18) return "10s"
-        if (p==16) return "1m";  if (p==15) return "10m"
-        if (p==13) return "1h";  if (p==10) return "1d"
+    function iname(p, m) {
+        if (p==19 && m==10) return "10s"
+        if (p==19) return "1s"
+        if (p==18) return "10s"
+        if (p==16 && m==2)  return "2m"
+        if (p==16 && m==5)  return "5m"
+        if (p==16 && m==10) return "10m"
+        if (p==16) return "1m"
+        if (p==15) return "10m"
+        if (p==13) return "1h"
+        if (p==10) return "1d"
         return "?"
     }
     ' "${args[@]}"
@@ -1087,7 +1180,7 @@ bmon() {
             -u) url="$2"; shift 2 ;;
             -n) interval="$2"; shift 2 ;;
             -v) view="$2"; shift 2 ;;
-            --help)
+            -h|--help)
                 cat <<EOF
 Usage: bmon [-u URL] [-n SECONDS] [-v VIEW]
 

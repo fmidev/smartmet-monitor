@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.7.15
+Version:        0.7.16
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -101,6 +101,24 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.16-1
+- Flag consistency across the bstat-family commands:
+  - -H now means "Braille chart height" everywhere it appears.
+    bchart's -h (which used to set the chart height) is renamed to
+    -H, freeing -h to mean help; bstatus gained -H for the same
+    purpose, controlling the per-class sparkline height (default 4
+    char-rows, matching bstat).
+  - -h | --help works in every command (previously bchart and bmon
+    accepted only --help).
+- New time-bucket intervals 2m and 5m. Existing intervals snap to a
+  digit boundary (1m, 10m, 1h …) which is why 3m/4m/etc never fit;
+  2m and 5m use minute-rounding (round the timestamp's minute field
+  down to the nearest 2- or 5-multiple) so they produce a clean
+  16-character key without the trailing-"0" workaround.
+- bstatus -i: per-class sparklines are now multi-row Braille (4
+  char-rows by default, tunable via -H), matching the bstat footer.
+  ASCII mode collapses to a single dot-ramp row regardless of -H.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.15-1
 - bstat: footer sparklines (requests / latency / avg_size /
   bandwidth) are now multi-row Braille charts. Each sparkline is
