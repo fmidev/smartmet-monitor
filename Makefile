@@ -47,8 +47,10 @@ install:
 	install -m 0644 smartmet_top/widgets/*.py $(SITEDIR)/widgets/
 	# man pages
 	$(foreach m,$(MANPAGES),install -m 0644 doc/man/$(m) $(MANDIR)/$(m); )
-	# README
+	# README + the screenshot images it references
 	install -m 0644 README.md $(DOCDIR)/README.md
+	install -d $(DOCDIR)/images
+	install -m 0644 doc/images/*.png $(DOCDIR)/images/
 	# symlink for discoverability alongside smartmet-library-* and friends
 	ln -sf smtop $(BINDIR)/smartmet-top
 

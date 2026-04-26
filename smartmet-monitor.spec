@@ -97,6 +97,7 @@ make install \
 %{_mandir}/man1/bstat60.1*
 %{_mandir}/man1/bstat24.1*
 %doc %{_docdir}/smartmet-monitor/README.md
+%doc %{_docdir}/smartmet-monitor/images/
 %{_python3_sitelib}/smartmet_top/
 
 %changelog

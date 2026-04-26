@@ -91,6 +91,20 @@ smtop [-l PATH-OR-GLOB ...] [-u LABEL=URL,URL ...] [-n SECONDS] \
       [--history-minutes N] [--ascii] [--perf] [--perf-interval SEC]
 ```
 
+A typical production invocation, used for every screenshot below:
+
+```sh
+smtop --perf --replay -u http://127.0.0.1:8081/admin
+```
+
+`--perf` enables the live flamegraph and perf-top symbol view (requires
+`perf` from `linux-tools` plus root or `kernel.perf_event_paranoid <= 2`),
+`--replay` populates the panels from the tail of every
+`/var/log/smartmet/*-access-log` on startup, and `-u` points at the
+SmartMet admin plugin for the polled cache/service/active-request data.
+
+![smtop default startup view (Live composite) on a SmartMet backend](doc/images/monitor_top.png)
+
 Each panel has one **red highlighted letter** in its tab label — pressing
 that letter (case-insensitive) jumps directly to it; `Tab`/`Shift-Tab`
 cycle through panels. Sparklines and charts use Braille (U+2800..U+28FF)
@@ -118,6 +132,8 @@ direction; the dedicated single-panel views below remain for sortable
    restarting smtop. The lower portion of the screen carries the
    perf-top symbol list so nothing is wasted on shallow stacks.
 
+   ![Flame view: live flamegraph for smartmetd plus perf-top symbol list](doc/images/monitor_flame.png)
+
 **Single-panel views**:
 
 4. **O**verview — totals (1m/5m/60m) plus four mini-charts
@@ -129,29 +145,52 @@ direction; the dedicated single-panel views below remain for sortable
    response size) over the last 60 seconds at 1-second resolution.
    `m` toggles time spark mean ↔ p95, `b` toggles size spark
    mean ↔ throughput, `i` shows/hides idle handlers.
+
+   ![Graphs panel: per-plugin tall layout with response-time and response-size charts](doc/images/monitor_overview.png)
 6. **U**RLs — live, sortable table with p50/p95/max latency, mean size,
    error %, and a per-URL latency sparkline. Press Enter to drill into
    a URL: windowed stats, 60-minute mean-latency sparkline, exponential
    histogram, status-code breakdown, and top API keys using that URL.
    ↑/↓ walk through URLs without leaving the drill-in.
+
+   ![URLs panel: per-endpoint latency table; note /download's chunked-transfer-inflated total bytes](doc/images/monitor_urls.png)
+
 7. **C**aches — per-cache size / hit rate / hits-per-minute bars plus
    a trend sparkline (from polled history).
+
+   ![Caches panel: per-cache hit rate, size and trend](doc/images/monitor_caches.png)
+
 8. **S**ervices — per-handler request rate + trend sparkline.
-9. **A**ctive — in-flight requests sorted by descending duration.
+
+   ![Services panel: per-handler request rates and tall trend charts](doc/images/monitor_services.png)
+
+9. **A**ctive — in-flight requests sorted by descending duration. The
+   Braille sparkline at the top tracks the in-flight count over the
+   recent admin-poll history.
+
+   ![Active panel: in-flight count sparkline at the top, current requests below](doc/images/monitor_active.png)
+
 10. **P**roc — `/proc`-based memory + I/O for each `smartmetd` process
    on the host, with RSS-split sparklines (file-backed vs anon vs
    shmem), `VmPTE`, swap, FDs, and on-demand `smaps_rollup`. Multiple
    smartmetd PIDs (frontend + backend) are switched via `n`/`N`. With
    `--perf`, the panel adds a live perf-top symbol view and a Braille
    flamegraph that updates each cycle (`f` toggles between them).
+
+   ![Proc panel: memory + I/O + perf-top symbols for the focused smartmetd PID](doc/images/monitor_proc.png)
+
 11. **L**ogs — multi-source `tail -F`. Each tailed plugin has its own
     ring buffer; the panel shows a tab bar of plugin names with the
     focused one marked, and ←↑→↓ switch between them. There's also
     an `[all]` virtual entry that pulls from a merged ring across
     every plugin. Enter / End jumps to the live tail; `/` filters
     within the focused source.
+
+    ![Logs panel: per-source tab bar with the focused log's tail bottom-anchored below](doc/images/monitor_logs.png)
+
 12. Api**k**eys — per-API-key aggregate stats; Enter drills into the
-    key to see top URLs it calls.
+    key to see top URLs it calls. *(No screenshot — would reveal
+    customer API keys.)*
 
 ### Data sources
 
@@ -162,6 +201,12 @@ direction; the dedicated single-panel views below remain for sortable
   each URL can be given a label: `-u prod=http://a/admin,dev=http://b/admin`.
   The panel chrome shows per-host status. Role (frontend/backend/mixed)
   is auto-detected from `?what=list` on startup.
+
+  Smoke-test the admin URL with `wget` or `curl` before pointing
+  `smtop` at it — the `?format=json` endpoints are what `smtop`
+  polls:
+
+  ![Verifying the admin endpoint with wget against a SmartMet backend](doc/images/monitor_health.png)
 
 ### Key reference (excerpt)
 
