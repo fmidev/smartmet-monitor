@@ -117,7 +117,19 @@ def count_fds(pid: int) -> int:
         return 0
 
 
-def _read_starttime_ticks(pid: int) -> Optional[int]:
+def _read_stat_fields(pid: int) -> Optional[list]:
+    """Return /proc/PID/stat fields starting at #3 (state).
+
+    The comm field (#2) is in parentheses and can contain spaces, so
+    we slice past the last `)` before whitespace-splitting. The
+    returned list is 0-indexed and aligns to the documented stat
+    fields as follows (kernel docs use 1-indexed):
+
+        list[0]  = state            (field 3)
+        list[7]  = minflt           (field 10)
+        list[9]  = majflt           (field 12)
+        list[19] = starttime        (field 22)
+    """
     try:
         text = _read_text(f"/proc/{pid}/stat")
     except OSError:
@@ -125,15 +137,34 @@ def _read_starttime_ticks(pid: int) -> Optional[int]:
     rp = text.rfind(")")
     if rp < 0:
         return None
-    fields = text[rp + 2:].split()
-    # Field 22 ("starttime") in the documented numbering — the comm field
-    # is gone after slicing past ")", so it lands at index 19 here.
-    if len(fields) <= 19:
+    return text[rp + 2:].split()
+
+
+def _read_starttime_ticks(pid: int) -> Optional[int]:
+    fields = _read_stat_fields(pid)
+    if fields is None or len(fields) <= 19:
         return None
     try:
         return int(fields[19])
     except ValueError:
         return None
+
+
+def read_majflt(pid: int) -> int:
+    """Cumulative major page-fault count (/proc/PID/stat field 12).
+
+    Major faults are page faults that required reading from disk —
+    a clear "fell out of page cache" signal for a memory-mapped
+    workload like SmartMet's QueryData files. Minor faults (field 10)
+    are cheaper and we don't track them.
+    """
+    fields = _read_stat_fields(pid)
+    if fields is None or len(fields) <= 9:
+        return 0
+    try:
+        return int(fields[9])
+    except ValueError:
+        return 0
 
 
 _BOOT_TIME_CACHE: Optional[float] = None
@@ -219,6 +250,7 @@ async def proc_loop(store) -> None:
                 continue
             if do_fd:
                 pids[pid]["fds"] = count_fds(pid)
+            majflt = read_majflt(pid)
             store.proc_update(
                 pid=pid,
                 ts=now,
@@ -234,6 +266,7 @@ async def proc_loop(store) -> None:
                 io_read_bytes=io.get("read_bytes", 0),
                 io_write_bytes=io.get("write_bytes", 0),
                 fds=pids[pid].get("fds", 0),
+                majflt=majflt,
             )
         if do_fd:
             last_fd = now

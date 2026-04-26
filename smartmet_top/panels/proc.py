@@ -61,6 +61,34 @@ def _io_rate(samples: List[ProcSample], field_name: str) -> float:
     return max(0.0, float(getattr(b, field_name) - getattr(a, field_name)) / dt)
 
 
+def _majflt_rate(samples: List[ProcSample]) -> float:
+    """Rate of major page faults per second, computed from the last
+    pair of samples — same shape as `_io_rate` so the sparkline
+    helpers can be re-used.
+    """
+    if len(samples) < 2:
+        return 0.0
+    a, b = samples[-2], samples[-1]
+    dt = b.ts - a.ts
+    if dt <= 0:
+        return 0.0
+    return max(0, b.majflt - a.majflt) / dt
+
+
+def _majflt_rate_series(samples: List[ProcSample]) -> List[float]:
+    if len(samples) < 2:
+        return []
+    out: List[float] = []
+    for i in range(1, len(samples)):
+        a, b = samples[i - 1], samples[i]
+        dt = b.ts - a.ts
+        if dt <= 0:
+            out.append(0.0)
+            continue
+        out.append(max(0, b.majflt - a.majflt) / dt)
+    return out
+
+
 def _io_rate_series(samples: List[ProcSample], field_name: str) -> List[float]:
     if len(samples) < 2:
         return []
@@ -301,6 +329,7 @@ class ProcPanel(Panel):
         row = self._draw_header(win, info, len(procs), top=sel_bottom)
         row = self._draw_memory(win, info, row)
         row = self._draw_io(win, info, row)
+        row = self._draw_page_faults(win, info, row)
         # Block-I/O latency is host-wide and only meaningful when the
         # biolat sampler ran at least once. Render only when enabled
         # (and when there's room) so unrelated hosts without bcc-tools
@@ -411,6 +440,42 @@ class ProcPanel(Panel):
                     theme.attr(theme.P_SPARK))
         x += spark_w + 2
         safe_addstr(win, row, x, f"FDs {human_count(latest.fds)}", 0)
+        return row + 2
+
+    def _draw_page_faults(self, win, info: ProcInfo, row: int) -> int:
+        """Major page-fault rate for this PID, with sparkline.
+
+        Major faults indicate "the page wasn't in RAM and we had to
+        read it from disk" — the canonical "fell out of page cache"
+        signal. SmartMet mmaps QueryData files, so when a model run
+        evicts the working set from page cache the next request that
+        touches those pages incurs a wave of major faults and a
+        latency spike that on-CPU profiling cannot see.
+        """
+        h, w = win.getmaxyx()
+        if row + 2 >= h:
+            return row
+        self._section_divider(win, row, "Page faults (major)")
+        row += 1
+        samples = list(info.samples)
+        rate = _majflt_rate(samples)
+        spark_w = max(15, min(60, w - 50))
+        # Colour the rate red when sustained — even a few hundred per
+        # second is enough to dominate latency for a meteorology
+        # workload, since each fault is a synchronous block read.
+        rate_attr = (theme.attr(theme.P_BAD, curses.A_BOLD) if rate > 100
+                     else theme.attr(theme.P_HEADER) if rate > 10
+                     else theme.attr(theme.P_HEADER))
+        cells = [
+            (f"  rate {rate:>7.1f}/s  ", rate_attr),
+            (f"total {samples[-1].majflt if samples else 0:>10}  ",
+             theme.attr(theme.P_DIM)),
+        ]
+        x = write_row(win, row, 0, cells)
+        series = _majflt_rate_series(samples)
+        if series:
+            safe_addstr(win, row, x, sparkline(series, width=spark_w),
+                        theme.attr(theme.P_SPARK))
         return row + 2
 
     def _draw_biolat(self, win, store, row: int) -> int:

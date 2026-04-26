@@ -286,6 +286,11 @@ class ProcSample:
     io_read_bytes: int = 0
     io_write_bytes: int = 0
     fds: int = 0
+    # Cumulative major page-fault counter (/proc/PID/stat field 12).
+    # Rate is computed by the panel as delta-per-second across samples,
+    # so storing the cumulative value keeps the math identical to how
+    # io_read_bytes / io_write_bytes are turned into rates.
+    majflt: int = 0
 
 
 @dataclass

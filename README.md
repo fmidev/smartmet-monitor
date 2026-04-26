@@ -347,6 +347,52 @@ Exports are written to `$SMARTMET_MONITOR_EXPORT_DIR`
 (falls back to `$SMARTMET_TOP_EXPORT_DIR`, then `/tmp`). A toast
 reports the exact path after write.
 
+### Reading the live monitors
+
+Every panel that draws a sparkline or histogram answers a specific
+operational question. The intent here is the
+[Brendan Gregg](https://www.brendangregg.com/) school of
+performance analysis: each metric is part of the
+[USE method](https://www.brendangregg.com/usemethod.html) story
+(Utilization / Saturation / Errors), and most have a "shape that
+means trouble" you can pattern-match on at a glance.
+
+#### Major page faults (Proc panel)
+
+**What it measures.** Number of page faults per second that
+required a synchronous read from disk — the kernel's "I asked for
+a page that wasn't resident in RAM" counter, taken from
+`/proc/PID/stat` field 12 (`majflt`) and rate-converted across
+samples.
+
+**Healthy shape.** Flat at 0 / s (or a thin floor of ones and
+twos) on a steady-state SmartMet server whose working set fits in
+page cache. The sparkline reads as a near-empty channel.
+
+**Trouble shape.** Bursts of hundreds-to-thousands per second,
+typically after a fresh model run rolls in. The on-CPU flame
+shows nothing unusual — threads are blocked in `do_swap_page` /
+`__readpage` deep in the kernel — but request p95 jumps several
+fold for the duration of the spike. A *sustained* high rate (e.g.
+50 + / s for minutes) is the signal that the working set has
+permanently outgrown RAM and the host is now read-from-disk-bound.
+
+**Why this is the killer SmartMet metric.** Querydata files are
+mmapped, so every "first touch" after a model run is a major
+fault. You will not see this in the on-CPU flamegraph (the kernel
+work is mostly waiting), nor in the access log (no errors), nor
+in CPU utilisation (idle threads). The pattern is "everything
+felt slow for a few minutes after the producer published" — and
+this graph proves it.
+
+**What to look at next.** Pair the page-fault sparkline with
+`Block I/O latency (host)` underneath: if both spike together, the
+disk caught the fault traffic; if page faults spike but I/O p95
+stays sane, the storage is keeping up and the latency is purely
+the time spent reading. Cross-reference with `RssFile` in the
+Memory section — a falling file-backed RSS at the same moment
+confirms eviction.
+
 ### Memory model
 
 * Per-URL stats are kept as one exponential-bin histogram (40 bins,

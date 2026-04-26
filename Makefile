@@ -100,7 +100,13 @@ check:
 	    assert tot == 255 and p50 == 15 and p95 == 31 and p99 == 31, (p50, p95, p99, tot); \
 	    bks_ms, unit_ms = parse_biolatency("     msecs               : count     distribution\n         0 -> 1          : 100\n"); \
 	    p50ms, _, _, totms = percentiles_us(bks_ms, unit_ms); \
-	    assert unit_ms == "msecs" and totms == 100 and p50ms == 1000, (p50ms, totms, unit_ms)'
+	    assert unit_ms == "msecs" and totms == 100 and p50ms == 1000, (p50ms, totms, unit_ms); \
+	    from smartmet_top.state.store import ProcSample; \
+	    from smartmet_top.panels.proc import _majflt_rate, _majflt_rate_series; \
+	    s = [ProcSample(ts=10.0, majflt=100), ProcSample(ts=11.0, majflt=200), ProcSample(ts=12.0, majflt=210)]; \
+	    assert _majflt_rate(s) == 10.0, _majflt_rate(s); \
+	    assert _majflt_rate_series(s) == [100.0, 10.0], _majflt_rate_series(s); \
+	    assert _majflt_rate([]) == 0.0 and _majflt_rate([s[0]]) == 0.0'
 	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
 	bash -n share/smartmet/bstat.sh
 	for t in $(BTOOLS) $(LEGACY); do bash -n bin/$$t; done

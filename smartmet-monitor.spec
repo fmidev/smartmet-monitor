@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.26
-Release:        4%{?dist}.fmi
+Release:        5%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -112,6 +112,18 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.26-5.fmi
+- Major page-fault rate per smartmetd PID. New section in the
+  Proc panel that reads /proc/PID/stat field 12 (majflt) on each
+  poll, computes the per-second rate, and renders it next to a
+  sparkline. The killer SmartMet metric: when a fresh model run
+  evicts QueryData pages from cache, the next request to touch
+  those mmapped files takes a wave of synchronous block reads,
+  invisible to on-CPU profiling. The README's new "Reading the
+  live monitors" section documents how to interpret the graph
+  in the Brendan Gregg style — healthy shape, trouble shape,
+  what to look at next when it goes red.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.26-4.fmi
 - Block-I/O latency in the Proc panel. Periodically runs
   `biolatency-bpfcc INTERVAL 1`, parses the power-of-2 microsecond
