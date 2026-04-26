@@ -265,10 +265,13 @@ class UrlsPanel(Panel):
         safe_addstr(win, 0, 0, hdr.ljust(w - 1),
                     theme.attr(theme.P_TAB_ACTIVE))
 
-        # table header
+        # table header — `avg_size` / `total` use human-readable
+        # bytes (1.2GB, 12.0TB) so chunked downloads with extreme
+        # accumulated byte counts don't render as raw MB-in-trillions.
         cols_text = (
             f"{'URL':<40}  {'reqs':>7} {'mean':>7} {'p50':>7} {'p95':>7} "
-            f"{'max':>7}  {'KB':>6} {'MB':>7} {'err%':>5}  {'latency ' + str(eff_win_min) + 'm':<30}"
+            f"{'max':>7}  {'avg_sz':>8} {'total':>8} {'err%':>5}  "
+            f"{'latency ' + str(eff_win_min) + 'm':<30}"
         )
         safe_addstr(win, 2, 0, cols_text,
                     theme.attr(theme.P_HEADER, curses.A_BOLD))
@@ -312,8 +315,8 @@ class UrlsPanel(Panel):
             p50 = b.hist.p50()
             p95 = b.hist.p95()
             max_ms = b.hist.max_ms
-            avg_kb = (b.bytes / count / 1024) if count else 0
-            tot_mb = b.bytes / 1_048_576
+            avg_sz = human_bytes(b.bytes / count) if count else "0B"
+            tot_sz = human_bytes(b.bytes)
             err_pct = (b.errors / count * 100) if count else 0
 
             row_attr = curses.A_REVERSE if self.scroll + i == self.cursor else 0
@@ -324,8 +327,8 @@ class UrlsPanel(Panel):
                 (f"{human_ms(p50):>7} ", theme.latency_color(p50)),
                 (f"{human_ms(p95):>7} ", theme.latency_color(p95)),
                 (f"{human_ms(max_ms):>7}  ", theme.latency_color(max_ms)),
-                (f"{avg_kb:>6.1f} ", 0),
-                (f"{tot_mb:>7.2f} ", 0),
+                (f"{avg_sz:>8} ", 0),
+                (f"{tot_sz:>8} ", 0),
                 (f"{err_pct:>4.1f}%  ", theme.err_color(err_pct)),
             ]
             x_end = write_row(win, row, 0, cells, row_attr=row_attr)
@@ -369,8 +372,8 @@ class UrlsPanel(Panel):
         row += 1
         safe_addstr(win, row, 2,
                     f"{'window':>8}  {'reqs':>8} {'mean':>7} {'p50':>7} "
-                    f"{'p95':>7} {'p99':>7} {'max':>7}  {'avg_KB':>7} "
-                    f"{'MB':>8} {'err%':>5}",
+                    f"{'p95':>7} {'p99':>7} {'max':>7}  {'avg_sz':>8} "
+                    f"{'total':>8} {'err%':>5}",
                     theme.attr(theme.P_HEADER))
         row += 1
         safe_addstr(win, row, 2, "─" * min(w - 4, 90), theme.attr(theme.P_DIM))
@@ -388,8 +391,8 @@ class UrlsPanel(Panel):
                 (f"{human_ms(b.hist.p95()):>7} ", theme.latency_color(b.hist.p95())),
                 (f"{human_ms(b.hist.p99()):>7} ", theme.latency_color(b.hist.p99())),
                 (f"{human_ms(b.hist.max_ms):>7}  ", 0),
-                (f"{(b.bytes / b.count / 1024):>7.1f} ", 0),
-                (f"{b.bytes / 1_048_576:>8.2f} ", 0),
+                (f"{human_bytes(b.bytes / b.count) if b.count else '0B':>8} ", 0),
+                (f"{human_bytes(b.bytes):>8} ", 0),
                 (f"{err_pct:>4.1f}%", theme.err_color(err_pct)),
             ]
             write_row(win, row, 2, cells)

@@ -80,8 +80,13 @@ class LogsPanel(Panel):
             self.scroll = max(0, self.scroll - 1)
             if self.scroll == 0:
                 self.follow = True
-        elif key in (10, 13, curses.KEY_ENTER, curses.KEY_END):
+        elif key in (10, 13, curses.KEY_ENTER, curses.KEY_END,
+                     ord("0"), ord(">")):
             # Lock onto the focused source and jump to the live tail.
+            # Multiple bindings — Enter, End, 0 and > — because some
+            # terminals don't deliver curses.KEY_END as the expected
+            # code. If End doesn't follow but 0 or > does, the key
+            # delivery is the problem rather than the implementation.
             self.scroll = 0
             self.follow = True
         elif key == curses.KEY_PPAGE:
@@ -128,7 +133,7 @@ class LogsPanel(Panel):
             f" Logs — {sel_display}  "
             f"{'FOLLOW' if self.follow else 'scrolled'}  "
             f"filter:{self.filter or '<none>'}  "
-            "(←→ source  ↑↓ scroll  End live  / filter)"
+            "(←→ source  ↑↓ scroll  End/0/> follow  / filter)"
         )
         safe_addstr(win, 0, 0, hdr.ljust(w - 1),
                     theme.attr(theme.P_TAB_ACTIVE))

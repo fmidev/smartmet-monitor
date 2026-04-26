@@ -27,10 +27,15 @@ class AdminView(CompositeView):
 
     def __init__(self) -> None:
         super().__init__()
+        # Order top-to-bottom by operational priority: per-handler load
+        # (Services) and what's currently in flight (Active) are the
+        # signals operators usually look for first. Caches drops to
+        # the bottom — useful but rarely the bottleneck on a healthy
+        # day.
         self._regions = [
-            ("caches", CachesPanel()),
             ("services", ServicesPanel()),
             ("active", ActivePanel()),
+            ("caches", CachesPanel()),
         ]
 
     def geometry(self, H: int, W: int) -> List[Tuple[int, int, int, int]]:

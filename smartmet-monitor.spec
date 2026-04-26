@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.7.11
+Version:        0.7.12
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,24 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.12-1
+- Health composite: reorder regions Services / Active / Caches.
+  Per-handler load and what's currently in flight are the signals
+  operators usually look for first; cache stats drop to the bottom
+  since they're rarely the headline issue on a healthy day.
+- URLs panel: `KB` and `MB` columns replaced with `avg_sz` /
+  `total` rendered via human_bytes(), so a Download plugin
+  accumulating chunked-transfer-inflated bytes shows
+  `1.2TB` instead of misformatted `1200000.00 MB`. Drill-in
+  windowed-stats table gets the same treatment. The underlying
+  bytes counter from SmartMet's AccessLogger is unchanged — this
+  only fixes the rendering.
+- Logs panel: add 0 and > as alternative bindings for "follow
+  live tail" alongside Enter and End. Some terminals don't deliver
+  curses.KEY_END as the expected code, and these letter keys
+  test whether End-key delivery or the implementation is the
+  problem. Header help advertises End/0/> follow.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.11-1
 - Fix the "TypeError: object of type 'function' has no len()" error
   in the Live composite's embedded Plugins panel. The Graphs panel
