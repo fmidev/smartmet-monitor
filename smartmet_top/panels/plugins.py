@@ -57,8 +57,12 @@ class PluginsPanel(Panel):
         "size mean↔throughput, s cycles sort, r reverses sort."
     )
 
-    def __init__(self, default_window_idx: int = 0) -> None:
-        self.cursor = 0
+    def __init__(self, default_window_idx: int = 0,
+                 default_cursor: int = 0) -> None:
+        # default_cursor=-1 suppresses the cursor highlight entirely;
+        # used by the Live composite, which is display-only and where
+        # an arbitrary "selected row" indicator would be misleading.
+        self.cursor = default_cursor
         self.scroll = 0
         # Spark metric toggles
         self.time_metric = "mean_ms"   # ↔ "p95_ms"
@@ -98,6 +102,14 @@ class PluginsPanel(Panel):
             self.cursor = max(0, self.cursor - 1)
         elif key in (curses.KEY_DOWN, ord("j")):
             self.cursor += 1
+        elif key in (10, 13, curses.KEY_ENTER):
+            # Drill into the URLs panel filtered by the selected
+            # plugin's label, so the operator can see which URLs
+            # under that plugin are slow / busy.
+            rows = self._sorted_rows(store)
+            if rows and 0 <= self.cursor < len(rows):
+                plugin_label = rows[self.cursor][0].label
+                store.pending_panel_switch = ("u", {"filter": plugin_label})
         elif key == curses.KEY_PPAGE:
             self.cursor = max(0, self.cursor - 10)
         elif key == curses.KEY_NPAGE:
@@ -307,10 +319,13 @@ class PluginsPanel(Panel):
 
         visible = rows[self.scroll : self.scroll + body_h]
 
-        # Compute per-column max across visible rows so each spark
-        # auto-scales to its own data range, independent of the others.
-        # Pull `spark_samples` data points so the spark column is
-        # filled rather than mostly leading zeros.
+        # Pull `spark_samples` data points per row so each spark fills
+        # its column instead of being mostly zero-padding. Each row's
+        # spark is then scaled to its OWN max (not a column-wide max),
+        # which is essential here: a high-traffic plugin like wms can
+        # have 100x the request rate of a low-traffic one, and a
+        # column-wide max would crush every other plugin's spark to
+        # near-zero.
         time_series_cache: List[List[float]] = []
         size_series_cache: List[List[float]] = []
         for src, _ in visible:
@@ -320,8 +335,6 @@ class PluginsPanel(Panel):
             else:
                 time_series_cache.append(src.minute_series(self.time_metric, spark_samples))
                 size_series_cache.append(src.minute_series(self.size_metric, spark_samples))
-        time_max = max((max(s, default=0.0) for s in time_series_cache), default=0.0)
-        size_max = max((max(s, default=0.0) for s in size_series_cache), default=0.0)
 
         # req/s normalisation: in second-mode, snap.count is over
         # `span` seconds; in minute-mode, over `span` minutes.
@@ -349,15 +362,18 @@ class PluginsPanel(Panel):
             ]
             x = write_row(win, y, 0, cells, row_attr=row_attr)
 
+            # maxval=0 → sparkline auto-scales to this row's own data,
+            # so every plugin's pattern stays visible regardless of
+            # absolute magnitude.
             time_spark = sparkline(
-                time_series_cache[i], maxval=time_max, width=time_w
+                time_series_cache[i], maxval=0.0, width=time_w
             )
             safe_addstr(win, y, x, time_spark,
                         theme.attr(theme.P_WARN) | row_attr)
             x += time_w + 2
 
             size_spark = sparkline(
-                size_series_cache[i], maxval=size_max, width=size_w
+                size_series_cache[i], maxval=0.0, width=size_w
             )
             safe_addstr(win, y, x, size_spark,
                         theme.attr(theme.P_GOOD) | row_attr)

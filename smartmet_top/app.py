@@ -159,6 +159,19 @@ class App:
         except Exception as e:
             self.last_error = f"{type(e).__name__}: {e}"
             consumed = True
+        # A panel may have asked to drill into another panel — e.g. the
+        # Plugins panel's Enter wants to take the operator to the URLs
+        # panel filtered by the selected plugin label.
+        if self.store.pending_panel_switch is not None:
+            target, params = self.store.pending_panel_switch
+            self.store.pending_panel_switch = None
+            for i, panel in enumerate(self.panels):
+                if panel.hotkey == target:
+                    self.show_help = False
+                    self.panel_idx = i
+                    if "filter" in params and hasattr(panel, "set_filter"):
+                        panel.set_filter(params["filter"])
+                    break
         if consumed:
             return
 

@@ -406,6 +406,11 @@ class Store:
         # status: data source health
         self.logtail_status: str = "(starting)"
         self.admin_status: Dict[str, str] = {}
+        # Cross-panel "drill into another panel" request. A panel sets
+        # this to (target_hotkey, params_dict) when the operator drills
+        # in (e.g. Plugins → URLs filtered by plugin label); the App
+        # consumes and clears it after each key event.
+        self.pending_panel_switch: Optional[Tuple[str, Dict[str, str]]] = None
         # /proc-derived per-PID stats for smartmetd processes
         self.procs: Dict[int, ProcInfo] = {}
         # Per-access-log-file (per-plugin) live stats. Key is the log

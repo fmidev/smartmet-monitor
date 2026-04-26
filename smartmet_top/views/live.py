@@ -34,8 +34,12 @@ class LiveView(CompositeView):
         # so the operator can't widen it from here. Initial window 2
         # = "5m" (per-minute resolution) is populated by --replay's
         # minute buckets, so the Live view always has something to show.
+        # default_cursor=-1 suppresses the cursor highlight on the
+        # embedded Plugins panel — a "selected" indicator is misleading
+        # in the display-only Live composite where the operator can't
+        # actually select anything from this view.
         self._regions = [
-            ("plugins", PluginsPanel(default_window_idx=2)),
+            ("plugins", PluginsPanel(default_window_idx=2, default_cursor=-1)),
             ("urls", UrlsPanel()),
         ]
 

@@ -47,6 +47,10 @@ class UrlsPanel(Panel):
         self.sort_idx = 1  # p95
         self.reverse = True
         self.window_idx = 1  # 5 minutes
+        # Set by _sorted_urls each draw — what the panel actually
+        # rendered, which can differ from window_idx when the selected
+        # window was empty and we auto-widened.
+        self._effective_window_idx = self.window_idx
         self.cursor = 0
         self.scroll = 0
         self.filter = ""
@@ -175,10 +179,34 @@ class UrlsPanel(Panel):
             ])
         return headers, out
 
+    # External hook for cross-panel drill-in (Plugins → URLs filtered).
+    def set_filter(self, value: str) -> None:
+        self.filter = value
+        self.cursor = 0
+        self.scroll = 0
+        # Reset detail mode so the operator lands on the table.
+        self.detail_url = None
+
     # ---- selection / sort --------------------------------------------------
 
     def _sorted_urls(self, store) -> List[Tuple[str, MinuteBucket]]:
-        win_min = WINDOWS[self.window_idx]
+        # Auto-widen: if the operator's selected window has no URL data
+        # (common right after --replay since recent log activity may all
+        # be older than e.g. 5 minutes), fall through to the next wider
+        # window with data. Mirrors the Plugins panel behaviour.
+        rows = self._collect_urls(store, self.window_idx)
+        self._effective_window_idx = self.window_idx
+        if not rows:
+            for try_idx in range(self.window_idx + 1, len(WINDOWS)):
+                widened = self._collect_urls(store, try_idx)
+                if widened:
+                    rows = widened
+                    self._effective_window_idx = try_idx
+                    break
+        return rows
+
+    def _collect_urls(self, store, window_idx: int) -> List[Tuple[str, MinuteBucket]]:
+        win_min = WINDOWS[window_idx]
         urls = store.snapshot_urls(win_min)
         if self.filter:
             f = self.filter.lower()
@@ -223,11 +251,18 @@ class UrlsPanel(Panel):
         h, w = win.getmaxyx()
         urls = self._sorted_urls(store)
 
-        # header bar
+        # header bar — when auto-widened, surface both the user's
+        # selection and the effective rendered window so nothing is
+        # silently swapped.
         win_min = WINDOWS[self.window_idx]
+        eff_win_min = WINDOWS[self._effective_window_idx]
         sort_name = SORT_COLS[self.sort_idx][0]
+        if self._effective_window_idx != self.window_idx:
+            window_str = f"window:{win_min}m→{eff_win_min}m(auto-widened)"
+        else:
+            window_str = f"window:{win_min}m"
         hdr = (
-            f" window:{win_min}m  sort:{sort_name}{'↓' if self.reverse else '↑'}"
+            f" {window_str}  sort:{sort_name}{'↓' if self.reverse else '↑'}"
             f"  urls:{len(urls)}  filter:{self.filter or '<none>'}"
             f"  [s/S:sort r:reverse [/]:window /:filter enter:drill"
         )
@@ -237,7 +272,7 @@ class UrlsPanel(Panel):
         # table header
         cols_text = (
             f"{'URL':<40}  {'reqs':>7} {'mean':>7} {'p50':>7} {'p95':>7} "
-            f"{'max':>7}  {'KB':>6} {'MB':>7} {'err%':>5}  {'latency ' + str(win_min) + 'm':<30}"
+            f"{'max':>7}  {'KB':>6} {'MB':>7} {'err%':>5}  {'latency ' + str(eff_win_min) + 'm':<30}"
         )
         safe_addstr(win, 2, 0, cols_text,
                     theme.attr(theme.P_HEADER, curses.A_BOLD))

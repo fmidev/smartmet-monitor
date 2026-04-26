@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.7.2
+Version:        0.7.3
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,32 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.3-1
+- Per-plugin sparks in Plugins/Live panels now scale to each row's
+  own data range, not a column-wide max. The previous shared max
+  meant a high-traffic plugin like wms saturated its spark to full
+  while every other plugin (timeseries, wfs, ...) got crushed to
+  near-empty. Now each row's pattern is visible regardless of the
+  absolute magnitude difference; the numeric columns carry the
+  comparable magnitudes.
+- Live composite no longer renders a cursor highlight on the
+  embedded Plugins panel. The selection indicator was misleading
+  because Live is display-only and there's no way to actually
+  change the cursor from inside the composite. (`default_cursor=-1`
+  on the embedded PluginsPanel.)
+- Plugins panel: pressing Enter on a plugin row now switches to
+  the URLs panel filtered by that plugin's label. The URLs panel
+  shows the URL endpoints under that plugin so the operator can
+  trace which specific paths are slow / busy. Cross-panel drill-in
+  goes through a new store.pending_panel_switch field that the App
+  consumes after each key event.
+- URLs panel: same auto-widen behaviour the Plugins panel got in
+  0.5.6. When the selected window has no URL data — common right
+  after --replay because recent log activity may all be older than
+  e.g. 5 minutes — the panel auto-widens to the next window with
+  data. Header reads "window:5m→60m(auto-widened)" so the swap is
+  visible.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.2-1
 - parse_iso: handle SmartMet's comma decimal separator. The
   AccessLogger emits timestamps like `2026-04-25T19:57:49,567645`,
