@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.4.0
+Version:        0.5.0
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,24 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.5.0-1
+- Flame view: stop wasting the rows below the flame tree. Production
+  stacks are typically 8-15 frames deep, so on a 40-row terminal half
+  the screen was blank. The view now caps the flame to the upper
+  portion and fills the lower portion with the same top-symbols list
+  the Proc panel shows (mean / p95 sample sparklines included).
+- Flame view: interactive zoom. Cursor keys navigate the tree —
+  ↑ parent, ↓ most-used child, ←/→ previous/next sibling at the
+  same depth — and the selected frame is highlighted. Enter zooms
+  in (selected frame becomes the new visible root); Esc / u zooms
+  out one level; 0 / Home resets all the way back to the global
+  root. The tab header carries a breadcrumb (`zoom=main > engine_run
+  > Q::values`) so the operator always knows where they are.
+- Flame zoom degrades gracefully: if the zoomed function disappears
+  from the most recent stacks (because the program moved on), the
+  view walks the zoom path back up until it finds something to
+  render rather than going blank.
+
 * Sat Apr 25 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.4.0-1
 - Plugins panel: add window selector. `[` and `]` cycle through 60s
   (live, per-second), 1m, 5m, 15m, 60m. The 60s mode is unchanged

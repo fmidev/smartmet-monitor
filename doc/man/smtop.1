@@ -170,7 +170,22 @@ Toggle time spark mean\(<>p95 / size spark mean\(<>throughput / idle
 handlers shown\(<>hidden in the Graphs panel.
 .TP
 .BR f
-Toggle live flamegraph view (Proc panel, requires \-\-perf).
+Toggle inline flamegraph view (Proc panel, requires \-\-perf), or
+switch to the dedicated Flame view from any other panel.
+.TP
+.BR ↑↓←→ " (Flame view)"
+Navigate the flame tree: parent / most\-used child / previous / next
+sibling at the same depth. The selected frame is drawn with reverse
+video.
+.TP
+.BR Enter " (Flame view)"
+Zoom into the selected frame: it becomes the new visible root.
+.TP
+.BR Esc " / " u " (Flame view)"
+Zoom out one level.
+.TP
+.BR 0 " / " Home " (Flame view)"
+Reset zoom all the way back to the global root.
 .TP
 .BR e " / " E
 Export the current panel to CSV / JSON under

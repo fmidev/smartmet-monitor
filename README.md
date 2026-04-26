@@ -110,7 +110,11 @@ direction; the dedicated single-panel views below remain for sortable
    (bottom), in equal thirds. Operator goal: "is this server healthy?"
 3. **f**lame — full-screen live flamegraph for the focused
    `smartmetd` PID. Requires `--perf`. Rebuilds every perf cycle from
-   the most recent ~2000 stack samples.
+   the most recent ~2000 stack samples. Cursor keys navigate the
+   tree, Enter zooms into the selected frame, Esc / `u` zooms out,
+   `0` / Home resets to the root. The lower portion of the screen
+   carries the perf-top symbol list so nothing is wasted on shallow
+   stacks.
 
 **Single-panel views**:
 
@@ -167,8 +171,9 @@ direction; the dedicated single-panel views below remain for sortable
 | `r`              | reverse sort, or run `smaps_rollup` (Proc panel)    |
 | `[` / `]`        | shrink / grow time window (1 / 5 / 15 / 60 min)     |
 | `h` / `t` / `y`  | toggle histogram / status / API-key sections in URLs drill-in |
-| `n` / `N`        | next / prev smartmetd PID (Proc panel)              |
-| `f`              | toggle flamegraph view (Proc panel, `--perf` only)  |
+| `n` / `N`        | next / prev smartmetd PID (Proc and Flame panels)   |
+| `f`              | toggle inline flamegraph (Proc); also the Flame view mnemonic |
+| `↑↓←→` `Enter` `Esc/u` `0` | navigate / zoom in / zoom out / reset (Flame view) |
 | `m` / `b` / `i`  | toggle time spark / size spark / idle handlers (Graphs panel) |
 | `e` / `E`        | export current panel as CSV / JSON                  |
 | `q` / `Ctrl-C`   | quit                                                |
