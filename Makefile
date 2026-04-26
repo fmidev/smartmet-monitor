@@ -142,7 +142,12 @@ check:
 	    assert [a.id for a in st.alerts_active()] == ["t2"]; \
 	    assert st.alerts_for("p") == []; \
 	    assert [a.id for a in st.alerts_for("f")] == ["t2"]; \
-	    assert _format_age(45) == "45s" and _format_age(120) == "2m" and _format_age(3700) == "1h"'
+	    assert _format_age(45) == "45s" and _format_age(120) == "2m" and _format_age(3700) == "1h"; \
+	    from smartmet_top.sources import profile_caps as _pc; \
+	    assert "/usr/share/bcc/tools" in _pc._BCC_SEARCH_DIRS, _pc._BCC_SEARCH_DIRS; \
+	    assert _pc._find_bcc_tool("definitely-not-installed-bpfcc") is None; \
+	    assert "bcc-tools" in _pc._bcc_install_hint("offcputime"); \
+	    assert "/usr/share/bcc/tools" in _pc._bcc_install_hint("offcputime")'
 	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
 	bash -n share/smartmet/bstat.sh
 	for t in $(BTOOLS) $(LEGACY); do bash -n bin/$$t; done

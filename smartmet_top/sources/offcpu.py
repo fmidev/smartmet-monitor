@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import shutil
 import time
 from typing import List, Optional, Tuple
 
@@ -117,11 +116,11 @@ async def offcpu_loop(store, interval: float = 10.0,
         return
     store.offcpu_backend = backend
     if backend == "bcc":
-        bcc_path = shutil.which("offcputime-bpfcc") or shutil.which("offcputime")
+        bcc_path = profile_caps._find_bcc_tool("offcputime-bpfcc", "offcputime")
         if not bcc_path:
             # Lost between probe and use — extremely unlikely but possible
-            # if PATH changed or bcc-tools was uninstalled mid-session.
-            store.offcpu_status = "offcputime disappeared from PATH"
+            # if /usr changed or bcc-tools was uninstalled mid-session.
+            store.offcpu_status = "offcputime disappeared between probe and use"
             store.offcpu_enabled = False
             return
         store.offcpu_enabled = True

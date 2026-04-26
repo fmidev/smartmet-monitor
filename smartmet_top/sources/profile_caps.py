@@ -29,10 +29,53 @@ import os
 import platform
 import shutil
 from functools import lru_cache
-from typing import Tuple
+from typing import Optional, Tuple
 
 
 CapResult = Tuple[bool, str]
+
+
+# Where bcc-tools binaries live across the distros we support, in
+# preferred order. shutil.which() only walks $PATH; on RHEL 8
+# `/usr/share/bcc/tools/` (the package's actual script directory)
+# is usually not in PATH, and `/usr/sbin/` is dropped by sudo's
+# default `secure_path`. Probing these directories directly catches
+# both cases without making the operator export PATH.
+_BCC_SEARCH_DIRS = (
+    "/usr/sbin",                # Fedora / RHEL 9+ / RHEL 8 wrappers
+    "/usr/share/bcc/tools",     # RHEL 8 default, Python scripts directly
+    "/usr/share/bpfcc-tools",   # Debian / Ubuntu (bpfcc-tools package)
+    "/usr/local/sbin",
+    "/usr/local/share/bcc/tools",
+)
+
+
+def _find_bcc_tool(*candidates: str) -> Optional[str]:
+    """Find a bcc-tools binary by name, falling back from $PATH to the
+    well-known install directories. Returns the absolute path when
+    found, None otherwise. Each candidate is tried in turn — typically
+    `("offcputime-bpfcc", "offcputime")` so the suffixed wrapper wins
+    if both exist.
+    """
+    for name in candidates:
+        path = shutil.which(name)
+        if path:
+            return path
+        for base in _BCC_SEARCH_DIRS:
+            full = os.path.join(base, name)
+            if os.path.isfile(full) and os.access(full, os.X_OK):
+                return full
+    return None
+
+
+def _bcc_install_hint(tool: str) -> str:
+    """Helpful, distro-aware not-found message that lists where we
+    looked. Shown verbatim in the panel install hint, so it should
+    name the package the operator can install."""
+    where = ", ".join(_BCC_SEARCH_DIRS)
+    return (f"{tool} not found in $PATH or {where} "
+            f"— install bcc-tools (RHEL/Fedora: dnf install bcc-tools; "
+            f"Debian/Ubuntu: apt install bpfcc-tools)")
 
 
 @lru_cache(maxsize=1)
@@ -85,22 +128,24 @@ def have_perf_offcpu() -> CapResult:
 
 @lru_cache(maxsize=1)
 def have_offcputime_bcc() -> CapResult:
-    """bcc-tools' offcputime command (preferred over the perf path)."""
-    for binary in ("offcputime-bpfcc", "offcputime"):
-        path = shutil.which(binary)
-        if path:
-            return True, path
-    return False, ("offcputime not in PATH "
-                   "(dnf install bcc-tools)")
+    """bcc-tools' offcputime command (preferred over the perf path).
+
+    Looks in $PATH and the canonical bcc install directories — see
+    `_find_bcc_tool` for the rationale (RHEL 8 puts the script in
+    /usr/share/bcc/tools/, sudo's secure_path often omits /usr/sbin).
+    """
+    path = _find_bcc_tool("offcputime-bpfcc", "offcputime")
+    if path:
+        return True, path
+    return False, _bcc_install_hint("offcputime")
 
 
 @lru_cache(maxsize=1)
 def have_biolatency_bcc() -> CapResult:
-    for binary in ("biolatency-bpfcc", "biolatency"):
-        path = shutil.which(binary)
-        if path:
-            return True, path
-    return False, "biolatency not in PATH (dnf install bcc-tools)"
+    path = _find_bcc_tool("biolatency-bpfcc", "biolatency")
+    if path:
+        return True, path
+    return False, _bcc_install_hint("biolatency")
 
 
 @lru_cache(maxsize=1)

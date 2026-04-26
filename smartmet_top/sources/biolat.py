@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import shutil
 import time
 from typing import List, Optional, Tuple
 
@@ -147,10 +146,10 @@ async def biolat_loop(store, window_seconds: float = 5.0) -> None:
         store.biolat_status = info
         store.biolat_enabled = False
         return
-    binary: Optional[str] = (shutil.which("biolatency-bpfcc")
-                              or shutil.which("biolatency"))
+    binary: Optional[str] = profile_caps._find_bcc_tool(
+        "biolatency-bpfcc", "biolatency")
     if not binary:
-        store.biolat_status = "biolatency disappeared from PATH"
+        store.biolat_status = "biolatency disappeared between probe and use"
         store.biolat_enabled = False
         return
     store.biolat_enabled = True

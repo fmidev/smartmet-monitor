@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.26
-Release:        10%{?dist}.fmi
+Release:        11%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -112,6 +112,21 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.26-11.fmi
+- Fix bcc-tools detection on RHEL 8. shutil.which only walks
+  $PATH; the bcc-tools package on RHEL 8 installs scripts
+  directly to /usr/share/bcc/tools/ (no -bpfcc suffix), and
+  /usr/sbin/ is dropped by sudo's default secure_path. Both
+  cases produced "off-CPU profiling unavailable" install hints
+  even when bcc-tools was correctly installed. The new
+  profile_caps._find_bcc_tool() helper falls back from $PATH to
+  the canonical install directories used by RHEL, Fedora, and
+  Debian/Ubuntu, so the off-CPU flame, biolatency and runqlat
+  panels now light up automatically once the package is
+  present. The install-hint message also names the directories
+  it searched, so when a tool genuinely isn't available the
+  operator knows where it would have lived.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.26-10.fmi
 - Doc audit. Updated the Proc panel description in the panel
   listing to enumerate every section it now contains (Memory,

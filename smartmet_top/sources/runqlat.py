@@ -30,7 +30,6 @@ sources/biolat.py rather than duplicating the regex.
 from __future__ import annotations
 
 import asyncio
-import shutil
 import time
 from functools import lru_cache
 from typing import Optional, Tuple
@@ -41,11 +40,13 @@ from .biolat import parse_biolatency, percentiles_us
 
 @lru_cache(maxsize=1)
 def have_runqlat_bcc() -> Tuple[bool, str]:
-    for binary in ("runqlat-bpfcc", "runqlat"):
-        path = shutil.which(binary)
-        if path:
-            return True, path
-    return False, "runqlat not in PATH (dnf install bcc-tools)"
+    """Reuses profile_caps._find_bcc_tool so $PATH-restricted
+    environments (sudo with secure_path, /usr/share/bcc/tools/ not
+    in PATH) still find the binary."""
+    path = profile_caps._find_bcc_tool("runqlat-bpfcc", "runqlat")
+    if path:
+        return True, path
+    return False, profile_caps._bcc_install_hint("runqlat")
 
 
 async def _run_runqlat(binary: str, window_seconds: int
@@ -76,10 +77,10 @@ async def runqlat_loop(store, window_seconds: float = 5.0) -> None:
         store.runqlat_status = info
         store.runqlat_enabled = False
         return
-    binary: Optional[str] = (shutil.which("runqlat-bpfcc")
-                              or shutil.which("runqlat"))
+    binary: Optional[str] = profile_caps._find_bcc_tool(
+        "runqlat-bpfcc", "runqlat")
     if not binary:
-        store.runqlat_status = "runqlat disappeared from PATH"
+        store.runqlat_status = "runqlat disappeared between probe and use"
         store.runqlat_enabled = False
         return
     store.runqlat_enabled = True
