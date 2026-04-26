@@ -38,16 +38,16 @@ to its section:
 
 | Command | Synopsis |
 |---------|----------|
-| [`bstat`](#bstat--bucketed-dashboard)                              | `[-i INTERVAL] [-w WIDTH] [-H HEIGHT] [--ascii] [LOG]` |
-| [`bchart`](#bchart--single-metric-vertical-chart)                  | `[-i INTERVAL] [-m reqs\|ms\|kb\|mb\|err] [-H HEIGHT] [-w CELLW] [--ascii] [LOG]` |
+| [`bstat`](#bstat--bucketed-dashboard)                              | `[-i INTERVAL] [-w WIDTH] [-h HEIGHT] [--ascii] [LOG]` |
+| [`bchart`](#bchart--single-metric-vertical-chart)                  | `[-i INTERVAL] [-m reqs\|ms\|kb\|mb\|err] [-h HEIGHT] [-w CELLW] [--ascii] [LOG]` |
 | [`burls`](#burls--top-urls-with-query-string-filtering)            | `[-n N] [-s reqs\|ms\|kb\|mb] [-d\|-k LIST] [-L\|-i] [LOG]` |
-| [`bstatus`](#bstatus--http-status-code-distribution)               | `[-i INTERVAL] [-H HEIGHT] [--ascii] [LOG]` |
+| [`bstatus`](#bstatus--http-status-code-distribution)               | `[-i INTERVAL] [-h HEIGHT] [--ascii] [LOG]` |
 | [`bkeys`](#bkeys--top-api-keys)                                    | `[-n N] [-s reqs\|ms\|mb] [LOG]` |
 
 `INTERVAL` is one of `1s | 10s | 1m | 2m | 5m | 10m | 1h | 1d`.
 Most intervals snap to a digit boundary, so they are extracted by
 truncating the ISO-8601 timestamp; `2m` and `5m` use minute-rounding
-instead. `-H HEIGHT` sets the Braille chart height (in character rows)
+instead. `-h HEIGHT` sets the Braille chart height (in character rows)
 consistently for `bstat`, `bchart`, and `bstatus` — defaults to `4`
 for the sparkline footer in bstat / bstatus and `12` for bchart.
 
@@ -58,24 +58,24 @@ you omit the argument on a SmartMet host.
 
 ```sh
 bstat -i 1h          wms-access-log         # default sparkline height (4)
-bstat -i 1h -H 1     wms-access-log         # compact, single-row sparklines
-bstat -i 1h -H 5     wms-access-log         # taller multi-row sparklines
+bstat -i 1h -h 1     wms-access-log         # compact, single-row sparklines
+bstat -i 1h -h 5     wms-access-log         # taller multi-row sparklines
 ```
 
 Per-row half-height bars for requests / latency / size / bandwidth,
 with multi-row Braille sparklines underneath that show each metric
-as a time series. `-H` tunes the sparkline height: `-H 1` collapses
+as a time series. `-h` tunes the sparkline height: `-h 1` collapses
 to a single dot-ramp row that fits short terminals, while higher
 values give 4 dot rows of vertical resolution per char-row.
 
-Compact form (`-H 1`):
+Compact form (`-h 1`):
 
-![bstat -i 1h -H 1: compact single-row sparkline mode on a 24-hour WMS log](doc/images/bstat_1h_H1.png)
+![bstat -i 1h -h 1: compact single-row sparkline mode on a 24-hour WMS log](doc/images/bstat_1h_H1.png)
 
-Taller form (`-H 5`) on the same data — the sparkline shape becomes
+Taller form (`-h 5`) on the same data — the sparkline shape becomes
 much easier to read:
 
-![bstat -H 5: taller multi-row Braille sparklines for screens with vertical room](doc/images/bstat_H5.png)
+![bstat -h 5: taller multi-row Braille sparklines for screens with vertical room](doc/images/bstat_H5.png)
 
 ### `bchart` — single-metric vertical chart
 
@@ -152,7 +152,7 @@ continue to work during a gradual rollout:
 | `bstat24`   | `bstat -i 1d`     |
 
 All six forward their arguments to `bstat`, so you can still pass
-`--ascii` / `-w` / `-H` / a log file path. New scripts should prefer
+`--ascii` / `-w` / `-h` / a log file path. New scripts should prefer
 the `bstat -i X` form directly.
 
 ### `--ascii` mode
@@ -160,7 +160,7 @@ the `bstat -i X` form directly.
 Pass `--ascii` to `bstat`, `bchart`, or `bstatus` to render with
 plain ASCII (`=` bars, `. : | #` sparkline ramp) instead of
 half-height Unicode and Braille. The sparkline footer collapses to
-a single dot-ramp row regardless of `-H`. Useful for scripts that
+a single dot-ramp row regardless of `-h`. Useful for scripts that
 grep the output, or for terminals without reliable UTF-8 support.
 
 ![bstat --ascii: pure-ASCII layout for grep-friendly output](doc/images/bstat_ascii.png)

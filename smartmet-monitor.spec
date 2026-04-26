@@ -107,6 +107,12 @@ make install \
   smartmet-library-macgyver, smartmet-library-newbase, …): two-
   digit year, one-or-two-digit month, one-or-two-digit day, with
   Release suffix .fmi. Existing 0.7.x history is preserved below.
+- Rename the Braille-chart height option from -H back to -h across
+  bstat, bchart and bstatus. Lowercase is the conventional case for
+  short flags; -h was previously reserved as a help alias, but help
+  is fine with --help only and that frees -h for the more useful
+  use. The -h help alias is dropped in every bstat-family command;
+  --help still works everywhere.
 
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.17-1
 - Default --replay-bytes raised from 256 MB to 1 GB. SmartMet

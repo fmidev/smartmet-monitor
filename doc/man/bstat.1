@@ -3,8 +3,10 @@
 bstat \- per\-bucket access\-log summary with Unicode sparklines
 .SH SYNOPSIS
 .B bstat
-.RI [ \-i\  1s|10s|1m|10m|1h|1d ]
+.RI [ \-i\  INTERVAL ]
 .RI [ \-w\  WIDTH ]
+.RI [ \-h\  HEIGHT ]
+.RI [ \-\-ascii ]
 .RI [ LOG-FILE ]
 .SH DESCRIPTION
 .B bstat
@@ -31,13 +33,23 @@ duration in ms, content length, etag, API key).
 .TP
 .BI \-i \ INTERVAL
 Time\-bucket width. One of
-.BR 1s ,\  10s ,\  1m ,\  10m ,\  1h ,\  1d .
+.BR 1s ,\  10s ,\  1m ,\  2m ,\  5m ,\  10m ,\  1h ,\  1d .
 Default
 .BR 1h .
 .TP
 .BI \-w \ WIDTH
 Horizontal bar width in columns. Default
 .BR 20 .
+.TP
+.BI \-h \ HEIGHT
+Braille sparkline height in character rows. Vertical resolution per
+sparkline = HEIGHT \(mu 4 dots. Default
+.BR 4 .
+.TP
+.B \-\-ascii
+Use plain ASCII rendering (\fB=\fR bars and a single dot\-ramp
+sparkline row regardless of HEIGHT). Useful for grep\-friendly
+output and terminals without UTF\-8 support.
 .SH ENVIRONMENT
 .TP
 .B SMARTMET_MONITOR_LIB

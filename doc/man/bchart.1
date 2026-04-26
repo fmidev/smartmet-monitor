@@ -7,6 +7,7 @@ bchart \- btop\-style vertical chart of one access\-log metric
 .RI [ \-m\  reqs|ms|kb|mb|err ]
 .RI [ \-h\  HEIGHT ]
 .RI [ \-w\  CELLW ]
+.RI [ \-\-ascii ]
 .RI [ LOG-FILE ]
 .SH DESCRIPTION
 .B bchart
@@ -18,7 +19,7 @@ left.
 .TP
 .BI \-i \ INTERVAL
 Time\-bucket width. One of
-.BR 1s ,\  10s ,\  1m ,\  10m ,\  1h ,\  1d .
+.BR 1s ,\  10s ,\  1m ,\  2m ,\  5m ,\  10m ,\  1h ,\  1d .
 Default
 .BR 1h .
 .TP

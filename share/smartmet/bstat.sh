@@ -48,7 +48,7 @@ _bstat_prec() {
     esac
 }
 
-# Parse common flags ("-i INTERVAL", "-w WIDTH", "-H HEIGHT") out of
+# Parse common flags ("-i INTERVAL", "-w WIDTH", "-h HEIGHT") out of
 # the argument list. Writes BSTAT_INTERVAL, BSTAT_WIDTH, BSTAT_HEIGHT,
 # BSTAT_ARGS into the environment.
 _bstat_parse() {
@@ -61,9 +61,9 @@ _bstat_parse() {
         case "$1" in
             -i) BSTAT_INTERVAL="$2"; shift 2 ;;
             -w) BSTAT_WIDTH="$2"; shift 2 ;;
-            -H) BSTAT_HEIGHT="$2"; shift 2 ;;
+            -h) BSTAT_HEIGHT="$2"; shift 2 ;;
             --ascii) BSTAT_ASCII=1; shift ;;
-            -h|--help) BSTAT_INTERVAL=_help; shift ;;
+            --help) BSTAT_INTERVAL=_help; shift ;;
             *)  BSTAT_ARGS+=("$1"); shift ;;
         esac
     done
@@ -82,12 +82,12 @@ bstat() {
     _bstat_parse "$@"
     if [ "$BSTAT_INTERVAL" = _help ]; then
         cat <<EOF
-Usage: bstat [-i INTERVAL] [-w WIDTH] [-H HEIGHT] [--ascii] [LOG-FILE]
+Usage: bstat [-i INTERVAL] [-w WIDTH] [-h HEIGHT] [--ascii] [LOG-FILE]
 
   -i INTERVAL   bucket width: 1s, 10s, 1m, 2m, 5m, 10m, 1h, 1d
                                                        (default: 1h)
   -w WIDTH      horizontal bar width in columns         (default: 20)
-  -H HEIGHT     Braille sparkline height in char-rows   (default: 4)
+  -h HEIGHT     Braille sparkline height in char-rows   (default: 4)
                 Vertical resolution per sparkline = HEIGHT * 4 dots.
   --ascii       use = bars instead of Unicode eighth-blocks. The
                 sparkline footer falls back to a single-row dot ramp
@@ -416,7 +416,7 @@ EOF
 # -----------------------------------------------------------------------------
 # bchart: vertical btop-style chart for one metric
 # -----------------------------------------------------------------------------
-# Usage: bchart [-i INTERVAL] [-m METRIC] [-H HEIGHT] [-w CELLW] [log-file]
+# Usage: bchart [-i INTERVAL] [-m METRIC] [-h HEIGHT] [-w CELLW] [log-file]
 #   metric = reqs | ms | kb | mb | err   (default reqs)
 
 bchart() {
@@ -430,12 +430,12 @@ bchart() {
         case "$1" in
             -i) interval="$2"; shift 2 ;;
             -m) metric="$2";  shift 2 ;;
-            -H) height="$2";  shift 2 ;;
+            -h) height="$2";  shift 2 ;;
             -w) cellw="$2";   shift 2 ;;
             --ascii) ascii=1; shift ;;
-            -h|--help)
+            --help)
                 cat <<EOF
-Usage: bchart [-i INTERVAL] [-m METRIC] [-H HEIGHT] [-w CELLW] [--ascii] [LOG-FILE]
+Usage: bchart [-i INTERVAL] [-m METRIC] [-h HEIGHT] [-w CELLW] [--ascii] [LOG-FILE]
 
   -i INTERVAL   1s, 10s, 1m, 2m, 5m, 10m, 1h, 1d   (default: 1h)
   -m METRIC     reqs | ms | kb | mb | err          (default: reqs)
@@ -444,7 +444,7 @@ Usage: bchart [-i INTERVAL] [-m METRIC] [-H HEIGHT] [-w CELLW] [--ascii] [LOG-FI
                   kb   = mean response size (KB)
                   mb   = total bandwidth (MB)
                   err  = error rate (%)
-  -H HEIGHT     chart height in char-rows          (default: 12)
+  -h HEIGHT     chart height in char-rows          (default: 12)
                   Vertical resolution = HEIGHT * 4 dots in Braille
                   mode, HEIGHT * 8 in --ascii mode.
   -w CELLW      cells per data unit                (default: 1)
@@ -695,7 +695,7 @@ burls() {
             -k) keeps="$2"; shift 2 ;;
             -L|--list-params) listparams=1; shift ;;
             -i|--interactive) interactive=1; shift ;;
-            -h|--help)
+            --help)
                 cat <<EOF
 Usage: burls [-n N] [-s SORT] [-d LIST | -k LIST] [-L|-i] [LOG-FILE]
 
@@ -867,19 +867,18 @@ bstatus() {
     while (( $# )); do
         case "$1" in
             -i) interval="$2"; shift 2 ;;
-            -H) height="$2"; shift 2 ;;
+            -h) height="$2"; shift 2 ;;
             --ascii) ascii=1; shift ;;
-            -h|--help)
+            --help)
                 cat <<EOF
-Usage: bstatus [-i INTERVAL] [-H HEIGHT] [--ascii] [LOG-FILE]
+Usage: bstatus [-i INTERVAL] [-h HEIGHT] [--ascii] [LOG-FILE]
 
   -i INTERVAL  if given, additionally show a per-class Braille
                sparkline over time. Bucket widths:
                   1s, 10s, 1m, 2m, 5m, 10m, 1h, 1d.
-  -H HEIGHT    Braille sparkline height in char-rows  (default: 4)
+  -h HEIGHT    Braille sparkline height in char-rows  (default: 4)
                Vertical resolution per sparkline = HEIGHT * 4 dots.
-               Same option used by bstat and bchart for the same
-               purpose.
+               Same option name used by bstat and bchart.
   --ascii      use ASCII bars and a single-row dot-ramp sparkline.
 
 Always prints the aggregate code distribution and the per-class
@@ -1092,7 +1091,7 @@ bkeys() {
         case "$1" in
             -n) top="$2"; shift 2 ;;
             -s) sort_by="$2"; shift 2 ;;
-            -h|--help)
+            --help)
                 cat <<EOF
 Usage: bkeys [-n N] [-s SORT] [LOG-FILE]
 
@@ -1180,7 +1179,7 @@ bmon() {
             -u) url="$2"; shift 2 ;;
             -n) interval="$2"; shift 2 ;;
             -v) view="$2"; shift 2 ;;
-            -h|--help)
+            --help)
                 cat <<EOF
 Usage: bmon [-u URL] [-n SECONDS] [-v VIEW]
 
