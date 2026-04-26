@@ -33,15 +33,16 @@ sudo dnf builddep smartmet-monitor.spec     # RHEL 10 / Fedora
 ## `bstat` family — offline log analysis
 
 Each tool accepts a log file path (or reads stdin) and writes a
-Unicode-block summary to the terminal.
+Unicode-block summary to the terminal. Click a command name to jump
+to its section:
 
-```sh
-bstat    [-i INTERVAL] [-w WIDTH] [-H HEIGHT] [--ascii] [LOG]
-bchart   [-i INTERVAL] [-m reqs|ms|kb|mb|err] [-H HEIGHT] [-w CELLW] [--ascii] [LOG]
-burls    [-n N] [-s reqs|ms|kb|mb] [-d|-k LIST] [-L|-i] [LOG]
-bstatus  [-i INTERVAL] [-H HEIGHT] [--ascii] [LOG]
-bkeys    [-n N] [-s reqs|ms|mb] [LOG]
-```
+| Command | Synopsis |
+|---------|----------|
+| [`bstat`](#bstat--bucketed-dashboard)                              | `[-i INTERVAL] [-w WIDTH] [-H HEIGHT] [--ascii] [LOG]` |
+| [`bchart`](#bchart--single-metric-vertical-chart)                  | `[-i INTERVAL] [-m reqs\|ms\|kb\|mb\|err] [-H HEIGHT] [-w CELLW] [--ascii] [LOG]` |
+| [`burls`](#burls--top-urls-with-query-string-filtering)            | `[-n N] [-s reqs\|ms\|kb\|mb] [-d\|-k LIST] [-L\|-i] [LOG]` |
+| [`bstatus`](#bstatus--http-status-code-distribution)               | `[-i INTERVAL] [-H HEIGHT] [--ascii] [LOG]` |
+| [`bkeys`](#bkeys--top-api-keys)                                    | `[-n N] [-s reqs\|ms\|mb] [LOG]` |
 
 `INTERVAL` is one of `1s | 10s | 1m | 2m | 5m | 10m | 1h | 1d`.
 Most intervals snap to a digit boundary, so they are extracted by
@@ -123,6 +124,19 @@ prepends a per-class Braille sparkline showing how each class
 
 ![bstatus -i 1h: per-class Braille sparkline + aggregate distribution](doc/images/bstatus.png)
 
+### `bkeys` — top API keys
+
+```sh
+bkeys -n 20    wms-access-log              # top 20 by request count
+bkeys -n 20 -s ms  wms-access-log          # top 20 by total time spent
+bkeys -n 20 -s mb  wms-access-log          # top 20 by bandwidth
+```
+
+Per-API-key aggregate stats (request count, mean latency, total
+megabytes) with a horizontal half-height bar scaled to the top
+key. Sort key chosen with `-s`. No screenshot in the repository
+because the output reveals customer API keys verbatim.
+
 ### Legacy compatibility aliases
 
 The package also installs six compatibility commands that pin the
@@ -200,6 +214,9 @@ direction; the dedicated single-panel views below remain for sortable
    (bottom 40%). The default startup view when log files are
    configured. Operator goal: "which plugin is busy and which URLs
    inside it are slow?"
+
+   ![Live composite: per-plugin Graphs on top, sortable URLs table underneath](doc/images/monitor_live.png)
+
 2. **h**ealth — Caches (top), Services (middle), Active in-flight
    (bottom), in equal thirds. Operator goal: "is this server healthy?"
 3. **f**lame — full-screen live flamegraph for the focused
@@ -226,7 +243,7 @@ direction; the dedicated single-panel views below remain for sortable
    `m` toggles time spark mean ↔ p95, `b` toggles size spark
    mean ↔ throughput, `i` shows/hides idle handlers.
 
-   ![Graphs panel: per-plugin tall layout with response-time and response-size charts](doc/images/monitor_overview.png)
+   ![Graphs panel: per-plugin tall layout with response-time and response-size charts](doc/images/monitor_graphs.png)
 6. **U**RLs — live, sortable table with p50/p95/max latency, mean size,
    error %, and a per-URL latency sparkline. Press Enter to drill into
    a URL: windowed stats, 60-minute mean-latency sparkline, exponential
@@ -286,7 +303,7 @@ direction; the dedicated single-panel views below remain for sortable
   `smtop` at it — the `?format=json` endpoints are what `smtop`
   polls:
 
-  ![Verifying the admin endpoint with wget against a SmartMet backend](doc/images/monitor_health.png)
+  ![Verifying the admin endpoint with wget against a SmartMet backend](doc/images/monitor_wget.png)
 
 ### Key reference (excerpt)
 
