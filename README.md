@@ -145,8 +145,8 @@ direction; the dedicated single-panel views below remain for sortable
    `--perf`, the panel adds a live perf-top symbol view and a Braille
    flamegraph that updates each cycle (`f` toggles between them).
 11. **L**ogs — raw access-log tail with `/` filter.
-12. **K**eys — per-API-key aggregate stats; Enter drills into the key
-    to see top URLs it calls.
+12. Api**k**eys — per-API-key aggregate stats; Enter drills into the
+    key to see top URLs it calls.
 
 ### Data sources
 

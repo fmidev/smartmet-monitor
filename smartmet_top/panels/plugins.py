@@ -57,7 +57,7 @@ class PluginsPanel(Panel):
         "size mean↔throughput, s cycles sort, r reverses sort."
     )
 
-    def __init__(self) -> None:
+    def __init__(self, default_window_idx: int = 0) -> None:
         self.cursor = 0
         self.scroll = 0
         # Spark metric toggles
@@ -72,10 +72,15 @@ class PluginsPanel(Panel):
         # Hide entirely-idle rows by default — production hosts have
         # many always-empty handler logs we don't want crowding the view.
         self.hide_idle = True
-        # Window selector: 60s (live), 1m, 5m, 15m, 60m. Default 60s
-        # keeps the live feel; `[` / `]` cycle, and the minute modes
-        # are the ones --replay populates.
-        self.window_idx = 0
+        # Window selector: 60s (live), 1m, 5m, 15m, 60m. Caller can
+        # override the initial window — the Live composite uses 5m so
+        # it isn't empty right after --replay (the 60s window only
+        # populates from live tail, not from replayed history).
+        self.window_idx = max(0, min(len(WINDOWS) - 1, default_window_idx))
+        # Set by _sorted_rows on each draw — what the panel actually
+        # ended up rendering, which can differ from window_idx when the
+        # selected window is empty and we auto-widened.
+        self._effective_window_idx: int = self.window_idx
 
     # ---- key handling ------------------------------------------------------
 
@@ -158,9 +163,24 @@ class PluginsPanel(Panel):
 
     def _sorted_rows(self, store) -> List[Tuple[SourceStats, "object"]]:
         """Return [(source_stats, current-window-bucket), ...] sorted per
-        the current sort column. The window is computed once here so
-        downstream callers don't redo the merge per redraw."""
-        _, span, resolution = WINDOWS[self.window_idx]
+        the current sort column. Auto-widens the window when the
+        operator's selection has no data — common right after --replay,
+        because the 60s per-second window can only be filled from live
+        tail. The header reflects which window we actually rendered.
+        """
+        rows = self._collect_rows(store, self.window_idx)
+        self._effective_window_idx = self.window_idx
+        if not rows and self.hide_idle and store.snapshot_sources():
+            for try_idx in range(self.window_idx + 1, len(WINDOWS)):
+                widened = self._collect_rows(store, try_idx)
+                if widened:
+                    rows = widened
+                    self._effective_window_idx = try_idx
+                    break
+        return rows
+
+    def _collect_rows(self, store, window_idx: int) -> List[Tuple[SourceStats, "object"]]:
+        _, span, resolution = WINDOWS[window_idx]
         rows: List[Tuple[SourceStats, object]] = []
         for src in store.snapshot_sources():
             if resolution == "second":
@@ -210,9 +230,17 @@ class PluginsPanel(Panel):
         idle_state = "hidden" if self.hide_idle else "shown"
         sort_name = SORT_COLS[self.sort_idx][0]
         win_label, _, win_res = WINDOWS[self.window_idx]
+        eff_label, _, eff_res = WINDOWS[self._effective_window_idx]
+        # If we auto-widened, show both the user's selection and what's
+        # actually rendered so nobody is left wondering why the spark
+        # column doesn't match the window picker.
+        if self._effective_window_idx != self.window_idx:
+            window_str = f"window:{win_label}→{eff_label}(auto-widened)"
+        else:
+            window_str = f"window:{win_label}({win_res})"
         hdr = (
             f" Graphs — {len(rows)}/{total} log files  "
-            f"window:{win_label}({win_res})  "
+            f"{window_str}  "
             f"sort:{sort_name}{'↓' if self.reverse else '↑'}  "
             f"time={time_label}  size={size_label}  idle={idle_state}  "
             f"filter:{self.filter or '<none>'}"
@@ -236,10 +264,12 @@ class PluginsPanel(Panel):
             return
 
         # Header row — sparks span the active window, auto-scaled
-        # column-wide.
-        time_hdr = f"resp-{time_label} ({win_label})"
-        size_hdr = (f"resp-bytes/s ({win_label})" if self.size_metric == "bytes"
-                    else f"resp-size ({win_label})")
+        # column-wide. Use the effective window so the column label
+        # matches the data (e.g., when the panel auto-widened from 60s
+        # to 5m the spark column header should read "(5m)" too).
+        time_hdr = f"resp-{time_label} ({eff_label})"
+        size_hdr = (f"resp-bytes/s ({eff_label})" if self.size_metric == "bytes"
+                    else f"resp-size ({eff_label})")
         col_hdr = (
             f"{'plugin':<{name_col}} "
             f"{'req/s':>{num_cols}} "
@@ -273,7 +303,9 @@ class PluginsPanel(Panel):
 
         # Compute per-column max across visible rows so each spark
         # auto-scales to its own data range, independent of the others.
-        _, span, resolution = WINDOWS[self.window_idx]
+        # Read from the *effective* window — when _sorted_rows
+        # auto-widened, sparks need to follow the same window.
+        _, span, resolution = WINDOWS[self._effective_window_idx]
         time_series_cache: List[List[float]] = []
         size_series_cache: List[List[float]] = []
         for src, _ in visible:
@@ -287,8 +319,11 @@ class PluginsPanel(Panel):
         size_max = max((max(s, default=0.0) for s in size_series_cache), default=0.0)
 
         # req/s normalisation: in second-mode, snap.count is over
-        # `span` seconds; in minute-mode, over `span` minutes.
-        rps_divisor = float(span) if resolution == "second" else float(span * 60)
+        # `span` seconds; in minute-mode, over `span` minutes. Use the
+        # effective window so the rate matches the bucket.
+        _, eff_span, eff_resolution = WINDOWS[self._effective_window_idx]
+        rps_divisor = (float(eff_span) if eff_resolution == "second"
+                       else float(eff_span * 60))
         for i, (src, snap) in enumerate(visible):
             y = body_top + i
             row_attr = curses.A_REVERSE if (self.scroll + i == self.cursor) else 0

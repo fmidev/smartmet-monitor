@@ -71,8 +71,11 @@ class OverviewPanel(Panel):
             row += 1
 
         row += 1
-        cw = max(10, (w - 8) // 4)
-        # Four vertical mini-charts side by side
+        # Four vertical mini-charts side by side, each with a small
+        # Y-axis label column so the operator can read off the value
+        # at the top, middle and bottom of every chart.
+        label_w = 7  # fits "9999.9" plus padding
+        cw = max(10, (w - 8) // 4 - label_w)
         charts = [
             ("req/min",   store.global_series(60, "count"),               theme.P_SPARK),
             ("mean ms",   store.global_series(60, "mean_ms"),             theme.P_WARN),
@@ -85,13 +88,35 @@ class OverviewPanel(Panel):
         col_x = 2
         for title, series, color in charts:
             maxv = max(series) if series else 0
-            safe_addstr(win, row, col_x, f"{title}  max={maxv:.1f}",
+            # Title spans label + chart so the operator can read
+            # "metric  max=N" without it cramming into the chart.
+            safe_addstr(win, row, col_x,
+                        f"{title}  max={maxv:.1f}".ljust(label_w + cw),
                         theme.attr(theme.P_HEADER, curses.A_BOLD))
-            rows = vchart(series, chart_h, cell_width=1, maxval=maxv)
+            rows = vchart(series, chart_h, cell_width=1, maxval=maxv,
+                          width=cw)
+            mid_row = chart_h // 2
             for j, line in enumerate(rows):
-                safe_addstr(win, row + 1 + j, col_x, line, theme.attr(color))
-            col_x += cw + 2
-            if col_x + cw > w:
+                # Label only the top/middle/bottom rows so the column
+                # doesn't get noisy on tall charts.
+                if j == 0:
+                    label_val = maxv
+                elif j == chart_h - 1:
+                    label_val = 0.0
+                elif j == mid_row:
+                    label_val = maxv / 2
+                else:
+                    label_val = None
+                if label_val is None:
+                    label = " " * label_w
+                else:
+                    label = f"{label_val:>{label_w - 1}.1f} "
+                safe_addstr(win, row + 1 + j, col_x, label,
+                            theme.attr(theme.P_DIM))
+                safe_addstr(win, row + 1 + j, col_x + label_w, line,
+                            theme.attr(color))
+            col_x += label_w + cw + 2
+            if col_x + label_w + cw > w:
                 break
 
         # sparkline of request rate across full width

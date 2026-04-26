@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.5.5
+Version:        0.5.6
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,25 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.5.6-1
+- Live view: the embedded Plugins panel now defaults to the 5-minute
+  window instead of 60s. The 60s window can only be filled from live
+  tail (it doesn't survive --replay), so right after startup it
+  showed "0/22 log files" until 60s of fresh tail accumulated. The
+  composite is display-only with no key to widen, so 5m is the
+  right default for it.
+- Plugins panel: when the operator's selected window has no data
+  (common right after --replay) the panel auto-widens to the next
+  window that does, and the header shows both the user's selection
+  and the effective rendered window — e.g. "window:60s→5m
+  (auto-widened)" — so nothing is silently swapped underneath.
+- Overview panel: the four mini-charts now have Y-axis labels at
+  top, middle and bottom rows so the operator can read the value
+  scale at a glance instead of guessing where the bars sit.
+- Rename Keys panel to Apikeys to clarify what aggregates by what.
+  Keyboard shortcut stays `k` (the K in "Apikeys" is highlighted
+  red in the tab label as the mnemonic).
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.5.5-1
 - Services and Caches panels: horizontal bar widths now adapt to the
   available terminal width instead of being hardcoded. The previous

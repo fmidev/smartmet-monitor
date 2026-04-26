@@ -28,8 +28,14 @@ class LiveView(CompositeView):
 
     def __init__(self) -> None:
         super().__init__()
+        # Plugins panel defaults to the 60-second per-second window for
+        # live monitoring, but on the Live composite that's empty until
+        # 60 s of fresh tail arrives — and the composite is display-only
+        # so the operator can't widen it from here. Initial window 2
+        # = "5m" (per-minute resolution) is populated by --replay's
+        # minute buckets, so the Live view always has something to show.
         self._regions = [
-            ("plugins", PluginsPanel()),
+            ("plugins", PluginsPanel(default_window_idx=2)),
             ("urls", UrlsPanel()),
         ]
 

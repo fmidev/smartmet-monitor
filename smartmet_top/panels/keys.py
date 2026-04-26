@@ -23,8 +23,11 @@ SORT_COLS = (
 
 
 class KeysPanel(Panel):
-    name = "Keys"
+    name = "Apikeys"
     hotkey = "k"
+    # Highlight the K (zero-indexed position 3 in "Apikeys") rather
+    # than the leading A, since `k` is the global hotkey.
+    mnemonic_pos = 3
     help_text = (
         "API keys. s/S sort, [/] resize window, / filter, "
         "Enter drills into a key to see top URLs."
