@@ -29,6 +29,7 @@ from .sources.perftop import perf_loop
 from .sources.offcpu import offcpu_loop
 from .sources.biolat import biolat_loop
 from .sources.netstats import netstats_loop
+from .sources.runqlat import runqlat_loop
 from .sources.proc import proc_loop
 from .state.store import Store
 
@@ -281,6 +282,11 @@ class App:
             # sleep needed. Probes for bcc-tools at startup and exits
             # cleanly with an install hint if missing.
             tasks.append(asyncio.create_task(biolat_loop(self.store)))
+            # Run-queue latency. Same scaffolding as biolat — bcc tool,
+            # power-of-2 histogram, host-wide. Critical on virtualised
+            # hosts where CFS throttling can hide threads from the CPU
+            # without showing as utilisation.
+            tasks.append(asyncio.create_task(runqlat_loop(self.store)))
 
         last_draw = 0.0
         try:

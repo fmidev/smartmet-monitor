@@ -504,6 +504,14 @@ class Store:
         self.netstats_iface: Dict[str, Deque[Tuple[float, float, float]]] = {}
         self.netstats_enabled: bool = False
         self.netstats_status: str = "(network sampler not started)"
+        # Run-queue latency sampler (bcc-tools' runqlat-bpfcc).
+        # Same shape as biolat — (ts, p50_us, p95_us, p99_us, total).
+        # Operationally most valuable on virtualised hosts where CFS
+        # throttling or noisy neighbours hold ready threads off CPU.
+        self.runqlat_samples: Deque[Tuple[float, int, int, int, int]] = deque(maxlen=120)
+        self.runqlat_enabled: bool = False
+        self.runqlat_status: str = "(runqlat sampler not started)"
+        self.runqlat_last_error: str = ""
 
     def register_admin_host(self, host: str) -> None:
         with self._lock:
@@ -938,3 +946,14 @@ class Store:
     def netstats_iface_names(self) -> List[str]:
         with self._lock:
             return sorted(self.netstats_iface.keys())
+
+    # -- run-queue latency --------------------------------------------------
+
+    def runqlat_record_sample(self, ts: float, p50_us: int, p95_us: int,
+                              p99_us: int, total: int) -> None:
+        with self._lock:
+            self.runqlat_samples.append((ts, p50_us, p95_us, p99_us, total))
+
+    def runqlat_p95_series(self) -> List[float]:
+        with self._lock:
+            return [float(p95) for _, _, p95, _, _ in self.runqlat_samples]

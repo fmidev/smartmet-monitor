@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.26
-Release:        6%{?dist}.fmi
+Release:        7%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -112,6 +112,18 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.26-7.fmi
+- Run-queue latency in the Proc panel via runqlat-bpfcc. Same
+  scaffolding as biolatency: power-of-2 histogram, 5 s window,
+  p50 / p95 / p99 microseconds + total context-switch count,
+  rendered next to a p95 sparkline. Critical on virtualised
+  hosts where CFS bandwidth controls or noisy neighbours hold
+  ready threads off the run queue without showing as CPU
+  utilisation. p95 ≥ 1 ms goes red. README "Reading the live
+  monitors" gains an entry covering the bare-metal vs VM
+  expectations and the cross-references (steal time, cgroup
+  cpu.stat, on-CPU flame, URLs latency correlation).
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.26-6.fmi
 - Network monitoring in the Proc panel. Three host-wide counters
   from /proc/net/snmp and /proc/net/netstat (TCP retransmits/s,

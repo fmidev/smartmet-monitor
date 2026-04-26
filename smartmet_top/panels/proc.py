@@ -336,6 +336,8 @@ class ProcPanel(Panel):
         # don't see a permanent "(no data)" line.
         if store.biolat_enabled and store.biolat_samples:
             row = self._draw_biolat(win, store, row)
+        if store.runqlat_enabled and store.runqlat_samples:
+            row = self._draw_runqlat(win, store, row)
         if store.netstats_enabled and store.netstats_tcp:
             row = self._draw_netstats(win, store, row)
         if store.perf_enabled:
@@ -475,6 +477,42 @@ class ProcPanel(Panel):
         ]
         x = write_row(win, row, 0, cells)
         series = _majflt_rate_series(samples)
+        if series:
+            safe_addstr(win, row, x, sparkline(series, width=spark_w),
+                        theme.attr(theme.P_SPARK))
+        return row + 2
+
+    def _draw_runqlat(self, win, store, row: int) -> int:
+        """Run-queue latency: how long ready threads waited for CPU.
+
+        On bare metal this should sit near zero. When it climbs, the
+        kernel scheduler is the bottleneck — typical on virtualised
+        / containerised hosts where CFS bandwidth controls or noisy
+        neighbours hold ready threads off the run queue.
+        """
+        h, w = win.getmaxyx()
+        if row + 2 >= h:
+            return row
+        self._section_divider(win, row, "Run-queue latency (host)")
+        row += 1
+        latest = store.runqlat_samples[-1] if store.runqlat_samples else None
+        if latest is None:
+            safe_addstr(win, row, 2, "no samples yet — first cycle pending",
+                        theme.attr(theme.P_DIM))
+            return row + 2
+        ts, p50, p95, p99, total = latest
+        spark_w = max(15, min(60, w - 70))
+        # Red on sustained ≥ 1 ms p95 (bare metal should be tens of µs).
+        p95_attr = (theme.attr(theme.P_BAD, curses.A_BOLD) if p95 >= 1000
+                    else theme.attr(theme.P_HEADER))
+        cells = [
+            (f"  p50 {_fmt_us(p50):>8}  ", theme.attr(theme.P_HEADER)),
+            (f"p95 {_fmt_us(p95):>8}  ", p95_attr),
+            (f"p99 {_fmt_us(p99):>8}  ", theme.attr(theme.P_HEADER)),
+            (f"events {total:>6}  ", theme.attr(theme.P_ACCENT)),
+        ]
+        x = write_row(win, row, 0, cells)
+        series = store.runqlat_p95_series()
         if series:
             safe_addstr(win, row, x, sparkline(series, width=spark_w),
                         theme.attr(theme.P_SPARK))

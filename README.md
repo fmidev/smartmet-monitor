@@ -439,6 +439,53 @@ host for queue-depth detail; `dmesg` for filesystem / driver
 errors; the access log for any handler that newly correlates
 with the latency spike (a plugin that pulled a cold dataset).
 
+#### Run-queue latency (Proc panel)
+
+**What it measures.** Power-of-2 histogram of the time each
+thread spent ready-but-not-running over a 5-second window,
+summarised as p50 / p95 / p99 microseconds plus the total
+context-switch count. Sourced from `runqlat-bpfcc`, which
+instruments `sched:sched_wakeup` and `sched:sched_switch`.
+Saturation metric for the CPU resource.
+
+**Detects.** Scheduler-side latency that CPU utilisation alone
+cannot show. The textbook case: CPU looks idle, threads still
+take milliseconds to run, requests pile up. Most useful on
+virtualised hosts; on dedicated bare metal it should sit near
+zero unless the host is genuinely overloaded.
+
+**Likely causes when it goes red.**
+- *Container CFS throttling.* The cgroup hit its `cpu.cfs_quota`
+  ceiling and the kernel parked all its threads. Cross-check
+  `/sys/fs/cgroup/.../cpu.stat` for `nr_throttled` /
+  `throttled_time`.
+- *Noisy neighbour VM.* Another guest on the hypervisor is
+  pinning the same cores. If your VM's `steal time`
+  (`vmstat 1`, the `st` column) climbs at the same moment, this
+  is the cause.
+- *Too many runnable threads for too few CPUs.* Classic
+  saturation. The Active panel shows in-flight count climbing
+  in tandem.
+- *Real-time tasks pre-empting smartmetd* (rare on production
+  servers — `chrt -p PID` shows the scheduling class).
+
+**Healthy shape.** On bare metal: p50 in single-digit
+microseconds, p95 < 100 µs, p99 < 1 ms, all flat. On a
+healthy VM: same shape, with occasional p99 blips into the
+low-millisecond range when the hypervisor briefly stalls.
+
+**Trouble shape.** p95 sustained over 1 ms (red in the panel)
+means the scheduler is stealing real time from your work. p99
+stuck in the tens-of-milliseconds range during peak hours is
+the smoking gun for a CFS quota that's too tight.
+
+**What to look at next.** `vmstat 1`'s `st` (steal) column for
+hypervisor pre-emption; `cat /sys/fs/cgroup/$UNIT/cpu.stat` for
+throttled time; the on-CPU flame to confirm work *is* being
+scheduled in pipe bursts rather than continuously; the URLs
+panel for which handlers' p95 follows runqlat's shape — those
+are the operations actually being held off CPU.
+
 #### Network — TCP retransmits + listen drops + NIC bandwidth (Proc panel)
 
 **What it measures.** Three host-wide counters from
