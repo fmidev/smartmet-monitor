@@ -425,6 +425,11 @@ class Store:
         # script invocation. Cleared on the next successful cycle.
         self.perf_last_error: str = ""
         self.perf_target_pid: Optional[int] = None
+        # Per-cycle perf record duration in seconds. Initialised from
+        # the --perf-record-seconds CLI flag and mutable from the Flame
+        # view's `s`-keyed selection overlay; perf_loop reads it on
+        # each iteration so changes take effect on the next cycle.
+        self.perf_record_seconds: int = 3
 
     def register_admin_host(self, host: str) -> None:
         with self._lock:

@@ -33,6 +33,14 @@ from .base import Panel, safe_addstr, write_label, write_row
 from .proc import _build_flame_tree, _flame_color
 
 
+# Preset record durations offered by the `s` selection overlay. Picked
+# to span "barely visible flame" through "full investigative dump":
+# 1s = ~10% duty (gentlest), 3s = default, 5s noticeably denser,
+# 10/20/30 are for focused debugging where the operator accepts the
+# overhead.
+PERF_SECONDS_PRESETS = (1, 3, 5, 10, 20, 30)
+
+
 # ---- pure helpers ----------------------------------------------------------
 
 def _subtree_at(root: Dict[str, list],
@@ -136,10 +144,18 @@ class FlamePanel(Panel):
         # children / the parent of the current cursor frame.
         self._last_frames: List[FlameFrame] = []
         self._last_root: Dict[str, list] = {}
+        # `s`-keyed record-duration selection overlay state.
+        self._seconds_menu_open: bool = False
+        self._seconds_menu_idx: int = 0
 
     # ---- key handling ------------------------------------------------------
 
     def handle_key(self, key, store):
+        # While the duration overlay is open, every keystroke goes there
+        # — including arrows that would otherwise navigate the flame.
+        if self._seconds_menu_open:
+            return self._handle_seconds_menu_key(key, store)
+
         # PID switching is allowed regardless of perf state.
         procs = store.proc_list()
         pids = [p.pid for p in procs]
@@ -154,6 +170,14 @@ class FlamePanel(Panel):
             if key == ord("N"):
                 store.proc_select(pids[(pids.index(selected) - 1) % len(pids)])
                 return True
+
+        # `s` opens the record-duration overlay even when there's no
+        # data yet — the operator may want to reduce overhead before
+        # the first cycle starts.
+        if key == ord("s") and store.perf_enabled:
+            self._open_seconds_menu(store)
+            return True
+
         # Flame navigation only meaningful when perf is on AND we have data.
         if not store.perf_enabled or not self._last_root:
             return False
@@ -174,6 +198,36 @@ class FlamePanel(Panel):
             self.cursor_path = ()
         else:
             return False
+        return True
+
+    # ---- record-duration overlay ------------------------------------------
+
+    def _open_seconds_menu(self, store) -> None:
+        self._seconds_menu_open = True
+        current = getattr(store, "perf_record_seconds", 3)
+        try:
+            self._seconds_menu_idx = PERF_SECONDS_PRESETS.index(current)
+        except ValueError:
+            # Out-of-band value (e.g. user passed --perf-record-seconds 7).
+            # Land on the closest preset so arrow keys feel sensible.
+            self._seconds_menu_idx = min(
+                range(len(PERF_SECONDS_PRESETS)),
+                key=lambda i: abs(PERF_SECONDS_PRESETS[i] - current),
+            )
+
+    def _handle_seconds_menu_key(self, key, store) -> bool:
+        if key in (curses.KEY_UP, ord("k")):
+            self._seconds_menu_idx = max(0, self._seconds_menu_idx - 1)
+        elif key in (curses.KEY_DOWN, ord("j")):
+            self._seconds_menu_idx = min(len(PERF_SECONDS_PRESETS) - 1,
+                                          self._seconds_menu_idx + 1)
+        elif key in (10, 13, curses.KEY_ENTER):
+            store.perf_record_seconds = PERF_SECONDS_PRESETS[self._seconds_menu_idx]
+            self._seconds_menu_open = False
+        elif key in (27, ord("s"), ord("q")):
+            self._seconds_menu_open = False
+        # Always intercept while the overlay is open so stray keys
+        # don't navigate the flame behind it.
         return True
 
     # ---- navigation primitives ---------------------------------------------
@@ -278,6 +332,9 @@ class FlamePanel(Panel):
         flame_bottom = self._draw_flame_section(win, store, info)
         self._draw_top_symbols(win, store, info, flame_bottom)
         self._draw_footer(win, n_procs=len(procs))
+        # Draw the modal overlay last so it sits on top of the flame.
+        if self._seconds_menu_open:
+            self._draw_seconds_menu(win, store)
 
     # ---- rendering pieces --------------------------------------------------
 
@@ -444,7 +501,9 @@ class FlamePanel(Panel):
         x = write_label(win, h - 1, x, "u", 0, base, hot)
         x = write_label(win, h - 1, x, " zoom out  ", 0, base, base)
         x = write_label(win, h - 1, x, "0", 0, base, hot)
-        x = write_label(win, h - 1, x, " reset zoom", 0, base, base)
+        x = write_label(win, h - 1, x, " reset  ", 0, base, base)
+        x = write_label(win, h - 1, x, "s", 0, base, hot)
+        x = write_label(win, h - 1, x, " seconds", 0, base, base)
         if n_procs > 1:
             x = write_label(win, h - 1, x, "  ", 0, base, base)
             x = write_label(win, h - 1, x, "n", 0, base, hot)
@@ -453,3 +512,37 @@ class FlamePanel(Panel):
             x = write_label(win, h - 1, x, " PID", 0, base, base)
         if x < w - 1:
             safe_addstr(win, h - 1, x, " " * (w - x - 1), base)
+
+    def _draw_seconds_menu(self, win, store) -> None:
+        """Centered modal overlay listing the preset record durations."""
+        h, w = win.getmaxyx()
+        title = " perf record duration "
+        item_text_width = 24
+        menu_w = max(item_text_width, len(title)) + 4
+        # title row + blank + items + blank + footer
+        menu_h = len(PERF_SECONDS_PRESETS) + 4
+        if menu_h >= h or menu_w >= w:
+            return  # terminal too small; skip the overlay
+        top = max(0, (h - menu_h) // 2)
+        left = max(0, (w - menu_w) // 2)
+        bg = theme.attr(theme.P_TITLE)
+        # Wipe the rectangle so the flame underneath doesn't bleed
+        # through and confuse the eye.
+        for y in range(top, top + menu_h):
+            safe_addstr(win, y, left, " " * menu_w, bg)
+        # Title
+        safe_addstr(win, top, left, title.center(menu_w),
+                    theme.attr(theme.P_TAB_ACTIVE, curses.A_BOLD))
+        current = getattr(store, "perf_record_seconds", 3)
+        for i, sec in enumerate(PERF_SECONDS_PRESETS):
+            row_y = top + 2 + i
+            is_cursor = (i == self._seconds_menu_idx)
+            attr = (theme.attr(theme.P_HIGHLIGHT, curses.A_BOLD)
+                    if is_cursor else bg)
+            mark = "●" if sec == current else " "
+            label = f"  {mark} {sec:>3} second{'s' if sec != 1 else ' '}  "
+            safe_addstr(win, row_y, left + 2,
+                        label.ljust(menu_w - 4), attr)
+        footer = " ↑↓ select  Enter apply  Esc cancel "
+        safe_addstr(win, top + menu_h - 1, left, footer.center(menu_w),
+                    theme.attr(theme.P_DIM))

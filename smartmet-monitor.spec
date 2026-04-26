@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.5.2
+Version:        0.5.3
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,17 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.5.3-1
+- Flame view: pressing `s` now opens a centered modal overlay
+  listing six preset perf record durations (1, 3, 5, 10, 20, 30
+  seconds). ↑↓ navigate, Enter applies and closes; Esc / s / q
+  cancels. The applied value lives on the Store as
+  perf_record_seconds and the perf sampler picks it up on the next
+  cycle, so changes take effect without restarting smtop. The
+  current value is marked with a bullet (●) in the list, and
+  out-of-band starting values (e.g. --perf-record-seconds 7)
+  position the cursor on the closest preset.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.5.2-1
 - Triple the default perf record duration from 1 second to 3 seconds
   per cycle. With -F 99 the previous default produced ~99 samples per

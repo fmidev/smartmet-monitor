@@ -110,11 +110,13 @@ direction; the dedicated single-panel views below remain for sortable
    (bottom), in equal thirds. Operator goal: "is this server healthy?"
 3. **f**lame — full-screen live flamegraph for the focused
    `smartmetd` PID. Requires `--perf`. Rebuilds every perf cycle from
-   the most recent ~2000 stack samples. Cursor keys navigate the
-   tree, Enter zooms into the selected frame, Esc / `u` zooms out,
-   `0` / Home resets to the root. The lower portion of the screen
-   carries the perf-top symbol list so nothing is wasted on shallow
-   stacks.
+   the entire retained stack ring (~20 000 samples). Cursor keys
+   navigate the tree, Enter zooms into the selected frame, Esc / `u`
+   zooms out, `0` / Home resets to the root. `s` opens a preset
+   menu (1 / 3 / 5 / 10 / 20 / 30 s) for the per-cycle record
+   duration; the new value takes effect on the next cycle without
+   restarting smtop. The lower portion of the screen carries the
+   perf-top symbol list so nothing is wasted on shallow stacks.
 
 **Single-panel views**:
 

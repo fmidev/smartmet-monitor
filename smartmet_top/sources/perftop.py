@@ -136,16 +136,21 @@ async def perf_loop(store, interval: float = DEFAULT_INTERVAL,
         store.perf_status = "perf not found in PATH (install linux-tools)"
         store.perf_enabled = False
         return
+    # Seed the store with the CLI default; the Flame view's selection
+    # overlay can mutate this and we'll pick the new value up on the
+    # next iteration without restarting smtop.
+    store.perf_record_seconds = record_seconds
     store.perf_status = "waiting for PID"
     while True:
         pid: Optional[int] = store.proc_selected()
         if pid is None:
             await asyncio.sleep(0.5)
             continue
+        rs = max(1, int(getattr(store, "perf_record_seconds", record_seconds)))
         store.perf_target_pid = pid
-        store.perf_status = f"recording pid={pid} ({record_seconds}s)"
+        store.perf_status = f"recording pid={pid} ({rs}s)"
         try:
-            ok, rc, diag = await _run_perf_record(perf_bin, pid, record_seconds)
+            ok, rc, diag = await _run_perf_record(perf_bin, pid, rs)
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -178,7 +183,7 @@ async def perf_loop(store, interval: float = DEFAULT_INTERVAL,
         store.perf_status = f"ok pid={pid} samples={len(stacks)}"
         # Idle remainder of the duty cycle, but break early if the user
         # selects a different PID so the next cycle re-targets quickly.
-        target = time.time() + max(0.0, interval - record_seconds)
+        target = time.time() + max(0.0, interval - rs)
         while time.time() < target:
             if store.proc_selected() != pid:
                 break
