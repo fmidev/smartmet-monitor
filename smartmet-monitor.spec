@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.7.13
+Version:        0.7.14
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -101,6 +101,42 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.14-1
+- bstat / bstatus / burls / bkeys / bmon: per-row magnitude bars now
+  use half-height ▄ (cell-level rounding, no eighth-block partials),
+  matching smtop's hbar so a row of bars no longer dominates the
+  line height.
+- bstat: bottom four sparklines (requests / latency / avg_size /
+  bandwidth) switched from vertical eighth-blocks to Braille (2
+  buckets per cell, btop-style). Vertical level is capped at 3 of 4
+  so the topmost dot row stays empty — keeps adjacent stacked
+  sparklines from visually touching.
+- bstat / bchart: 10m and 10s buckets render with a trailing "0"
+  appended (`13:0` → `13:00`, `13:00:0` → `13:00:00`) so truncated
+  ISO-8601 timestamps no longer look mid-digit.
+- bchart: vertical chart now renders in Braille by default (4 dot
+  rows per char-row × 2 buckets per cell). Adjacent cell-rows of
+  the same bucket retain full level-4 encoding for continuity. Pass
+  --ascii to fall back to eighth-block bars.
+- bstatus: new -i INTERVAL mode prepends a per-class time-bucketed
+  Braille sparkline view (one row per HTTP class, sparkline showing
+  bucket counts over time). --ascii falls back to dot-ramp.
+- burls: keeps the full URL by default — different parameter sets
+  (GetMap vs GetCapabilities, producer=foo vs producer=bar) are
+  distinct rows. New flags:
+  -d LIST   drop listed query-string parameter names before grouping
+            (e.g. -d bbox,time collapses GetMaps differing only in
+             bbox/time into one row).
+  -k LIST   keep only listed parameter names (mutually exclusive
+            with -d).
+  -L, --list-params
+            scan the log and print a frequency table of every
+            distinct query-string parameter name.
+  -i, --interactive
+            print the parameter table, then prompt for a comma-
+            separated drop-list and re-run the analysis with that
+            filter. Requires a log file argument.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.13-1
 - Services panel: tall layout. When there are ≥ 2 rows of room
   per service, each handler's row expands into a multi-row block

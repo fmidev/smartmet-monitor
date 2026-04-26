@@ -1,10 +1,12 @@
 # SmartMet access-log & live-stats visualizer
 #
 # Source this file from ~/.bashrc to get:
-#   bstat    - dashboard (table + sparklines + summary)
+#   bstat    - dashboard (table + Braille sparklines + summary)
 #   bchart   - btop-style vertical chart for one metric over time
 #   burls    - top N slowest / heaviest / most-requested URLs
-#   bstatus  - HTTP status code distribution
+#              (-L lists query params, -d/-k filter them, -i prompts)
+#   bstatus  - HTTP status code distribution; -i adds a per-class
+#              time-bucketed sparkline view
 #   bkeys    - top API keys
 #
 #   bmon     - live dashboard polling the admin plugin (cache + service stats)
@@ -12,6 +14,11 @@
 # All log functions read stdin or a file passed as the last argument.
 # Interval flag -i picks the time bucket width:
 #   1s, 10s, 1m, 10m, 1h, 1d           (default: 1h)
+#
+# Rendering uses half-height ▄ bars for per-row magnitudes and Braille
+# (2 buckets per cell, level capped at 3 to leave a visual gap between
+# stacked sparklines) for sparklines. Pass --ascii to either bstat or
+# bstatus to fall back to plain ASCII output for grep-friendly logs.
 #
 # Log format (from spine/AccessLogger.cpp):
 #   IP - - [END_TIME] "METHOD URL HTTP/VER" STATUS [START_TIME] DUR_MS BYTES ETAG APIKEY
@@ -88,16 +95,21 @@ EOF
     BEGIN {
         if (ASCII) {
             FULL = "="
-            p8[1]="="; p8[2]="="; p8[3]="="; p8[4]="="
-            p8[5]="="; p8[6]="="; p8[7]="="
-            sp[0]=" "; sp[1]="."; sp[2]="."; sp[3]=":"; sp[4]=":"
-            sp[5]="|"; sp[6]="|"; sp[7]="#"; sp[8]="#"
+            # ASCII sparkline: 4-level dot ramp (one char per bucket).
+            sp[0]=" "; sp[1]="."; sp[2]=":"; sp[3]="|"; sp[4]="#"
         } else {
-            FULL = "█"
-            p8[1]="▏"; p8[2]="▎"; p8[3]="▍"; p8[4]="▌"
-            p8[5]="▋"; p8[6]="▊"; p8[7]="▉"
-            sp[0]=" "; sp[1]="▁"; sp[2]="▂"; sp[3]="▃"; sp[4]="▄"
-            sp[5]="▅"; sp[6]="▆"; sp[7]="▇"; sp[8]="█"
+            # Half-height block: bar fills only the lower half of the
+            # row, freeing visual space and matching smtop hbar style.
+            FULL = "▄"
+            # Braille 5x5 lookup B[l*5+r] for l,r in [0..4]. Two buckets
+            # encoded per cell (left dot column + right dot column),
+            # 4 vertical levels each = 2x denser than eighth-block.
+            # Identical to btop graph_symbols and smtop sparkline tables.
+            B[0]=" ";  B[1]="⢀"; B[2]="⢠"; B[3]="⢰"; B[4]="⢸"
+            B[5]="⡀";  B[6]="⣀"; B[7]="⣠"; B[8]="⣰"; B[9]="⣸"
+            B[10]="⡄"; B[11]="⣄"; B[12]="⣤"; B[13]="⣴"; B[14]="⣼"
+            B[15]="⡆"; B[16]="⣆"; B[17]="⣦"; B[18]="⣶"; B[19]="⣾"
+            B[20]="⡇"; B[21]="⣇"; B[22]="⣧"; B[23]="⣷"; B[24]="⣿"
         }
     }
     {
@@ -136,18 +148,29 @@ EOF
             if (sumbytes[t] > gB) gB = sumbytes[t]
         }
 
+        # 10m and 10s intervals truncate ISO-8601 between digits (e.g.
+        # "13:0" for 10m, "13:00:0" for 10s). Append a "0" when
+        # rendering so "13:0" → "13:00" makes the bucket boundary
+        # visually unambiguous. DISPLEN is the rendered width of a
+        # bucket label.
+        TPAD = (PREC==15 || PREC==18) ? "0" : ""
+        DISPLEN = PREC + length(TPAD)
+
         # title
         printf "┌─ SmartMet access-log summary  (bucket: %s, %d rows) ─┐\n",
             iname(PREC), n
         printf "│\n"
         # header
         bwL = BW
+        # Sparkline width = bucket count in ASCII mode, ceil(n/2) in
+        # Braille mode (2 buckets per cell).
+        sw = ASCII ? n : int((n+1)/2)
         printf "│ %-*s  %7s %8s %7s %8s %8s %5s  %-*s  %-*s  %-*s  %-*s\n",
-            PREC, "time", "reqs", "avg_ms", "max_ms", "avg_KB", "MB_out", "err%",
+            DISPLEN, "time", "reqs", "avg_ms", "max_ms", "avg_KB", "MB_out", "err%",
             bwL, "requests", bwL, "latency", bwL, "size", bwL, "bandwidth"
         # separator
         printf "│ "
-        for (i=0; i<PREC; i++) printf "─"
+        for (i=0; i<DISPLEN; i++) printf "─"
         printf "  %7s %8s %7s %8s %8s %5s  ", "───────", "────────", "───────", "────────", "────────", "─────"
         for (i=0; i<bwL; i++) printf "─"
         printf "  "
@@ -171,7 +194,7 @@ EOF
             b4 = vbar(sumbytes[t], gB, bwL)
 
             printf "│ %-*s  %7d %8.1f %7d %8.1f %8.2f %5.1f  %s  %s  %s  %s\n",
-                PREC, t,
+                DISPLEN, t TPAD,
                 count[t],
                 avgd,
                 maxdur[t],
@@ -183,13 +206,13 @@ EOF
 
         # separator
         printf "│ "
-        for (i=0; i<PREC; i++) printf "─"
+        for (i=0; i<DISPLEN; i++) printf "─"
         printf "  %7s %8s %7s %8s %8s %5s\n",
             "───────", "────────", "───────", "────────", "────────", "─────"
 
         if (tot_count > 0) {
             printf "│ %-*s  %7d %8.1f %7s %8.1f %8.2f %5.1f\n",
-                PREC, "TOTAL",
+                DISPLEN, "TOTAL",
                 tot_count,
                 tot_dur / tot_count,
                 "-",
@@ -198,7 +221,8 @@ EOF
                 tot_err / tot_count * 100
         }
 
-        # Sparklines (one char per bucket, 0..8 block heights).
+        # Sparklines: ASCII = 1 dot per bucket (4-level ramp), Braille
+        # = 2 buckets per cell (4-level overlap encoding, btop-style).
         printf "│\n"
         printf "│  requests   "; spark(count, keys, n, gc); printf "\n"
         printf "│  latency    "; sparkavg(sumdur, count, keys, n);    printf "\n"
@@ -206,20 +230,25 @@ EOF
         printf "│  bandwidth  "; spark(sumbytes, keys, n, gB); printf "\n"
         printf "│\n"
 
-        # time axis: print first and last timestamp under the sparklines.
+        # time axis: first + last bucket label under the sparklines.
+        # Pad to the rendered sparkline width (sw), not bucket count.
         if (n > 0) {
-            pad = n - length(keys[1]) - length(keys[n])
+            l1 = keys[1]   TPAD
+            l2 = keys[n]   TPAD
+            pad = sw - length(l1) - length(l2)
             if (pad < 1) pad = 1
-            printf "│             %s", keys[1]
+            printf "│             %s", l1
             for (i=0; i<pad; i++) printf " "
-            printf "%s\n", keys[n]
+            printf "%s\n", l2
         }
         printf "└" ; for (i=0; i<72; i++) printf "─"; printf "\n"
     }
 
-    # Horizontal bar 0..width columns wide using eighth-block partials.
-    # In ASCII mode FULL is "=" and p8[*] is also "=" (no partials).
-    function vbar(val, maxval, width,   full, p, s, i, eighths, visual) {
+    # Per-row horizontal bar, "width" cells wide, half-height (▄) so
+    # the four bars per row stay visually distinct without dominating
+    # the line. Cell-level rounding (no eighth-block partials) — same
+    # approach as smtop hbar 0.7.7.
+    function vbar(val, maxval, width,   ratio, n, s, i) {
         if (maxval <= 0) {
             s = ""
             for (i=0; i<width; i++) s = s " "
@@ -228,41 +257,68 @@ EOF
         ratio = val / maxval
         if (ratio > 1) ratio = 1
         if (ratio < 0) ratio = 0
-        eighths = int(ratio * width * 8 + 0.5)
-        full = int(eighths / 8)
-        p = eighths - full * 8
+        n = int(ratio * width + 0.5)
         s = ""
-        for (i=0; i<full; i++) s = s FULL
-        visual = full
-        if (p > 0 && visual < width) { s = s p8[p]; visual++ }
-        while (visual < width) { s = s " "; visual++ }
+        for (i=0; i<n; i++) s = s FULL
+        for (i=n; i<width; i++) s = s " "
         return s
     }
 
-    # Vertical-spark line: one char per bucket, height 0..8 scaled to max.
-    # Keys array is 1..m (output of asort).
-    function spark(vals, ks, m, mx,   i, r, lvl) {
+    # Sparkline for vals[ks[i]]/mx — Braille: 2 buckets per cell
+    # (left dots = vals[2i-1], right dots = vals[2i]); ASCII: one dot
+    # per bucket. Levels are capped at 3 (out of 4) so the topmost
+    # Braille dot row stays empty — keeps stacked sparklines from
+    # visually touching across line boundaries.
+    function spark(vals, ks, m, mx,   i, l1, l2) {
         if (mx <= 0) {
-            for (i=1; i<=m; i++) printf " "
+            if (ASCII) for (i=1; i<=m; i++) printf " "
+            else       for (i=0; i<int((m+1)/2); i++) printf " "
             return
         }
-        for (i=1; i<=m; i++) {
-            r = vals[ks[i]] / mx
-            if (r > 1) r = 1
-            lvl = int(r * 8 + 0.5)
-            printf "%s", sp[lvl]
+        if (ASCII) {
+            for (i=1; i<=m; i++) {
+                l1 = int(vals[ks[i]] / mx * 3 + 0.5)
+                if (l1 < 0) l1 = 0; if (l1 > 3) l1 = 3
+                printf "%s", sp[l1]
+            }
+            return
+        }
+        for (i=1; i<=m; i+=2) {
+            l1 = int(vals[ks[i]] / mx * 3 + 0.5)
+            if (l1 < 0) l1 = 0; if (l1 > 3) l1 = 3
+            if (i+1 <= m) {
+                l2 = int(vals[ks[i+1]] / mx * 3 + 0.5)
+                if (l2 < 0) l2 = 0; if (l2 > 3) l2 = 3
+            } else l2 = 0
+            printf "%s", B[l1*5 + l2]
         }
     }
 
-    # Sparkline for mean-per-bucket (numerator/denominator per bucket).
-    function sparkavg(num, den, ks, m,   i, mx, v) {
+    # Mean-per-bucket sparkline (num[k]/den[k]). Same encoding as spark().
+    function sparkavg(num, den, ks, m,   i, mx, va, l1, l2) {
         mx = 0
-        for (i=1; i<=m; i++) { v = num[ks[i]]/den[ks[i]]; if (v > mx) mx = v }
-        if (mx <= 0) { for (i=1; i<=m; i++) printf " "; return }
-        for (i=1; i<=m; i++) {
-            v = num[ks[i]] / den[ks[i]] / mx
-            if (v > 1) v = 1
-            printf "%s", sp[int(v * 8 + 0.5)]
+        for (i=1; i<=m; i++) { va[i] = num[ks[i]] / den[ks[i]]; if (va[i] > mx) mx = va[i] }
+        if (mx <= 0) {
+            if (ASCII) for (i=1; i<=m; i++) printf " "
+            else       for (i=0; i<int((m+1)/2); i++) printf " "
+            return
+        }
+        if (ASCII) {
+            for (i=1; i<=m; i++) {
+                l1 = int(va[i] / mx * 3 + 0.5)
+                if (l1 < 0) l1 = 0; if (l1 > 3) l1 = 3
+                printf "%s", sp[l1]
+            }
+            return
+        }
+        for (i=1; i<=m; i+=2) {
+            l1 = int(va[i] / mx * 3 + 0.5)
+            if (l1 < 0) l1 = 0; if (l1 > 3) l1 = 3
+            if (i+1 <= m) {
+                l2 = int(va[i+1] / mx * 3 + 0.5)
+                if (l2 < 0) l2 = 0; if (l2 > 3) l2 = 3
+            } else l2 = 0
+            printf "%s", B[l1*5 + l2]
         }
     }
 
@@ -288,7 +344,8 @@ bchart() {
     local interval=1h
     local metric=reqs
     local height=12
-    local cellw=2
+    local cellw=1
+    local ascii=0
     local args=()
     while (( $# )); do
         case "$1" in
@@ -296,9 +353,10 @@ bchart() {
             -m) metric="$2";  shift 2 ;;
             -h) height="$2";  shift 2 ;;
             -w) cellw="$2";   shift 2 ;;
+            --ascii) ascii=1; shift ;;
             --help)
                 cat <<EOF
-Usage: bchart [-i INTERVAL] [-m METRIC] [-h HEIGHT] [-w CELLW] [LOG-FILE]
+Usage: bchart [-i INTERVAL] [-m METRIC] [-h HEIGHT] [-w CELLW] [--ascii] [LOG-FILE]
 
   -i INTERVAL   1s, 10s, 1m, 10m, 1h, 1d    (default: 1h)
   -m METRIC     reqs | ms | kb | mb | err   (default: reqs)
@@ -308,7 +366,11 @@ Usage: bchart [-i INTERVAL] [-m METRIC] [-h HEIGHT] [-w CELLW] [LOG-FILE]
                   mb   = total bandwidth (MB)
                   err  = error rate (%)
   -h HEIGHT     chart height in rows        (default: 12)
-  -w CELLW      columns per bucket          (default: 2)
+  -w CELLW      cells per data unit         (default: 1)
+                  Default Braille mode renders 2 buckets per cell, so
+                  one CELLW = one Braille cell = 2 buckets. ASCII mode
+                  renders 1 bucket per cell.
+  --ascii       use eighth-block vertical bars instead of Braille.
 EOF
                 return 0 ;;
             *) args+=("$1"); shift ;;
@@ -321,10 +383,21 @@ EOF
         return 1
     fi
 
-    gawk -v PREC="$prec" -v METRIC="$metric" -v H="$height" -v CW="$cellw" '
+    gawk -v PREC="$prec" -v METRIC="$metric" -v H="$height" -v CW="$cellw" -v ASCII="$ascii" '
     BEGIN {
-        sp[0]=" "; sp[1]="▁"; sp[2]="▂"; sp[3]="▃"; sp[4]="▄"
-        sp[5]="▅"; sp[6]="▆"; sp[7]="▇"; sp[8]="█"
+        if (ASCII) {
+            sp[0]=" "; sp[1]="."; sp[2]="."; sp[3]=":"; sp[4]=":"
+            sp[5]="|"; sp[6]="|"; sp[7]="#"; sp[8]="#"
+            FULL = "#"
+        } else {
+            # Same Braille 5x5 lookup as bstat.
+            B[0]=" ";  B[1]="⢀"; B[2]="⢠"; B[3]="⢰"; B[4]="⢸"
+            B[5]="⡀";  B[6]="⣀"; B[7]="⣠"; B[8]="⣰"; B[9]="⣸"
+            B[10]="⡄"; B[11]="⣄"; B[12]="⣤"; B[13]="⣴"; B[14]="⣼"
+            B[15]="⡆"; B[16]="⣆"; B[17]="⣦"; B[18]="⣶"; B[19]="⣾"
+            B[20]="⡇"; B[21]="⣇"; B[22]="⣧"; B[23]="⣷"; B[24]="⣿"
+        }
+        TPAD = (PREC==15 || PREC==18) ? "0" : ""
     }
     {
         t = substr($9, 2, PREC)
@@ -360,37 +433,66 @@ EOF
 
         # y-axis label width
         lw = 8
-        # each row top..bottom
-        for (row = H-1; row >= 0; row--) {
-            # y tick label
-            tick = mx * (row + 1) / H
-            printf "│ %*s ", lw, fmtnum(tick)
-            for (i=1; i<=n; i++) {
-                r = v[i] / mx
-                eighths = int(r * H * 8 + 0.5)
-                full_rows = int(eighths / 8)
-                partial = eighths - full_rows * 8
-                if (row < full_rows) { cell = "█" }
-                else if (row == full_rows && partial > 0) { cell = sp[partial] }
-                else { cell = " " }
-                for (c=0; c<CW; c++) printf "%s", cell
+
+        if (ASCII) {
+            # Eighth-block vertical bars, 1 cell per bucket × CW.
+            for (row = H-1; row >= 0; row--) {
+                tick = mx * (row + 1) / H
+                printf "│ %*s ", lw, fmtnum(tick)
+                for (i=1; i<=n; i++) {
+                    r = v[i] / mx
+                    eighths = int(r * H * 8 + 0.5)
+                    full_rows = int(eighths / 8)
+                    partial = eighths - full_rows * 8
+                    if (row < full_rows) cell = FULL
+                    else if (row == full_rows && partial > 0) cell = sp[partial]
+                    else cell = " "
+                    for (c=0; c<CW; c++) printf "%s", cell
+                }
+                printf "\n"
             }
-            printf "\n"
+            total = n * CW
+        } else {
+            # Braille vertical chart. Each cell encodes two adjacent
+            # buckets; vertical resolution per char-row = 4 pixels.
+            # For bucket b, total filled pixels (bottom-up) =
+            # round(v[b]/mx * H * 4). For char-row r (0=bottom),
+            # level = clamp(pixels - 4*r, 0, 4).
+            for (row = H-1; row >= 0; row--) {
+                tick = mx * (row + 1) / H
+                printf "│ %*s ", lw, fmtnum(tick)
+                for (i=1; i<=n; i+=2) {
+                    pL = int(v[i] / mx * H * 4 + 0.5)
+                    levL = pL - 4 * row
+                    if (levL < 0) levL = 0; if (levL > 4) levL = 4
+                    if (i+1 <= n) {
+                        pR = int(v[i+1] / mx * H * 4 + 0.5)
+                        levR = pR - 4 * row
+                        if (levR < 0) levR = 0; if (levR > 4) levR = 4
+                    } else levR = 0
+                    cell = B[levL*5 + levR]
+                    for (c=0; c<CW; c++) printf "%s", cell
+                }
+                printf "\n"
+            }
+            total = int((n+1)/2) * CW
         }
         # x axis
         printf "│ %*s ", lw, ""
-        for (i=0; i<n*CW; i++) printf "─"
+        for (i=0; i<total; i++) printf "─"
         printf "\n"
 
         # x-axis ticks: first, middle, last
         if (n > 0) {
             printf "│ %*s ", lw, ""
-            total = n * CW
             s = sprintf("%*s", total, "")
             mid = int((n+1)/2)
-            s = place(s, keys[1], 0)
-            if (n > 2) s = place(s, keys[mid], int(total/2 - length(keys[mid])/2))
-            if (n > 1) s = place(s, keys[n], total - length(keys[n]))
+            l1 = keys[1]   TPAD
+            lm = keys[mid] TPAD
+            ln = keys[n]   TPAD
+            s = place(s, l1, 0)
+            if (n > 2) s = place(s, lm, int(total/2 - length(lm)/2))
+            if (n > 1) s = place(s, ln, total - length(ln))
             printf "%s\n", s
         }
         printf "└" ; for (i=0; i<72; i++) printf "─" ; printf "\n"
@@ -430,19 +532,73 @@ EOF
 # -----------------------------------------------------------------------------
 # burls: top N URLs by various metrics
 # -----------------------------------------------------------------------------
-# Usage: burls [-n 20] [-s reqs|ms|kb|mb] [log-file]
+# Usage: burls [-n 20] [-s reqs|ms|kb|mb] [-d|-k LIST] [-L|-i] [log-file]
+
+# Helper: scan a log and print a frequency table of every distinct
+# query-string parameter name seen. Used by both -L (list) and -i
+# (interactive) modes.
+_burls_list_params() {
+    gawk '
+    BEGIN { tot = 0 }
+    {
+        url = $6
+        qpos = index(url, "?")
+        if (qpos == 0) next
+        qs = substr(url, qpos+1)
+        np = split(qs, parts, "&")
+        for (j=1; j<=np; j++) {
+            eq = index(parts[j], "=")
+            name = (eq > 0) ? substr(parts[j], 1, eq-1) : parts[j]
+            if (name == "") continue
+            cnt[name]++
+        }
+        tot++
+    }
+    END {
+        if (tot == 0) {
+            print "burls: no requests with a query string in input" > "/dev/stderr"
+            exit 0
+        }
+        printf "┌─ Query-string parameters seen (%d requests with query) ─\n", tot
+        printf "│ %-30s %10s %7s\n", "param", "count", "pct"
+        printf "│ %-30s %10s %7s\n",
+            "──────────────────────────────", "──────────", "───────"
+        n = 0
+        for (k in cnt) names[n++] = k
+        # sort names by count desc (insertion sort — n is small)
+        for (i=0; i<n; i++) for (j=i+1; j<n; j++) {
+            if (cnt[names[j]] > cnt[names[i]]) {
+                t = names[i]; names[i] = names[j]; names[j] = t
+            }
+        }
+        for (i=0; i<n; i++) {
+            printf "│ %-30s %10d %6.1f%%\n",
+                names[i], cnt[names[i]], cnt[names[i]] / tot * 100
+        }
+        printf "└" ; for (i=0; i<72; i++) printf "─"; printf "\n"
+    }
+    ' "$@"
+}
 
 burls() {
     local top=20
     local sort_by=ms
+    local drops=""
+    local keeps=""
+    local listparams=0
+    local interactive=0
     local args=()
     while (( $# )); do
         case "$1" in
             -n) top="$2"; shift 2 ;;
             -s) sort_by="$2"; shift 2 ;;
-            --help)
+            -d) drops="$2"; shift 2 ;;
+            -k) keeps="$2"; shift 2 ;;
+            -L|--list-params) listparams=1; shift ;;
+            -i|--interactive) interactive=1; shift ;;
+            -h|--help)
                 cat <<EOF
-Usage: burls [-n N] [-s SORT] [LOG-FILE]
+Usage: burls [-n N] [-s SORT] [-d LIST | -k LIST] [-L|-i] [LOG-FILE]
 
   -n N     show top N URLs         (default: 20)
   -s SORT  reqs | ms | kb | mb     (default: ms)
@@ -450,22 +606,93 @@ Usage: burls [-n N] [-s SORT] [LOG-FILE]
              ms   = total time spent (ms)
              kb   = mean response size (KB)
              mb   = total bandwidth (MB)
+  -d LIST  comma-separated query-string parameter NAMES to drop
+           before grouping. Useful when 'bbox', 'time', or other
+           high-cardinality values fragment otherwise identical
+           requests:
+             burls -d bbox,time wms-access-log
+  -k LIST  comma-separated query-string parameter names to KEEP
+           (everything else is dropped). Mutually exclusive with -d.
+  -L, --list-params
+           Scan the log and print a frequency table of every
+           query-string parameter name seen. Use this output to
+           pick which parameters to feed -d or -k.
+  -i, --interactive
+           Like -L, but after printing the parameter table, prompt
+           for a comma-separated drop-list and re-run the analysis
+           with that filter. Requires a log file argument; will not
+           work with stdin input.
 EOF
                 return 0 ;;
             *) args+=("$1"); shift ;;
         esac
     done
 
-    gawk -v TOP="$top" -v SORT="$sort_by" '
+    if [ -n "$drops" ] && [ -n "$keeps" ]; then
+        echo "burls: -d and -k are mutually exclusive" >&2
+        return 1
+    fi
+
+    if (( listparams )); then
+        _burls_list_params "${args[@]}"
+        return 0
+    fi
+
+    if (( interactive )); then
+        if (( ${#args[@]} == 0 )); then
+            echo "burls -i: requires a log file argument (cannot read stdin twice)" >&2
+            return 1
+        fi
+        _burls_list_params "${args[@]}"
+        printf "\nParameters to drop (comma-separated, blank for none): " >&2
+        local reply
+        IFS= read -r reply
+        if [ -n "$reply" ]; then
+            drops="$reply"
+        fi
+        echo "" >&2
+    fi
+
+    gawk -v TOP="$top" -v SORT="$sort_by" -v DROPS="$drops" -v KEEPS="$keeps" '
     BEGIN {
-        p8[1]="▏"; p8[2]="▎"; p8[3]="▍"; p8[4]="▌"
-        p8[5]="▋"; p8[6]="▊"; p8[7]="▉"
+        FULL = "▄"
+        if (DROPS != "") {
+            nd = split(DROPS, dlist, ",")
+            for (i=1; i<=nd; i++) drop[dlist[i]] = 1
+            HAS_DROPS = 1
+        }
+        if (KEEPS != "") {
+            nk = split(KEEPS, klist, ",")
+            for (i=1; i<=nk; i++) keep[klist[i]] = 1
+            HAS_KEEPS = 1
+        }
     }
     {
+        # Full URL including query string — different parameter sets
+        # (GetMap vs GetCapabilities, producer=foo vs producer=bar)
+        # are distinct rows. Per-service access logs share a path
+        # prefix, so the query string is what distinguishes traffic.
+        # -d drops listed parameter names; -k keeps only listed ones
+        # (everything else dropped). They are mutually exclusive.
         url = $6
-        # strip query string to group by endpoint path
-        q = index(url, "?")
-        if (q > 0) url = substr(url, 1, q-1)
+        if (HAS_DROPS || HAS_KEEPS) {
+            qpos = index(url, "?")
+            if (qpos > 0) {
+                path = substr(url, 1, qpos-1)
+                qs = substr(url, qpos+1)
+                np = split(qs, parts, "&")
+                out = ""; first = 1
+                for (j=1; j<=np; j++) {
+                    eq = index(parts[j], "=")
+                    name = (eq > 0) ? substr(parts[j], 1, eq-1) : parts[j]
+                    if (HAS_DROPS && drop[name]) continue
+                    if (HAS_KEEPS && !keep[name]) continue
+                    if (first) { out = parts[j]; first = 0 }
+                    else       { out = out "&" parts[j] }
+                }
+                url = (out == "") ? path : path "?" out
+            }
+        }
         dur = $10 + 0
         bytes = $11 + 0
 
@@ -516,18 +743,14 @@ EOF
         }
         printf "└" ; for (i=0; i<72; i++) printf "─" ; printf "\n"
     }
-    function vbar(val, maxval, width,   full, p, s, i, eighths, visual) {
+    function vbar(val, maxval, width,   ratio, n, s, i) {
         if (maxval <= 0) return sprintf("%*s", width, "")
         ratio = val / maxval
         if (ratio > 1) ratio = 1
-        eighths = int(ratio * width * 8 + 0.5)
-        full = int(eighths / 8)
-        p = eighths - full * 8
+        n = int(ratio * width + 0.5)
         s = ""
-        for (i=0; i<full; i++) s = s "█"
-        visual = full
-        if (p > 0 && visual < width) { s = s p8[p]; visual++ }
-        while (visual < width) { s = s " "; visual++ }
+        for (i=0; i<n; i++) s = s FULL
+        for (i=n; i<width; i++) s = s " "
         return s
     }
     ' "${args[@]}"
@@ -538,19 +761,51 @@ EOF
 # -----------------------------------------------------------------------------
 
 bstatus() {
-    if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
-        cat <<EOF
-Usage: bstatus [LOG-FILE]
+    local interval=""
+    local ascii=0
+    local args=()
+    while (( $# )); do
+        case "$1" in
+            -i) interval="$2"; shift 2 ;;
+            --ascii) ascii=1; shift ;;
+            -h|--help)
+                cat <<EOF
+Usage: bstatus [-i INTERVAL] [--ascii] [LOG-FILE]
 
-Print HTTP status-code distribution and per-class breakdown, with
-horizontal Unicode bars. Reads stdin if no file is given.
+  -i INTERVAL  if given, additionally show a per-class sparkline
+               over time. Bucket widths: 1s, 10s, 1m, 10m, 1h, 1d.
+  --ascii      use ASCII bars and dot-ramp sparklines.
+
+Always prints the aggregate code distribution and the per-class
+breakdown; -i prepends a time-bucketed view.
 EOF
-        return 0
+                return 0 ;;
+            *) args+=("$1"); shift ;;
+        esac
+    done
+
+    local prec=0
+    if [ -n "$interval" ]; then
+        if ! prec=$(_bstat_prec "$interval"); then
+            echo "bstatus: unknown interval '$interval' (use 1s|10s|1m|10m|1h|1d)" >&2
+            return 1
+        fi
     fi
-    gawk '
+
+    gawk -v PREC="$prec" -v ASCII="$ascii" '
     BEGIN {
-        p8[1]="▏"; p8[2]="▎"; p8[3]="▍"; p8[4]="▌"
-        p8[5]="▋"; p8[6]="▊"; p8[7]="▉"
+        if (ASCII) {
+            FULL = "="
+            sp[0]=" "; sp[1]="."; sp[2]=":"; sp[3]="|"; sp[4]="#"
+        } else {
+            FULL = "▄"
+            B[0]=" ";  B[1]="⢀"; B[2]="⢠"; B[3]="⢰"; B[4]="⢸"
+            B[5]="⡀";  B[6]="⣀"; B[7]="⣠"; B[8]="⣰"; B[9]="⣸"
+            B[10]="⡄"; B[11]="⣄"; B[12]="⣤"; B[13]="⣴"; B[14]="⣼"
+            B[15]="⡆"; B[16]="⣆"; B[17]="⣦"; B[18]="⣶"; B[19]="⣾"
+            B[20]="⡇"; B[21]="⣇"; B[22]="⣧"; B[23]="⣷"; B[24]="⣿"
+        }
+        TPAD = (PREC==15 || PREC==18) ? "0" : ""
     }
     {
         s = $8 + 0
@@ -558,17 +813,62 @@ EOF
         tot++
         cls = int(s/100) * 100
         clscnt[cls]++
+        if (PREC > 0) {
+            t = substr($9, 2, PREC)
+            tkey[t] = 1
+            bcls[t SUBSEP cls]++
+            if (bcls[t SUBSEP cls] > clsmax[cls]) clsmax[cls] = bcls[t SUBSEP cls]
+        }
     }
     END {
-        printf "┌─ HTTP status distribution  (%d requests) ─\n", tot
+        if (PREC > 0) {
+            # collect time keys sorted
+            k = 0
+            for (t in tkey) tmptk[++k] = t
+            tn = asort(tmptk, tks)
+            sw = ASCII ? tn : int((tn+1)/2)
+            # widen sparkline column to at least the header label width
+            spw = (sw > 9) ? sw : 9
+            printf "┌─ HTTP status by %s  (%d buckets, %d requests) ─\n",
+                iname(PREC), tn, tot
+            printf "│ %5s %8s %6s  %-*s\n", "class", "total", "pct", spw, "sparkline"
+            printf "│ %5s %8s %6s  ", "─────", "────────", "──────"
+            for (i=0; i<spw; i++) printf "─"
+            printf "\n"
+            # collect classes
+            k = 0
+            for (c in clscnt) tmpc[++k] = c + 0
+            m = asort(tmpc, cks)
+            for (i=1; i<=m; i++) {
+                c = cks[i]
+                printf "│ %3dxx %8d %5.1f%%  ",
+                    c/100, clscnt[c], clscnt[c]/tot*100
+                spark_class(c)
+                printf "\n"
+            }
+            # time axis under sparklines
+            if (tn > 0) {
+                l1 = tks[1]   TPAD
+                l2 = tks[tn]  TPAD
+                pad = sw - length(l1) - length(l2)
+                if (pad < 1) pad = 1
+                printf "│ %5s %8s %6s  %s", "", "", "", l1
+                for (i=0; i<pad; i++) printf " "
+                printf "%s\n", l2
+            }
+            printf "│\n"
+        }
+        # aggregate code distribution
+        if (PREC > 0)
+            printf "│ HTTP code distribution  (%d requests):\n", tot
+        else
+            printf "┌─ HTTP status distribution  (%d requests) ─\n", tot
         printf "│ %5s %8s %6s  %-30s\n", "code", "count", "pct", "bar"
-
         k = 0
         for (c in cnt) tmp1[++k] = c + 0
         n = asort(tmp1, keys)
         mx = 0
         for (i=1; i<=n; i++) if (cnt[keys[i]] > mx) mx = cnt[keys[i]]
-
         for (i=1; i<=n; i++) {
             c = keys[i]
             printf "│ %5d %8d %5.1f%%  %s\n",
@@ -577,29 +877,61 @@ EOF
         printf "│\n│  by class:\n"
         k = 0
         for (c in clscnt) tmp2[++k] = c + 0
-        m = asort(tmp2, ckeys)
+        m = asort(tmp2, ckeys2)
         for (i=1; i<=m; i++) {
-            c = ckeys[i]
+            c = ckeys2[i]
             printf "│   %dxx: %8d  %5.1f%%  %s\n",
                 c/100, clscnt[c], clscnt[c]/tot*100, vbar(clscnt[c], tot, 40)
         }
         printf "└" ; for (i=0; i<72; i++) printf "─" ; printf "\n"
     }
-    function vbar(val, maxval, width,   full, p, s, i, eighths, visual) {
+    function spark_class(c,   i, mx, l1, l2, v1, v2) {
+        # Same level-3 cap as bstat sparklines so stacked per-class
+        # rows do not visually touch.
+        mx = clsmax[c]
+        if (mx <= 0) {
+            if (ASCII) for (i=1; i<=tn; i++) printf " "
+            else       for (i=0; i<int((tn+1)/2); i++) printf " "
+            return
+        }
+        if (ASCII) {
+            for (i=1; i<=tn; i++) {
+                v1 = bcls[tks[i] SUBSEP c] + 0
+                l1 = int(v1 / mx * 3 + 0.5)
+                if (l1 < 0) l1 = 0; if (l1 > 3) l1 = 3
+                printf "%s", sp[l1]
+            }
+            return
+        }
+        for (i=1; i<=tn; i+=2) {
+            v1 = bcls[tks[i] SUBSEP c] + 0
+            l1 = int(v1 / mx * 3 + 0.5)
+            if (l1 < 0) l1 = 0; if (l1 > 3) l1 = 3
+            if (i+1 <= tn) {
+                v2 = bcls[tks[i+1] SUBSEP c] + 0
+                l2 = int(v2 / mx * 3 + 0.5)
+                if (l2 < 0) l2 = 0; if (l2 > 3) l2 = 3
+            } else l2 = 0
+            printf "%s", B[l1*5 + l2]
+        }
+    }
+    function vbar(val, maxval, width,   ratio, n, s, i) {
         if (maxval <= 0) return sprintf("%*s", width, "")
         ratio = val / maxval
         if (ratio > 1) ratio = 1
-        eighths = int(ratio * width * 8 + 0.5)
-        full = int(eighths / 8)
-        p = eighths - full * 8
+        n = int(ratio * width + 0.5)
         s = ""
-        for (i=0; i<full; i++) s = s "█"
-        visual = full
-        if (p > 0 && visual < width) { s = s p8[p]; visual++ }
-        while (visual < width) { s = s " "; visual++ }
+        for (i=0; i<n; i++) s = s FULL
+        for (i=n; i<width; i++) s = s " "
         return s
     }
-    ' "$@"
+    function iname(p) {
+        if (p==19) return "1s";  if (p==18) return "10s"
+        if (p==16) return "1m";  if (p==15) return "10m"
+        if (p==13) return "1h";  if (p==10) return "1d"
+        return "?"
+    }
+    ' "${args[@]}"
 }
 
 # -----------------------------------------------------------------------------
@@ -628,10 +960,7 @@ EOF
     done
 
     gawk -v TOP="$top" -v SORT="$sort_by" '
-    BEGIN {
-        p8[1]="▏"; p8[2]="▎"; p8[3]="▍"; p8[4]="▌"
-        p8[5]="▋"; p8[6]="▊"; p8[7]="▉"
-    }
+    BEGIN { FULL = "▄" }
     {
         # APIKEY is the last field, but some requests have none ("-")
         k = $NF
@@ -673,18 +1002,14 @@ EOF
         }
         printf "└" ; for (i=0; i<72; i++) printf "─" ; printf "\n"
     }
-    function vbar(val, maxval, width,   full, p, s, i, eighths, visual) {
+    function vbar(val, maxval, width,   ratio, n, s, i) {
         if (maxval <= 0) return sprintf("%*s", width, "")
         ratio = val / maxval
         if (ratio > 1) ratio = 1
-        eighths = int(ratio * width * 8 + 0.5)
-        full = int(eighths / 8)
-        p = eighths - full * 8
+        n = int(ratio * width + 0.5)
         s = ""
-        for (i=0; i<full; i++) s = s "█"
-        visual = full
-        if (p > 0 && visual < width) { s = s p8[p]; visual++ }
-        while (visual < width) { s = s " "; visual++ }
+        for (i=0; i<n; i++) s = s FULL
+        for (i=n; i<width; i++) s = s " "
         return s
     }
     ' "${args[@]}"
@@ -758,8 +1083,7 @@ _bmon_cache() {
     echo "$json" | jq -r '.[] | [.cache_name, .size, .maxsize, .hits, .misses, .hitrate, ."hits/min", ."inserts/min"] | @tsv' 2>/dev/null | \
     gawk -F'\t' '
     BEGIN {
-        p8[1]="▏"; p8[2]="▎"; p8[3]="▍"; p8[4]="▌"
-        p8[5]="▋"; p8[6]="▊"; p8[7]="▉"
+        FULL = "▄"
         printf "│\n│ Caches\n"
         printf "│ %-34s %8s %8s %9s %9s %6s  %-20s\n",
             "name","size","max","hits/min","ins/min","hit%","hitrate"
@@ -773,18 +1097,14 @@ _bmon_cache() {
         printf "│ %-34s %8d %8d %9.1f %9.1f %6.2f  %s\n",
             substr(name,1,34), size, max, hpm, ipm, hitrate, vbar(hitrate, 100, 20)
     }
-    function vbar(val, maxval, width,   full, p, s, i, eighths, visual) {
+    function vbar(val, maxval, width,   ratio, n, s, i) {
         if (maxval <= 0) return sprintf("%*s", width, "")
         ratio = val / maxval
         if (ratio > 1) ratio = 1
-        eighths = int(ratio * width * 8 + 0.5)
-        full = int(eighths / 8)
-        p = eighths - full * 8
+        n = int(ratio * width + 0.5)
         s = ""
-        for (i=0; i<full; i++) s = s "█"
-        visual = full
-        if (p > 0 && visual < width) { s = s p8[p]; visual++ }
-        while (visual < width) { s = s " "; visual++ }
+        for (i=0; i<n; i++) s = s FULL
+        for (i=n; i<width; i++) s = s " "
         return s
     }'
 }
@@ -800,8 +1120,7 @@ _bmon_service() {
     echo "$json" | jq -r '.[] | [.Handler, .LastMinute, .LastHour, .Last24Hours, .AverageDuration] | @tsv' 2>/dev/null | \
     gawk -F'\t' '
     BEGIN {
-        p8[1]="▏"; p8[2]="▎"; p8[3]="▍"; p8[4]="▌"
-        p8[5]="▋"; p8[6]="▊"; p8[7]="▉"
+        FULL = "▄"
         printf "│\n│ Services  (req/min, req/h, req/day, mean ms)\n"
         printf "│ %-40s %7s %7s %9s %8s  %-20s\n",
             "handler","last1m","last1h","last24h","avg_ms","last_min"
@@ -820,18 +1139,14 @@ _bmon_service() {
                 substr(h[i],1,40), m1[i], m60[i], d[i], ms[i], vbar(m1[i], mx, 20)
         }
     }
-    function vbar(val, maxval, width,   full, p, s, i, eighths, visual) {
+    function vbar(val, maxval, width,   ratio, n, s, i) {
         if (maxval <= 0) return sprintf("%*s", width, "")
         ratio = val / maxval
         if (ratio > 1) ratio = 1
-        eighths = int(ratio * width * 8 + 0.5)
-        full = int(eighths / 8)
-        p = eighths - full * 8
+        n = int(ratio * width + 0.5)
         s = ""
-        for (i=0; i<full; i++) s = s "█"
-        visual = full
-        if (p > 0 && visual < width) { s = s p8[p]; visual++ }
-        while (visual < width) { s = s " "; visual++ }
+        for (i=0; i<n; i++) s = s FULL
+        for (i=n; i<width; i++) s = s " "
         return s
     }'
 }
