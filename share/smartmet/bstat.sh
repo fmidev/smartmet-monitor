@@ -41,17 +41,20 @@ _bstat_prec() {
     esac
 }
 
-# Parse common flags ("-i INTERVAL", "-w WIDTH") out of the argument list.
-# Writes BSTAT_INTERVAL, BSTAT_WIDTH, BSTAT_ARGS into the environment.
+# Parse common flags ("-i INTERVAL", "-w WIDTH", "-H HEIGHT") out of
+# the argument list. Writes BSTAT_INTERVAL, BSTAT_WIDTH, BSTAT_HEIGHT,
+# BSTAT_ARGS into the environment.
 _bstat_parse() {
     BSTAT_INTERVAL=1h
     BSTAT_WIDTH=20
+    BSTAT_HEIGHT=4
     BSTAT_ASCII=0
     BSTAT_ARGS=()
     while (( $# )); do
         case "$1" in
             -i) BSTAT_INTERVAL="$2"; shift 2 ;;
             -w) BSTAT_WIDTH="$2"; shift 2 ;;
+            -H) BSTAT_HEIGHT="$2"; shift 2 ;;
             --ascii) BSTAT_ASCII=1; shift ;;
             -h|--help) BSTAT_INTERVAL=_help; shift ;;
             *)  BSTAT_ARGS+=("$1"); shift ;;
@@ -72,12 +75,15 @@ bstat() {
     _bstat_parse "$@"
     if [ "$BSTAT_INTERVAL" = _help ]; then
         cat <<EOF
-Usage: bstat [-i INTERVAL] [-w WIDTH] [--ascii] [LOG-FILE]
+Usage: bstat [-i INTERVAL] [-w WIDTH] [-H HEIGHT] [--ascii] [LOG-FILE]
 
   -i INTERVAL   bucket width: 1s, 10s, 1m, 10m, 1h, 1d  (default: 1h)
   -w WIDTH      horizontal bar width in columns         (default: 20)
-  --ascii       use = bars instead of Unicode eighth-blocks, and
-                skip the sparkline footer. For scripts that grep
+  -H HEIGHT     Braille sparkline height in char-rows   (default: 4)
+                Vertical resolution per sparkline = HEIGHT * 4 dots.
+  --ascii       use = bars instead of Unicode eighth-blocks. The
+                sparkline footer falls back to a single-row dot ramp
+                regardless of HEIGHT. Useful for scripts that grep
                 the output or terminals without UTF-8 support.
 
 Reads stdin if no file is given.
@@ -91,7 +97,7 @@ EOF
         return 1
     fi
 
-    gawk -v PREC="$prec" -v BW="$BSTAT_WIDTH" -v ASCII="$BSTAT_ASCII" '
+    gawk -v PREC="$prec" -v BW="$BSTAT_WIDTH" -v SH="$BSTAT_HEIGHT" -v ASCII="$BSTAT_ASCII" '
     BEGIN {
         if (ASCII) {
             FULL = "="
@@ -221,13 +227,21 @@ EOF
                 tot_err / tot_count * 100
         }
 
-        # Sparklines: ASCII = 1 dot per bucket (4-level ramp), Braille
-        # = 2 buckets per cell (4-level overlap encoding, btop-style).
+        # Sparklines.
+        # Braille mode: each sparkline is SH char-rows tall (default 4)
+        # = SH*4 dots of vertical resolution, 2 buckets per cell. The
+        # topmost char-row of each sparkline is capped at level 3 so
+        # adjacent stacked sparklines retain a 1/4-cell visual gap;
+        # rows below stay at full level 4 for within-sparkline bar
+        # continuity.
+        # ASCII mode: single-row dot ramp (per-bucket), regardless of SH.
+        SPARK_H = ASCII ? 1 : (SH+0 > 0 ? SH+0 : 4)
+        SPARK_IND = "│             "
         printf "│\n"
-        printf "│  requests   "; spark(count, keys, n, gc); printf "\n"
-        printf "│  latency    "; sparkavg(sumdur, count, keys, n);    printf "\n"
-        printf "│  avg_size   "; sparkavg(sumbytes, count, keys, n);  printf "\n"
-        printf "│  bandwidth  "; spark(sumbytes, keys, n, gB); printf "\n"
+        spark(count, keys, n, gc,            "│  requests   ", SPARK_IND, SPARK_H)
+        sparkavg(sumdur, count, keys, n,     "│  latency    ", SPARK_IND, SPARK_H)
+        sparkavg(sumbytes, count, keys, n,   "│  avg_size   ", SPARK_IND, SPARK_H)
+        spark(sumbytes, keys, n, gB,         "│  bandwidth  ", SPARK_IND, SPARK_H)
         printf "│\n"
 
         # time axis: first + last bucket label under the sparklines.
@@ -264,61 +278,99 @@ EOF
         return s
     }
 
-    # Sparkline for vals[ks[i]]/mx — Braille: 2 buckets per cell
-    # (left dots = vals[2i-1], right dots = vals[2i]); ASCII: one dot
-    # per bucket. Levels are capped at 3 (out of 4) so the topmost
-    # Braille dot row stays empty — keeps stacked sparklines from
-    # visually touching across line boundaries.
-    function spark(vals, ks, m, mx,   i, l1, l2) {
-        if (mx <= 0) {
-            if (ASCII) for (i=1; i<=m; i++) printf " "
-            else       for (i=0; i<int((m+1)/2); i++) printf " "
-            return
-        }
+    # Multi-row sparkline. Renders H char-rows (top to bottom):
+    # the first row gets LBL as prefix, subsequent rows get IND so
+    # the chart sits flush under the label column. Braille mode: 2
+    # buckets per char-cell, 4 dot rows per char-row → H*4 levels of
+    # vertical resolution. ASCII mode: H is forced to 1 (single-row
+    # dot ramp), per the comment in the call site.
+    # Within a sparkline rows below the top use full level 0..4 for
+    # bar continuity; the TOP row caps at 3 of 4 so the topmost dot
+    # row stays empty and stacked sparklines do not visually touch.
+    function spark(vals, ks, m, mx, LBL, IND, H,    r, i, pL, pR, lL, lR, prefix) {
         if (ASCII) {
-            for (i=1; i<=m; i++) {
-                l1 = int(vals[ks[i]] / mx * 3 + 0.5)
-                if (l1 < 0) l1 = 0; if (l1 > 3) l1 = 3
-                printf "%s", sp[l1]
-            }
+            printf "%s", LBL
+            _spark_oneline(vals, ks, m, mx)
+            printf "\n"
             return
         }
-        for (i=1; i<=m; i+=2) {
-            l1 = int(vals[ks[i]] / mx * 3 + 0.5)
-            if (l1 < 0) l1 = 0; if (l1 > 3) l1 = 3
-            if (i+1 <= m) {
-                l2 = int(vals[ks[i+1]] / mx * 3 + 0.5)
-                if (l2 < 0) l2 = 0; if (l2 > 3) l2 = 3
-            } else l2 = 0
-            printf "%s", B[l1*5 + l2]
+        if (mx <= 0) {
+            for (r=0; r<H; r++) printf "%s\n", (r == 0 ? LBL : IND)
+            return
+        }
+        for (r = H-1; r >= 0; r--) {
+            prefix = (r == H-1) ? LBL : IND
+            printf "%s", prefix
+            for (i=1; i<=m; i+=2) {
+                pL = int(vals[ks[i]] / mx * H * 4 + 0.5)
+                lL = pL - 4 * r
+                if (lL < 0) lL = 0
+                if (lL > 4) lL = 4
+                if (r == H-1 && lL > 3) lL = 3
+                if (i+1 <= m) {
+                    pR = int(vals[ks[i+1]] / mx * H * 4 + 0.5)
+                    lR = pR - 4 * r
+                    if (lR < 0) lR = 0
+                    if (lR > 4) lR = 4
+                    if (r == H-1 && lR > 3) lR = 3
+                } else lR = 0
+                printf "%s", B[lL*5 + lR]
+            }
+            printf "\n"
         }
     }
 
     # Mean-per-bucket sparkline (num[k]/den[k]). Same encoding as spark().
-    function sparkavg(num, den, ks, m,   i, mx, va, l1, l2) {
+    function sparkavg(num, den, ks, m, LBL, IND, H,    r, i, mx, va, pL, pR, lL, lR, prefix) {
         mx = 0
         for (i=1; i<=m; i++) { va[i] = num[ks[i]] / den[ks[i]]; if (va[i] > mx) mx = va[i] }
-        if (mx <= 0) {
-            if (ASCII) for (i=1; i<=m; i++) printf " "
-            else       for (i=0; i<int((m+1)/2); i++) printf " "
-            return
-        }
         if (ASCII) {
-            for (i=1; i<=m; i++) {
-                l1 = int(va[i] / mx * 3 + 0.5)
-                if (l1 < 0) l1 = 0; if (l1 > 3) l1 = 3
-                printf "%s", sp[l1]
-            }
+            printf "%s", LBL
+            _sparkavg_oneline(va, m, mx)
+            printf "\n"
             return
         }
-        for (i=1; i<=m; i+=2) {
+        if (mx <= 0) {
+            for (r=0; r<H; r++) printf "%s\n", (r == 0 ? LBL : IND)
+            return
+        }
+        for (r = H-1; r >= 0; r--) {
+            prefix = (r == H-1) ? LBL : IND
+            printf "%s", prefix
+            for (i=1; i<=m; i+=2) {
+                pL = int(va[i] / mx * H * 4 + 0.5)
+                lL = pL - 4 * r
+                if (lL < 0) lL = 0
+                if (lL > 4) lL = 4
+                if (r == H-1 && lL > 3) lL = 3
+                if (i+1 <= m) {
+                    pR = int(va[i+1] / mx * H * 4 + 0.5)
+                    lR = pR - 4 * r
+                    if (lR < 0) lR = 0
+                    if (lR > 4) lR = 4
+                    if (r == H-1 && lR > 3) lR = 3
+                } else lR = 0
+                printf "%s", B[lL*5 + lR]
+            }
+            printf "\n"
+        }
+    }
+
+    # Single-row helpers used in ASCII mode.
+    function _spark_oneline(vals, ks, m, mx,    i, l1) {
+        if (mx <= 0) { for (i=1; i<=m; i++) printf " "; return }
+        for (i=1; i<=m; i++) {
+            l1 = int(vals[ks[i]] / mx * 3 + 0.5)
+            if (l1 < 0) l1 = 0; if (l1 > 3) l1 = 3
+            printf "%s", sp[l1]
+        }
+    }
+    function _sparkavg_oneline(va, m, mx,    i, l1) {
+        if (mx <= 0) { for (i=1; i<=m; i++) printf " "; return }
+        for (i=1; i<=m; i++) {
             l1 = int(va[i] / mx * 3 + 0.5)
             if (l1 < 0) l1 = 0; if (l1 > 3) l1 = 3
-            if (i+1 <= m) {
-                l2 = int(va[i+1] / mx * 3 + 0.5)
-                if (l2 < 0) l2 = 0; if (l2 > 3) l2 = 3
-            } else l2 = 0
-            printf "%s", B[l1*5 + l2]
+            printf "%s", sp[l1]
         }
     }
 

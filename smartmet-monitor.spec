@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.7.14
+Version:        0.7.15
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -101,6 +101,17 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.15-1
+- bstat: footer sparklines (requests / latency / avg_size /
+  bandwidth) are now multi-row Braille charts. Each sparkline is
+  4 character rows tall by default (16 dot rows of vertical
+  resolution per metric) instead of 1 row. The topmost char-row
+  caps at level 3 so adjacent sparklines retain a 1/4-cell gap;
+  rows below stay at full level 4 so a tall bar within a single
+  bucket renders as a continuous column. New -H HEIGHT flag tunes
+  the per-sparkline height; passing --ascii keeps the original
+  single-row dot-ramp layout regardless of -H.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.14-1
 - bstat / bstatus / burls / bkeys / bmon: per-row magnitude bars now
   use half-height ▄ (cell-level rounding, no eighth-block partials),
