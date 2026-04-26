@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.26
-Release:        5%{?dist}.fmi
+Release:        6%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -112,6 +112,24 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.26-6.fmi
+- Network monitoring in the Proc panel. Three host-wide counters
+  from /proc/net/snmp and /proc/net/netstat (TCP retransmits/s,
+  listen-queue overflows/s, listen drops/s) plus per-NIC rx/tx
+  bandwidth from /proc/net/dev. No external tools, no eBPF —
+  always-on regardless of host config; runs on the smallest VM.
+  Loopback is omitted from the NIC list because it is never the
+  bottleneck and would crowd the panel on hosts where backend ↔
+  frontend talks over local sockets. Retransmits > 1/s and any
+  listen drops are coloured red.
+- README's "Reading the live monitors" gains a Block-I/O latency
+  entry and a Network entry, both written in the Brendan Gregg
+  style: detects / likely causes / healthy shape / trouble shape
+  / what to look at next. The Major page faults entry is also
+  rewritten to use the same explicit Detects + Likely-causes
+  structure so an on-call operator can diagnose without leaving
+  the README.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.26-5.fmi
 - Major page-fault rate per smartmetd PID. New section in the
   Proc panel that reads /proc/PID/stat field 12 (majflt) on each

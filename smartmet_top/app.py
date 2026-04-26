@@ -28,6 +28,7 @@ from .sources.logtail import bulk_load, tail_many
 from .sources.perftop import perf_loop
 from .sources.offcpu import offcpu_loop
 from .sources.biolat import biolat_loop
+from .sources.netstats import netstats_loop
 from .sources.proc import proc_loop
 from .state.store import Store
 
@@ -257,6 +258,10 @@ class App:
         # Always poll /proc — even without log files or admin URLs, the
         # ProcPanel works as long as smartmetd is running on this host.
         tasks.append(asyncio.create_task(proc_loop(self.store)))
+        # Network counters from /proc/net/* — no external tools, no
+        # eBPF, runs on every Linux. The Proc panel renders the
+        # results in its own Network section.
+        tasks.append(asyncio.create_task(netstats_loop(self.store)))
         if self.enable_perf:
             tasks.append(asyncio.create_task(
                 perf_loop(self.store, self.perf_interval,

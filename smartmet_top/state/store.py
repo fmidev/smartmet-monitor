@@ -496,6 +496,14 @@ class Store:
         self.biolat_enabled: bool = False
         self.biolat_status: str = "(block-I/O sampler not started)"
         self.biolat_last_error: str = ""
+        # Network counters from /proc/net/{snmp,netstat,dev}. Always
+        # available — no eBPF dependency, runs everywhere Linux runs.
+        # TCP entries: (ts, retrans/s, listen_overflows/s, listen_drops/s).
+        # NIC entries are per-interface deques of (ts, rx_bytes/s, tx_bytes/s).
+        self.netstats_tcp: Deque[Tuple[float, float, float, float]] = deque(maxlen=180)
+        self.netstats_iface: Dict[str, Deque[Tuple[float, float, float]]] = {}
+        self.netstats_enabled: bool = False
+        self.netstats_status: str = "(network sampler not started)"
 
     def register_admin_host(self, host: str) -> None:
         with self._lock:
@@ -894,3 +902,39 @@ class Store:
         with self._lock:
             return [t / window_seconds
                     for _, _, _, _, t in self.biolat_samples]
+
+    # -- network counters ---------------------------------------------------
+
+    def netstats_record_tcp(self, ts: float, retrans_rate: float,
+                            overflow_rate: float, drop_rate: float) -> None:
+        with self._lock:
+            self.netstats_tcp.append((ts, retrans_rate, overflow_rate, drop_rate))
+
+    def netstats_record_iface(self, ts: float, iface: str,
+                              rx_rate: float, tx_rate: float) -> None:
+        with self._lock:
+            buf = self.netstats_iface.get(iface)
+            if buf is None:
+                # 180 samples × default 2 s = 6 minutes of NIC history.
+                buf = deque(maxlen=180)
+                self.netstats_iface[iface] = buf
+            buf.append((ts, rx_rate, tx_rate))
+
+    def netstats_tcp_series(self) -> Tuple[List[float], List[float], List[float]]:
+        """Returns (retrans_rate, overflow_rate, drop_rate) series."""
+        with self._lock:
+            r = [s[1] for s in self.netstats_tcp]
+            o = [s[2] for s in self.netstats_tcp]
+            d = [s[3] for s in self.netstats_tcp]
+            return r, o, d
+
+    def netstats_iface_series(self, iface: str) -> Tuple[List[float], List[float]]:
+        with self._lock:
+            buf = self.netstats_iface.get(iface)
+            if buf is None:
+                return [], []
+            return [s[1] for s in buf], [s[2] for s in buf]
+
+    def netstats_iface_names(self) -> List[str]:
+        with self._lock:
+            return sorted(self.netstats_iface.keys())

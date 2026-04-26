@@ -106,7 +106,13 @@ check:
 	    s = [ProcSample(ts=10.0, majflt=100), ProcSample(ts=11.0, majflt=200), ProcSample(ts=12.0, majflt=210)]; \
 	    assert _majflt_rate(s) == 10.0, _majflt_rate(s); \
 	    assert _majflt_rate_series(s) == [100.0, 10.0], _majflt_rate_series(s); \
-	    assert _majflt_rate([]) == 0.0 and _majflt_rate([s[0]]) == 0.0'
+	    assert _majflt_rate([]) == 0.0 and _majflt_rate([s[0]]) == 0.0; \
+	    import smartmet_top.sources.netstats; \
+	    from smartmet_top.sources.netstats import _parse_proc_net_snmp, parse_proc_net_dev; \
+	    snmp = _parse_proc_net_snmp("Tcp: RtoAlgorithm RtoMin RtoMax MaxConn ActiveOpens PassiveOpens AttemptFails EstabResets CurrEstab InSegs OutSegs RetransSegs InErrs OutRsts InCsumErrors\nTcp: 1 200 120000 -1 11 22 0 0 1 100 200 17 0 5 0\n"); \
+	    assert snmp["Tcp"]["RetransSegs"] == 17 and snmp["Tcp"]["InSegs"] == 100, snmp; \
+	    dev = parse_proc_net_dev("Inter-|   Receive                                                |  Transmit\n face |bytes packets errs drop fifo frame compressed multicast|bytes packets errs drop fifo colls carrier compressed\n    lo: 100 1 0 0 0 0 0 0 200 1 0 0 0 0 0 0\n  eth0: 5000 50 0 0 0 0 0 0 6000 60 0 0 0 0 0 0\n"); \
+	    assert "lo" not in dev and dev["eth0"] == (5000, 6000), dev'
 	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
 	bash -n share/smartmet/bstat.sh
 	for t in $(BTOOLS) $(LEGACY); do bash -n bin/$$t; done

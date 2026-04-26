@@ -359,39 +359,136 @@ means trouble" you can pattern-match on at a glance.
 
 #### Major page faults (Proc panel)
 
-**What it measures.** Number of page faults per second that
-required a synchronous read from disk — the kernel's "I asked for
-a page that wasn't resident in RAM" counter, taken from
+**What it measures.** Page faults per second that required a
+synchronous read from disk — the kernel's "I asked for a page
+that wasn't resident in RAM" counter, taken from
 `/proc/PID/stat` field 12 (`majflt`) and rate-converted across
-samples.
+samples. Saturation metric in USE-method terms.
 
-**Healthy shape.** Flat at 0 / s (or a thin floor of ones and
-twos) on a steady-state SmartMet server whose working set fits in
-page cache. The sparkline reads as a near-empty channel.
+**Detects.** Working-set eviction (the QueryData files
+just-published by a fresh model run no longer fit in page
+cache); host-wide memory pressure stealing pages from
+smartmetd; an mmap-and-discard access pattern hidden inside a
+plugin; the moment a SmartMet server stops being CPU-bound and
+starts being disk-bound.
 
-**Trouble shape.** Bursts of hundreds-to-thousands per second,
-typically after a fresh model run rolls in. The on-CPU flame
-shows nothing unusual — threads are blocked in `do_swap_page` /
-`__readpage` deep in the kernel — but request p95 jumps several
-fold for the duration of the spike. A *sustained* high rate (e.g.
-50 + / s for minutes) is the signal that the working set has
-permanently outgrown RAM and the host is now read-from-disk-bound.
+**Likely causes when it goes red.**
+- A producer just published new files large enough to push the
+  hot working set out of cache.
+- Another process on the same host (a backup, a scheduled
+  conversion, a colleague's experiment) suddenly demanded
+  several GB of RAM.
+- `vm.vfs_cache_pressure` was nudged up, or
+  `vm.drop_caches` was written, evicting cached pages.
+- A plugin is touching previously-unread files (e.g. broad
+  `param=` or `producer=` enumeration in WMS / timeseries).
 
-**Why this is the killer SmartMet metric.** Querydata files are
-mmapped, so every "first touch" after a model run is a major
-fault. You will not see this in the on-CPU flamegraph (the kernel
-work is mostly waiting), nor in the access log (no errors), nor
-in CPU utilisation (idle threads). The pattern is "everything
-felt slow for a few minutes after the producer published" — and
-this graph proves it.
+**Healthy shape.** Flat at 0 / s, with a thin floor of ones and
+twos on a steady-state server.
 
-**What to look at next.** Pair the page-fault sparkline with
-`Block I/O latency (host)` underneath: if both spike together, the
-disk caught the fault traffic; if page faults spike but I/O p95
-stays sane, the storage is keeping up and the latency is purely
-the time spent reading. Cross-reference with `RssFile` in the
-Memory section — a falling file-backed RSS at the same moment
-confirms eviction.
+**Trouble shape.** Bursts of hundreds-to-thousands per second
+shortly after a model-run timestamp. On-CPU flame stays
+innocuous, the access log shows no errors, CPU utilisation looks
+idle — and request p95 jumps several fold for the spike's
+duration. A *sustained* > 50 / s for minutes means the working
+set has permanently outgrown RAM.
+
+**What to look at next.** Pair this with `Block I/O latency
+(host)` underneath: if both spike together, the disk absorbed
+the fault traffic; if faults spike but I/O p95 stays flat, the
+storage is keeping up and the latency is purely the time spent
+reading. `RssFile` in the Memory section falling at the same
+moment confirms cache eviction.
+
+#### Block I/O latency (Proc panel)
+
+**What it measures.** Power-of-2 histogram of every block-device
+operation completed during a 5-second window, summarised as
+p50 / p95 / p99 microseconds plus the IOPS count. Sourced from
+`biolatency-bpfcc` which probes the kernel block layer. Latency
+metric in USE-method terms; pair with the IOPS to read
+saturation as well.
+
+**Detects.** Slow storage (failing disk, contended SAN volume,
+noisy-neighbour VM); a sudden change in workload mix (lots of
+small reads vs few large reads); fsync storms from a misconfigured
+log writer; the moment the disk starts to be the bottleneck.
+
+**Likely causes when it goes red.**
+- A model-run publish that drives a wave of major faults (the
+  page-fault graph above will spike at the same moment).
+- A backup or `dd` running on the same volume.
+- An LVM snapshot or filesystem resize in progress.
+- The underlying SSD reaching its endurance / queue limit
+  (sustained high p99 with flat IOPS = the device is the
+  bottleneck, not the workload).
+
+**Healthy shape.** p50 in the low microseconds (page-cache hits),
+p95 a few hundred microseconds, p99 ≤ a few milliseconds, all
+flat over time.
+
+**Trouble shape.** p95 steady over several windows in the
+multi-millisecond range — typical of saturated rotational disk
+or a network-attached volume that has lost its cached layer.
+A *spike* with IOPS climbing in tandem is just "you got busier";
+a *spike* with IOPS flat or falling is "the disk got slower".
+
+**What to look at next.** Major page faults above (suggests
+mmapped working-set churn driving the I/O); `iostat -x 5` on the
+host for queue-depth detail; `dmesg` for filesystem / driver
+errors; the access log for any handler that newly correlates
+with the latency spike (a plugin that pulled a cold dataset).
+
+#### Network — TCP retransmits + listen drops + NIC bandwidth (Proc panel)
+
+**What it measures.** Three host-wide counters from
+`/proc/net/snmp` and `/proc/net/netstat`: TCP retransmitted
+segments per second, listen-queue overflows per second, listen
+drops per second. Plus per-NIC rx/tx bytes-per-second from
+`/proc/net/dev` (loopback omitted). Both saturation (listen
+drops) and error (retransmits) signals.
+
+**Detects.** Network saturation between this host and any peer
+(retransmits); the application failing to call `accept()` fast
+enough (listen drops, listen overflows); a NIC reaching its
+bandwidth ceiling; a misbehaving switch / NIC offload bug;
+upstream routes that are silently lossy.
+
+**Likely causes when it goes red.**
+- *Retransmits > 1 / s sustained:* lossy network path — could
+  be a flaky cable / NIC / switch port between this host and a
+  client subnet, an overloaded firewall, or the peer's NIC ring
+  buffer is full. Compare with the receiving host's stats; if
+  both show retrans, the path is the suspect.
+- *Listen overflows or drops > 0:* the application is not
+  pulling new connections off the accept queue fast enough.
+  Either smartmetd is CPU-blocked elsewhere (cross-check
+  on-CPU flame), the listen backlog is too small
+  (`net.core.somaxconn`, the `listen()` argument), or a
+  burst-incoming pattern exceeds it momentarily.
+- *NIC rx or tx near interface line-rate:* you have hit the
+  pipe's ceiling. A 1 Gbit interface saturates at ~120 MB/s,
+  10 Gbit at ~1.2 GB/s. The Active panel will show queries
+  piling up because they cannot be drained.
+
+**Healthy shape.** `retrans/s` flat at 0.0 with the occasional
+single-segment blip on long-lived TCP connections; both listen
+counters at 0; rx/tx tracking actual operational load (peaks
+matching expected request volume).
+
+**Trouble shape.** A retransmit floor that never returns to
+zero (consistent path loss); spikes of listen drops at request
+peaks (accept-queue starvation); rx rate flat-topping with
+clear plateaus that match interface line rate (saturated NIC).
+
+**What to look at next.** When retransmits climb,
+`ss -s` and `nstat -az TcpRetransSegs TcpExtTCPLostRetransmit`
+on this host plus the same on a peer — if only one side reports,
+it's local; both sides, it's the path. When listen drops appear,
+look at the on-CPU flame for stalls in the accept loop, then
+`ss -lnt` for current backlog vs `Send-Q` ceiling. When NIC
+saturates, the URL panel ranks the bandwidth-heaviest endpoints
+that you may want to throttle or cache.
 
 ### Memory model
 

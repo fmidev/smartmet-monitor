@@ -336,6 +336,8 @@ class ProcPanel(Panel):
         # don't see a permanent "(no data)" line.
         if store.biolat_enabled and store.biolat_samples:
             row = self._draw_biolat(win, store, row)
+        if store.netstats_enabled and store.netstats_tcp:
+            row = self._draw_netstats(win, store, row)
         if store.perf_enabled:
             row = self._draw_perf(win, store, info, row)
         if info.rollup_ts > 0:
@@ -477,6 +479,69 @@ class ProcPanel(Panel):
             safe_addstr(win, row, x, sparkline(series, width=spark_w),
                         theme.attr(theme.P_SPARK))
         return row + 2
+
+    def _draw_netstats(self, win, store, row: int) -> int:
+        """Network section: TCP retransmits / listen drops + per-NIC bandwidth.
+
+        Host-wide; counters come from /proc/net/{snmp,netstat,dev}.
+        Loopback is skipped at the source; remaining NICs each get
+        one rx + one tx sparkline.
+        """
+        h, w = win.getmaxyx()
+        if row + 4 >= h:
+            return row
+        self._section_divider(win, row, "Network (host)")
+        row += 1
+        retrans, overflows, drops = store.netstats_tcp_series()
+        latest_r = retrans[-1] if retrans else 0.0
+        latest_o = overflows[-1] if overflows else 0.0
+        latest_d = drops[-1] if drops else 0.0
+        spark_w = max(15, min(40, w - 60))
+        # Bold red on retransmits sustained > 1 / s (anything more is
+        # a clear network or peer problem) and on listen drops at all
+        # (the application is failing to accept new connections).
+        retrans_attr = (theme.attr(theme.P_BAD, curses.A_BOLD) if latest_r > 1
+                        else theme.attr(theme.P_HEADER))
+        drop_attr = (theme.attr(theme.P_BAD, curses.A_BOLD)
+                     if (latest_o + latest_d) > 0
+                     else theme.attr(theme.P_HEADER))
+        cells = [
+            (f"  retrans/s {latest_r:>6.1f}  ", retrans_attr),
+            (f"listen-overflow/s {latest_o:>5.1f}  ", drop_attr),
+            (f"listen-drop/s {latest_d:>5.1f}  ", drop_attr),
+        ]
+        x = write_row(win, row, 0, cells)
+        if retrans:
+            safe_addstr(win, row, x, sparkline(retrans, width=spark_w),
+                        theme.attr(theme.P_SPARK))
+        row += 1
+        # Per-interface rx/tx. One row per NIC; truncate after
+        # (h - row - 4) NICs so the perf section underneath still fits.
+        ifaces = store.netstats_iface_names()
+        max_rows = max(1, h - row - 4)
+        for iface in ifaces[:max_rows]:
+            rx, tx = store.netstats_iface_series(iface)
+            rx_now = rx[-1] if rx else 0.0
+            tx_now = tx[-1] if tx else 0.0
+            cells = [
+                (f"  {iface:<8} ", theme.attr(theme.P_HEADER)),
+                (f"rx {human_bytes(rx_now):>10}/s  ", 0),
+            ]
+            x = write_row(win, row, 0, cells)
+            if rx:
+                safe_addstr(win, row, x, sparkline(rx, width=spark_w),
+                            theme.attr(theme.P_SPARK))
+            x += spark_w + 2
+            safe_addstr(win, row, x, f"tx {human_bytes(tx_now):>10}/s  ",
+                        theme.attr(theme.P_HEADER))
+            x += 18
+            if tx:
+                safe_addstr(win, row, x, sparkline(tx, width=spark_w),
+                            theme.attr(theme.P_SPARK))
+            row += 1
+            if row >= h - 2:
+                break
+        return row + 1
 
     def _draw_biolat(self, win, store, row: int) -> int:
         """Host-wide block-I/O latency from biolatency-bpfcc.
