@@ -74,6 +74,15 @@ async def _run_perf_record(perf_bin: str, pid: int) -> Tuple[bool, int, str]:
     """Run perf record; return (ok, returncode, combined_diagnostic_text).
 
     Notes on the command line:
+      * `--call-graph=dwarf,32768` rather than the default `-g` (which
+        is `--call-graph=fp`). SmartMet Server has deep call stacks
+        whose accuracy suffers when the compiler omits frame pointers,
+        and DWARF unwinding gives correct stacks regardless. The 32 KB
+        stack-dump size (default is 8 KB) is sized for those deep
+        stacks; perf truncates anything taller. perf.data files grow
+        significantly — a few MB per second of sampling — but the
+        recording cycle is short and `/tmp/.smtop_perf.data` is
+        overwritten each cycle.
       * `-q` is deliberately omitted — it silences perf's own progress
         and error messages, which is what the operator actually needs
         when sampling fails.
@@ -86,7 +95,7 @@ async def _run_perf_record(perf_bin: str, pid: int) -> Tuple[bool, int, str]:
     cmd = [
         perf_bin, "record",
         "-F", str(PERF_FREQ),
-        "-g",
+        "--call-graph=dwarf,32768",
         "-p", str(pid),
         "-o", PERF_DATA_PATH,
         "--", "sleep", str(RECORD_SECONDS),

@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.5.0
+Version:        0.5.1
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,17 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.5.1-1
+- Switch perf record from frame-pointer call-graph (-g, the default)
+  to `--call-graph=dwarf,32768`. SmartMet Server has deep call stacks
+  that the default frame-pointer unwinding splits — partial stacks
+  show up in the flamegraph as separate trees rooted somewhere in
+  the middle of the call hierarchy instead of at `main`. DWARF
+  unwinding reconstructs the full chain reliably. The 32 KB
+  stack-dump size (default is 8 KB) is sized for those deep stacks
+  so perf doesn't truncate them. perf.data files grow several-fold
+  but each cycle overwrites the same /tmp file.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.5.0-1
 - Flame view: stop wasting the rows below the flame tree. Production
   stacks are typically 8-15 frames deep, so on a 40-row terminal half
