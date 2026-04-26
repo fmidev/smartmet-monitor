@@ -202,7 +202,7 @@ async def bulk_load(paths: Iterable[str], store,
 
     The byte cap applies to each individual file (rotated *or* live),
     not to the union, and is taken from the tail — so on a 1.2 GB
-    rotated daily log a 256 MB cap reads the most recent ~256 MB of
+    rotated daily log a 1 GB cap reads the most recent ~1 GB of
     that day's traffic, not the entire day. Raise `--replay-bytes`
     when a full day matters.
     """

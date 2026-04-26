@@ -331,7 +331,7 @@ reports the exact path after write.
 ### Replaying historical logs
 
 `--replay` reads the tail of each log file (capped at `--replay-bytes`,
-default 256 MB) so the dashboard opens with populated panels rather
+default 1 GB) so the dashboard opens with populated panels rather
 than empty ones. Add `--include-rotated` to also read every rotated
 sibling (`<base>-YYYYMMDD`, `<base>-YYYYMMDD.gz`) in chronological
 order — combined with `--history-minutes 10080` this gives a full

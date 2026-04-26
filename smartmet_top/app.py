@@ -38,7 +38,7 @@ class App:
     def __init__(self, log_paths: List[str],
                  admin_urls: List[tuple],  # [(host_label, base_url), ...]
                  admin_interval: float, replay: bool,
-                 replay_bytes: int = 256 * 1024 * 1024,
+                 replay_bytes: int = 1024 * 1024 * 1024,
                  include_rotated: bool = False,
                  enable_perf: bool = False,
                  perf_interval: float = 10.0,
@@ -296,7 +296,7 @@ class App:
 
 def run_app(log_paths: List[str], admin_urls: List[tuple],
             admin_interval: float, replay: bool,
-            replay_bytes: int = 256 * 1024 * 1024,
+            replay_bytes: int = 1024 * 1024 * 1024,
             include_rotated: bool = False,
             enable_perf: bool = False, perf_interval: float = 10.0,
             perf_record_seconds: int = 3) -> None:

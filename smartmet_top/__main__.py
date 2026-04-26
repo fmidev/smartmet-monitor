@@ -45,14 +45,14 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         "--replay", action="store_true",
         help="On startup, read the tail of each log file so the panels "
              "come up populated instead of empty. Capped at "
-             "--replay-bytes per file (default 256 MB).",
+             "--replay-bytes per file (default 1 GB).",
     )
     p.add_argument(
-        "--replay-bytes", type=int, default=256 * 1024 * 1024,
+        "--replay-bytes", type=int, default=1024 * 1024 * 1024,
         metavar="N",
         help="Maximum number of bytes to read per log file when "
-             "--replay is in effect. Default 256 MB. Raise this on "
-             "low-traffic logs where 256 MB doesn't cover the desired "
+             "--replay is in effect. Default 1 GB. Raise this on "
+             "low-traffic logs where 1 GB doesn't cover the desired "
              "history window; lower it on busy logs to reduce startup "
              "time. Note: gzipped rotated logs are read in full "
              "regardless of this cap (gzip doesn't support cheap "

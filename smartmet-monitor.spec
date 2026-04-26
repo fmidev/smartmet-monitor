@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.7.16
+Version:        0.7.17
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -101,6 +101,14 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.17-1
+- Default --replay-bytes raised from 256 MB to 1 GB. SmartMet
+  access logs typically rotate daily and busy services hit several
+  hundred MB per day; 256 MB consistently failed to cover a full
+  day's history, forcing operators to set --replay-bytes 1G by
+  hand. Lower it explicitly when startup time matters more than
+  history depth.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.16-1
 - Flag consistency across the bstat-family commands:
   - -H now means "Braille chart height" everywhere it appears.
