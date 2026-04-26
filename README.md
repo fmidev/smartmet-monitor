@@ -486,6 +486,63 @@ scheduled in pipe bursts rather than continuously; the URLs
 panel for which handlers' p95 follows runqlat's shape — those
 are the operations actually being held off CPU.
 
+#### CPU efficiency — IPC + cache & branch miss rates (Proc panel)
+
+**What it measures.** Three derived ratios from a short
+`perf stat -e cycles,instructions,cache-references,
+cache-misses,branch-misses -p PID -- sleep N`:
+
+  - **IPC** = instructions per cycle. The single best one-number
+    summary of "is this CPU work efficient?".
+  - **Cache miss rate** = cache-misses / cache-references.
+    Where the LLC fits the working set.
+  - **Branch miss rate** = branch-misses / instructions.
+    How predictable the hot loop's control flow is.
+
+**Detects.** Memory-bound code (low IPC + high cache-miss); a
+working set that just outgrew the L3 cache (cache-miss rate
+suddenly steps up); badly-vectorised hot paths; an architecture
+mismatch with the binary (branch-miss rate elevated permanently);
+the moment a code change ships and the IPC drops without any
+other metric reacting.
+
+**Likely causes when it goes red.**
+- *IPC < 0.3 sustained:* the CPU is stalling, almost always on
+  memory. Look at the on-CPU flame for which function is hot;
+  if it's a tight loop over `std::map<>`, `std::unordered_map`
+  with a poor hash, or a virtual-call-heavy traversal, that's
+  the culprit. Cross-reference page-fault rate (cold pages) and
+  cache-miss rate (warm but evicted-from-LLC).
+- *Cache miss > 30%:* the working-set-per-core is bigger than
+  the L3 cache slice. Either trim the data (smaller queries,
+  better filtering) or pin SmartMet to fewer cores so each gets
+  more cache.
+- *Branch miss > 5%:* unpredictable branches. Most of the time
+  this is a hot data-dependent `if`; sometimes it's a binary
+  built with an old `-march=` that disables modern branch
+  predictor hints.
+- *All three OK but URLs are slow anyway:* the bottleneck is
+  off-CPU. The off-CPU flame is your next stop.
+
+**Healthy shape.** SmartMet workloads typically run between IPC
+0.5 and 1.0 with cache-miss rate 5–15% and branch-miss rate
+under 2%. Steady traces, both numbers tracking traffic levels.
+
+**Trouble shape.** A sustained IPC dip on a single PID while
+others stay healthy points at one plugin or one connection's
+hot path. A *step change* in cache-miss rate at a deploy
+boundary is the canonical "the new build has worse memory
+locality" signal. Cache-miss flapping between low and high
+across cycles often means the host is shared and the cache is
+being trampled by a neighbour.
+
+**What to look at next.** The on-CPU flame for the function
+where time is being spent; the off-CPU flame to confirm the
+work is actually CPU-bound rather than blocking; runqlat to
+rule out scheduler-side latency; and the URLs panel to see
+which handler's p95 follows the IPC trace — that's the one
+the inefficient code is on the hot path of.
+
 #### Network — TCP retransmits + listen drops + NIC bandwidth (Proc panel)
 
 **What it measures.** Three host-wide counters from

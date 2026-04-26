@@ -112,7 +112,17 @@ check:
 	    snmp = _parse_proc_net_snmp("Tcp: RtoAlgorithm RtoMin RtoMax MaxConn ActiveOpens PassiveOpens AttemptFails EstabResets CurrEstab InSegs OutSegs RetransSegs InErrs OutRsts InCsumErrors\nTcp: 1 200 120000 -1 11 22 0 0 1 100 200 17 0 5 0\n"); \
 	    assert snmp["Tcp"]["RetransSegs"] == 17 and snmp["Tcp"]["InSegs"] == 100, snmp; \
 	    dev = parse_proc_net_dev("Inter-|   Receive                                                |  Transmit\n face |bytes packets errs drop fifo frame compressed multicast|bytes packets errs drop fifo colls carrier compressed\n    lo: 100 1 0 0 0 0 0 0 200 1 0 0 0 0 0 0\n  eth0: 5000 50 0 0 0 0 0 0 6000 60 0 0 0 0 0 0\n"); \
-	    assert "lo" not in dev and dev["eth0"] == (5000, 6000), dev'
+	    assert "lo" not in dev and dev["eth0"] == (5000, 6000), dev; \
+	    import smartmet_top.sources.perfstat, smartmet_top.sources.runqlat; \
+	    from smartmet_top.sources.perfstat import parse_perf_stat_x, derive_ratios; \
+	    cx = parse_perf_stat_x("100,,cycles\n50,,instructions\n200,,cache-references\n20,,cache-misses\n5,,branch-misses\n"); \
+	    assert cx == {"cycles":100,"instructions":50,"cache-references":200,"cache-misses":20,"branch-misses":5}, cx; \
+	    ipc, cm, bm = derive_ratios(cx); \
+	    assert abs(ipc - 0.5) < 1e-9 and abs(cm - 0.1) < 1e-9 and abs(bm - 0.1) < 1e-9, (ipc, cm, bm); \
+	    cx2 = parse_perf_stat_x("<not supported>,,cycles\n50,,instructions\n"); \
+	    assert cx2 == {"cycles":0,"instructions":50}, cx2; \
+	    ipc2, _, _ = derive_ratios(cx2); \
+	    assert ipc2 == 0.0'
 	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
 	bash -n share/smartmet/bstat.sh
 	for t in $(BTOOLS) $(LEGACY); do bash -n bin/$$t; done

@@ -30,6 +30,7 @@ from .sources.offcpu import offcpu_loop
 from .sources.biolat import biolat_loop
 from .sources.netstats import netstats_loop
 from .sources.runqlat import runqlat_loop
+from .sources.perfstat import perfstat_loop
 from .sources.proc import proc_loop
 from .state.store import Store
 
@@ -287,6 +288,13 @@ class App:
             # hosts where CFS throttling can hide threads from the CPU
             # without showing as utilisation.
             tasks.append(asyncio.create_task(runqlat_loop(self.store)))
+            # perf stat — IPC + cache miss rate + branch miss rate per
+            # smartmetd PID, sampled in a short window each cycle. Pure
+            # perf, no bcc; auto-skips when perf isn't available.
+            tasks.append(asyncio.create_task(
+                perfstat_loop(self.store, self.perf_interval,
+                              self.perf_record_seconds)
+            ))
 
         last_draw = 0.0
         try:

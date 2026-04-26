@@ -338,6 +338,8 @@ class ProcPanel(Panel):
             row = self._draw_biolat(win, store, row)
         if store.runqlat_enabled and store.runqlat_samples:
             row = self._draw_runqlat(win, store, row)
+        if store.perfstat_enabled and store.perfstat_samples:
+            row = self._draw_perfstat(win, store, row)
         if store.netstats_enabled and store.netstats_tcp:
             row = self._draw_netstats(win, store, row)
         if store.perf_enabled:
@@ -477,6 +479,51 @@ class ProcPanel(Panel):
         ]
         x = write_row(win, row, 0, cells)
         series = _majflt_rate_series(samples)
+        if series:
+            safe_addstr(win, row, x, sparkline(series, width=spark_w),
+                        theme.attr(theme.P_SPARK))
+        return row + 2
+
+    def _draw_perfstat(self, win, store, row: int) -> int:
+        """CPU efficiency from perf stat: IPC + cache + branch miss rates.
+
+        IPC (instructions per cycle) below 0.3 sustained is a strong
+        memory-bound signal; cache-miss rate above ~30% says the
+        working set is too big for the L2/L3 caches; branch-miss
+        rate above ~5% says the hot loop has unpredictable control
+        flow.
+        """
+        h, w = win.getmaxyx()
+        if row + 2 >= h:
+            return row
+        self._section_divider(win, row, "CPU efficiency (perf stat)")
+        row += 1
+        latest = (store.perfstat_samples[-1] if store.perfstat_samples
+                  else None)
+        if latest is None:
+            safe_addstr(win, row, 2, "no samples yet — first cycle pending",
+                        theme.attr(theme.P_DIM))
+            return row + 2
+        ts, pid, ipc, cm, bm = latest
+        spark_w = max(15, min(60, w - 70))
+        # IPC < 0.3 = memory bound; ≥ 1.0 = healthy. Colour by band.
+        ipc_attr = (theme.attr(theme.P_BAD, curses.A_BOLD) if ipc < 0.3 and ipc > 0
+                    else theme.attr(theme.P_WARN) if ipc < 0.6
+                    else theme.attr(theme.P_GOOD)
+                    if ipc >= 1.0 else theme.attr(theme.P_HEADER))
+        cm_attr = (theme.attr(theme.P_BAD, curses.A_BOLD) if cm > 0.3
+                   else theme.attr(theme.P_WARN) if cm > 0.1
+                   else theme.attr(theme.P_HEADER))
+        bm_attr = (theme.attr(theme.P_BAD, curses.A_BOLD) if bm > 0.05
+                   else theme.attr(theme.P_HEADER))
+        cells = [
+            (f"  IPC {ipc:>4.2f}  ", ipc_attr),
+            (f"cache-miss {cm*100:>5.1f}%  ", cm_attr),
+            (f"branch-miss {bm*100:>4.1f}%  ", bm_attr),
+            (f"pid={pid}  ", theme.attr(theme.P_DIM)),
+        ]
+        x = write_row(win, row, 0, cells)
+        series = store.perfstat_ipc_series()
         if series:
             safe_addstr(win, row, x, sparkline(series, width=spark_w),
                         theme.attr(theme.P_SPARK))

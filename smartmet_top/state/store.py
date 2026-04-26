@@ -512,6 +512,16 @@ class Store:
         self.runqlat_enabled: bool = False
         self.runqlat_status: str = "(runqlat sampler not started)"
         self.runqlat_last_error: str = ""
+        # perf stat (hardware PMU counters) — IPC + cache/branch miss
+        # rates per smartmetd PID. Each sample: (ts, pid, ipc,
+        # cache_miss_rate, branch_miss_rate). Bounded ring of 60
+        # samples = 10 minutes at the default 10 s cycle.
+        self.perfstat_samples: Deque[Tuple[float, int, float, float, float]] = deque(maxlen=60)
+        # Latest raw counter values per metric (for the panel header).
+        self.perfstat_counters: Dict[str, int] = {}
+        self.perfstat_enabled: bool = False
+        self.perfstat_status: str = "(perfstat sampler not started)"
+        self.perfstat_last_error: str = ""
 
     def register_admin_host(self, host: str) -> None:
         with self._lock:
@@ -957,3 +967,23 @@ class Store:
     def runqlat_p95_series(self) -> List[float]:
         with self._lock:
             return [float(p95) for _, _, p95, _, _ in self.runqlat_samples]
+
+    # -- perf stat (PMU counters) ------------------------------------------
+
+    def perfstat_record_sample(self, ts: float, pid: int, ipc: float,
+                               cache_miss_rate: float,
+                               branch_miss_rate: float,
+                               counters: Dict[str, int]) -> None:
+        with self._lock:
+            self.perfstat_samples.append(
+                (ts, pid, ipc, cache_miss_rate, branch_miss_rate)
+            )
+            self.perfstat_counters = dict(counters)
+
+    def perfstat_ipc_series(self) -> List[float]:
+        with self._lock:
+            return [s[2] for s in self.perfstat_samples]
+
+    def perfstat_cache_miss_series(self) -> List[float]:
+        with self._lock:
+            return [s[3] for s in self.perfstat_samples]

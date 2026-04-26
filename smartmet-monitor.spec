@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.26
-Release:        7%{?dist}.fmi
+Release:        8%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -112,6 +112,19 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.26-8.fmi
+- CPU efficiency in the Proc panel via `perf stat`. Records
+  cycles, instructions, cache-references, cache-misses,
+  branch-misses for the focused PID over a short window each
+  cycle, derives IPC + cache miss rate + branch miss rate,
+  renders next to a sparkline of IPC over the retained ring.
+  Pure perf, no bcc — reuses the existing perf dependency.
+  Colour bands: IPC < 0.3 / cache-miss > 30% / branch-miss > 5%
+  go red; IPC ≥ 1.0 goes green. The README's "Reading the live
+  monitors" gains an entry covering the four canonical IPC
+  failure modes (memory-bound, LLC overflow, branch
+  unpredictability, "everything OK but URLs slow → off-CPU").
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.26-7.fmi
 - Run-queue latency in the Proc panel via runqlat-bpfcc. Same
   scaffolding as biolatency: power-of-2 histogram, 5 s window,
