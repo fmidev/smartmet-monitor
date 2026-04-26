@@ -80,12 +80,15 @@ much easier to read:
 ### `bchart` — single-metric vertical chart
 
 ```sh
-bchart -i 10m -m reqs    wms-access-log
-bchart -i 10m -m ms      timeseries-access-log
+bchart -i 10m -m reqs           wms-access-log     # default chart height (12)
+bchart -i 10m -m reqs -h 16     wms-access-log     # taller chart
+bchart -i 10m -m ms             timeseries-access-log
 ```
 
 Braille vertical chart, two buckets per character cell, levels 0-4
-per char-row. Latency varies more than request count and shows the
+per char-row. `-h HEIGHT` sets the chart height in character rows
+(default `12`); vertical resolution is `HEIGHT × 4` dots in Braille
+mode. Latency varies more than request count and shows the
 encoding's vertical resolution:
 
 ![bchart -m reqs: requests-per-bucket bar chart](doc/images/bchart_requests.png)
@@ -115,12 +118,15 @@ drop-list on stdin, and re-runs the analysis with that filter.
 ### `bstatus` — HTTP status code distribution
 
 ```sh
-bstatus -i 1h wms-access-log
+bstatus -i 1h         wms-access-log     # default sparkline height (4)
+bstatus -i 1h -h 6    wms-access-log     # taller per-class sparkline
 ```
 
 Aggregate code distribution + per-class breakdown. With `-i`,
 prepends a per-class Braille sparkline showing how each class
-(2xx / 3xx / 4xx / 5xx) moved over time:
+(2xx / 3xx / 4xx / 5xx) moved over time. `-h HEIGHT` controls the
+per-class sparkline height in character rows (default `4`, same
+as bstat's footer):
 
 ![bstatus -i 1h: per-class Braille sparkline + aggregate distribution](doc/images/bstatus.png)
 
