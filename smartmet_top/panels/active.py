@@ -6,6 +6,7 @@ import curses
 import time
 
 from .. import theme
+from ..widgets.bars import sparkline, vchart
 from .base import Panel, safe_addstr, write_row
 
 
@@ -81,18 +82,69 @@ class ActivePanel(Panel):
                 err_msg = f"{host}: {snap.error}"
 
         multi = len(hosts) > 1
-        hdr_state = f"{ok_count}/{len(hosts)} hosts OK" if multi else (
-            "OK" if ok_count == len(hosts) else "ERROR"
-        )
+        # Aggregate active-count history across hosts (most operators
+        # have one host; with multi-host, sum the in-flight counts so
+        # the operator sees total load).
+        agg_history: list = []
+        any_history = False
+        for host in hosts:
+            buf = store.active_count_history.get(host)
+            if not buf:
+                continue
+            samples = list(buf)
+            any_history = True
+            if not agg_history:
+                agg_history = samples[:]
+            else:
+                # Pad shorter list with leading zeros to align.
+                if len(samples) < len(agg_history):
+                    samples = [0] * (len(agg_history) - len(samples)) + samples
+                elif len(samples) > len(agg_history):
+                    agg_history = ([0] * (len(samples) - len(agg_history))
+                                   + agg_history)
+                agg_history = [a + b for a, b in zip(agg_history, samples)]
+
+        # Header line
+        current = agg_history[-1] if agg_history else len(flat)
+        peak = max(agg_history) if agg_history else current
+        hdr_state = (f"{ok_count}/{len(hosts)} hosts OK"
+                     if multi else
+                     ("OK" if ok_count == len(hosts) else "ERROR"))
         hdr_attr = (theme.attr(theme.P_TAB_ACTIVE) if ok_count == len(hosts)
                     else theme.attr(theme.P_BAD, curses.A_BOLD))
-        safe_addstr(win, 0, 0, f" Active — {hdr_state}".ljust(w - 1), hdr_attr)
+        header_text = (
+            f" Active — {hdr_state}  in-flight={current}  peak={peak}"
+        )
+        safe_addstr(win, 0, 0, header_text.ljust(w - 1), hdr_attr)
 
         if err_msg and ok_count == 0:
             safe_addstr(win, 2, 2, f"error: {err_msg}", theme.attr(theme.P_BAD))
             return
+
+        # Active-count sparkline at the top of the panel — vchart at
+        # auto-scale so the recent peak fills the rendered height. The
+        # operator's "one dot per request" intuition holds at low
+        # loads; at high loads (100+) the chart auto-scales.
+        chart_top = 1
+        chart_h = 4 if h >= 16 else (2 if h >= 10 else 0)
+        if any_history and chart_h > 0:
+            chart_w = max(20, w - 12)
+            lines = vchart(agg_history, chart_h, width=chart_w, maxval=0.0)
+            for j, line in enumerate(lines):
+                safe_addstr(win, chart_top + j, 6, line,
+                            theme.attr(theme.P_SPARK))
+            # Y-axis labels: peak at top, 0 at bottom.
+            if peak > 0:
+                safe_addstr(win, chart_top, 0, f"{peak:>5d} ",
+                            theme.attr(theme.P_DIM))
+            safe_addstr(win, chart_top + chart_h - 1, 0,
+                        f"{0:>5d} ", theme.attr(theme.P_DIM))
+
+        list_top = chart_top + chart_h + 1 if (any_history and chart_h > 0) else 2
+
         if not flat:
-            safe_addstr(win, 2, 2, "no active requests", theme.attr(theme.P_DIM))
+            safe_addstr(win, list_top, 2, "no active requests right now",
+                        theme.attr(theme.P_DIM))
             return
 
         flat.sort(key=lambda it: dur(it[1]), reverse=True)
@@ -101,11 +153,12 @@ class ActivePanel(Panel):
             (f"{'host':<{host_col}} " if multi else "")
             + f"{'id':>6} {'dur_s':>7} {'client':<20} {'apikey':<20}  request"
         )
-        safe_addstr(win, 2, 0, hdr_line,
+        safe_addstr(win, list_top, 0, hdr_line,
                     theme.attr(theme.P_HEADER, curses.A_BOLD))
-        safe_addstr(win, 3, 0, "─" * (w - 1), theme.attr(theme.P_DIM))
+        safe_addstr(win, list_top + 1, 0, "─" * (w - 1),
+                    theme.attr(theme.P_DIM))
 
-        body_top = 4
+        body_top = list_top + 2
         body_h = h - body_top - 1
         if self.scroll >= len(flat):
             self.scroll = max(0, len(flat) - 1)

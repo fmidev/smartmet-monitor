@@ -6,7 +6,7 @@ import curses
 import time
 
 from .. import theme
-from ..widgets.bars import hbar, human_count, human_ms, sparkline
+from ..widgets.bars import hbar, human_count, human_ms, sparkline, vchart
 from .base import Panel, safe_addstr, write_row
 
 
@@ -120,43 +120,70 @@ class ServicesPanel(Panel):
         if body_h <= 0:
             return
 
+        # Decide compact vs tall layout the same way Plugins does. With
+        # ~15 visible services and 30 rows of body the panel falls into
+        # tall mode (per_service ~ 2 rows): the trend spark turns into
+        # a multi-row vertical chart that uses the otherwise-empty
+        # space below each handler row. With many services and a short
+        # body, falls back to single-row.
+        n_total = len(flat)
+        max_per_service = max(1, body_h // n_total)
+        per_service = (min(max_per_service, 6) if max_per_service >= 2
+                       else 1)
+        services_per_screen = max(1, body_h // per_service)
+
         if self.cursor >= len(flat):
             self.cursor = len(flat) - 1
         if self.cursor < self.scroll:
             self.scroll = self.cursor
-        if self.cursor >= self.scroll + body_h:
-            self.scroll = self.cursor - body_h + 1
+        if self.cursor >= self.scroll + services_per_screen:
+            self.scroll = self.cursor - services_per_screen + 1
+        max_scroll = max(0, len(flat) - services_per_screen)
+        self.scroll = max(0, min(self.scroll, max_scroll))
 
-        visible = flat[self.scroll : self.scroll + body_h]
+        visible = flat[self.scroll : self.scroll + services_per_screen]
         for i, (host, r) in enumerate(visible):
             handler = str(r.get("Handler") or r.get("handler") or "?")
             m1 = _f(r.get("LastMinute"))
             m60 = _f(r.get("LastHour"))
             d24 = _f(r.get("Last24Hours"))
             avg = _f(r.get("AverageDuration"))
+            y_top = body_top + i * per_service
             row_attr = curses.A_REVERSE if self.scroll + i == self.cursor else 0
             hist = store.service_history.get(host)
-            # Pull as many trend samples as the spark is wide so it
-            # actually fills its allocated columns; HistorySeries holds
-            # up to 300 samples so we won't run out.
-            trend = hist.series(handler, "req_per_min",
-                                samples=trend_w + 1) if hist else []
-            trend_str = (sparkline(trend, width=trend_w) if trend
-                         else " " * trend_w)
             cells = []
             if multi:
                 cells.append((f"{host[:host_col-1]:<{host_col}} ",
                               theme.attr(theme.P_ACCENT)))
             cells += [
                 (f"{handler[:40]:<40} ", 0),
-                # req/min, req/h, req/d are integer counts upstream;
-                # the .1f formatting was just noise.
                 (f"{int(m1):>8d} ", 0),
                 (f"{int(m60):>8d} ", 0),
                 (f"{int(d24):>10d} ", 0),
                 (f"{human_ms(avg):>8}  ", theme.latency_color(avg)),
                 (hbar(m1, mx1, bar_w), theme.attr(theme.P_SPARK)),
                 ("  ", 0),
-                (trend_str, theme.attr(theme.P_SPARK)),
             ]
-            write_row(win, body_top + i, 0, cells, row_attr=row_attr)
+            x = write_row(win, y_top, 0, cells, row_attr=row_attr)
+
+            if per_service == 1:
+                # Compact: single-row sparkline as before.
+                trend = (hist.series(handler, "req_per_min",
+                                      samples=trend_w + 1)
+                         if hist else [])
+                trend_str = (sparkline(trend, width=trend_w) if trend
+                             else " " * trend_w)
+                safe_addstr(win, y_top, x, trend_str,
+                            theme.attr(theme.P_SPARK) | row_attr)
+            else:
+                # Tall: vertical chart of the trend spans `per_service`
+                # rows in the trend column. Auto-scales per service.
+                trend = (hist.series(handler, "req_per_min",
+                                      samples=trend_w + 1)
+                         if hist else [])
+                if trend:
+                    lines = vchart(trend, per_service, width=trend_w,
+                                   maxval=0.0)
+                    for j, line in enumerate(lines):
+                        safe_addstr(win, y_top + j, x, line,
+                                    theme.attr(theme.P_SPARK))

@@ -397,6 +397,12 @@ class Store:
         # per-entity historical series (for sparklines), per host
         self.cache_history: Dict[str, HistorySeries] = {}
         self.service_history: Dict[str, HistorySeries] = {}
+        # Per-host history of "active request count" — one sample per
+        # admin poll. Drives the sparkline at the top of the Active
+        # panel so the operator can see the in-flight load trending.
+        # Bounded with the same ADMIN_HISTORY_SAMPLES cap as the other
+        # admin sparklines.
+        self.active_count_history: Dict[str, Deque[int]] = {}
         # auto-detected endpoint availability & role per host
         self.available_what: Dict[str, set] = {}
         self.host_role: Dict[str, str] = {}  # "frontend", "backend", or "unknown"
@@ -453,6 +459,9 @@ class Store:
             self.lastrequests.setdefault(host, AdminSnapshot())
             self.cache_history.setdefault(host, HistorySeries())
             self.service_history.setdefault(host, HistorySeries())
+            self.active_count_history.setdefault(
+                host, deque(maxlen=ADMIN_HISTORY_SAMPLES)
+            )
             self.admin_status.setdefault(host, "(starting)")
             self.available_what.setdefault(host, set())
             self.host_role.setdefault(host, "unknown")

@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.7.12
+Version:        0.7.13
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,21 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.13-1
+- Services panel: tall layout. When there are ≥ 2 rows of room
+  per service, each handler's row expands into a multi-row block
+  whose trend column becomes a vertical Braille chart instead of
+  a single-row sparkline. Same compact-vs-tall heuristic the
+  Plugins panel uses. With many services and a short body the
+  panel falls back to single-row layout.
+- Active panel: in-flight count sparkline at the top. The
+  admin-poll loop now records len(activerequests) into a per-host
+  bounded ring (active_count_history); the panel renders a 4-row
+  Braille vchart at the top with auto-scaling, so a peak of 100+
+  active requests stays readable. Header carries `in-flight=N
+  peak=N` so the headline numbers are visible even on terminals
+  too short for the chart.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.12-1
 - Health composite: reorder regions Services / Active / Caches.
   Per-handler load and what's currently in flight are the signals

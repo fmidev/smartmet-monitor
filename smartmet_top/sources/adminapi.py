@@ -19,7 +19,16 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
+from collections import deque
+
+from ..state.store import ADMIN_HISTORY_SAMPLES
 from .logparse import parse_iso, strip_query
+
+
+def _new_active_history():
+    """Bounded deque for active-request count history, sized identically
+    to the other admin-derived sparkline rings."""
+    return deque(maxlen=ADMIN_HISTORY_SAMPLES)
 
 
 def _fetch(url: str, timeout: float = 5.0) -> list:
@@ -155,6 +164,12 @@ async def poll_admin(base_url: str, host: str, store,
                         _update_service_history(
                             store.service_history[host], rows, snap.fetched_at
                         )
+                    elif name == "activerequests":
+                        # Track in-flight count per poll for the
+                        # sparkline at the top of the Active panel.
+                        store.active_count_history.setdefault(
+                            host, _new_active_history()
+                        ).append(len(rows))
                 except Exception as e:
                     snap.ok = False
                     snap.error = f"{type(e).__name__}: {e}"
