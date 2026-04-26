@@ -481,6 +481,16 @@ class Store:
         self.offcpu_last_error: str = ""
         self.offcpu_target_pid: Optional[int] = None
         self.offcpu_backend: str = ""  # 'bcc' | 'perf' | ''
+        # Block-I/O latency sampler state. Host-wide (bcc biolatency
+        # operates at the block layer, not per-PID); on a dedicated
+        # SmartMet host the dominant block I/O is smartmetd anyway.
+        # Each entry: (ts, p50_us, p95_us, p99_us, total_ops_in_window).
+        # Bounded ring of 120 entries = 10 minutes at the default 5 s
+        # cycle, which fills a 60-cell sparkline twice over.
+        self.biolat_samples: Deque[Tuple[float, int, int, int, int]] = deque(maxlen=120)
+        self.biolat_enabled: bool = False
+        self.biolat_status: str = "(block-I/O sampler not started)"
+        self.biolat_last_error: str = ""
 
     def register_admin_host(self, host: str) -> None:
         with self._lock:
@@ -855,3 +865,27 @@ class Store:
         with self._lock:
             od = self.offcpu_data.get(pid)
             return od.last_total_us if od else 0
+
+    # -- block-I/O latency --------------------------------------------------
+
+    def biolat_record_sample(self, ts: float, p50_us: int, p95_us: int,
+                             p99_us: int, total: int) -> None:
+        with self._lock:
+            self.biolat_samples.append((ts, p50_us, p95_us, p99_us, total))
+
+    def biolat_recent(self) -> List[Tuple[float, int, int, int, int]]:
+        with self._lock:
+            return list(self.biolat_samples)
+
+    def biolat_p95_series(self) -> List[float]:
+        """Just the p95 column, for the Proc panel sparkline."""
+        with self._lock:
+            return [float(p95) for _, _, p95, _, _ in self.biolat_samples]
+
+    def biolat_iops_series(self, window_seconds: float = 5.0) -> List[float]:
+        """Operations-per-second series, derived from the per-window total."""
+        if window_seconds <= 0:
+            window_seconds = 1.0
+        with self._lock:
+            return [t / window_seconds
+                    for _, _, _, _, t in self.biolat_samples]

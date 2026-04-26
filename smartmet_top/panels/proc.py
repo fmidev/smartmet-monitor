@@ -21,6 +21,20 @@ from ..widgets.bars import human_bytes, human_count, sparkline
 from .base import Panel, safe_addstr, write_label, write_row
 
 
+def _fmt_us(microseconds: int) -> str:
+    """Compact latency rendering, auto-scaling unit. Block I/O ranges
+    from sub-microsecond (page cache hits) to seconds (queued I/O on
+    saturated devices); printing everything as us blows up the column.
+    """
+    if microseconds <= 0:
+        return "—"
+    if microseconds < 1000:
+        return f"{microseconds}us"
+    if microseconds < 1_000_000:
+        return f"{microseconds / 1000:.1f}ms"
+    return f"{microseconds / 1_000_000:.2f}s"
+
+
 def _humanize_kb(kb: int) -> str:
     return human_bytes(float(kb) * 1024.0)
 
@@ -287,6 +301,12 @@ class ProcPanel(Panel):
         row = self._draw_header(win, info, len(procs), top=sel_bottom)
         row = self._draw_memory(win, info, row)
         row = self._draw_io(win, info, row)
+        # Block-I/O latency is host-wide and only meaningful when the
+        # biolat sampler ran at least once. Render only when enabled
+        # (and when there's room) so unrelated hosts without bcc-tools
+        # don't see a permanent "(no data)" line.
+        if store.biolat_enabled and store.biolat_samples:
+            row = self._draw_biolat(win, store, row)
         if store.perf_enabled:
             row = self._draw_perf(win, store, info, row)
         if info.rollup_ts > 0:
@@ -391,6 +411,41 @@ class ProcPanel(Panel):
                     theme.attr(theme.P_SPARK))
         x += spark_w + 2
         safe_addstr(win, row, x, f"FDs {human_count(latest.fds)}", 0)
+        return row + 2
+
+    def _draw_biolat(self, win, store, row: int) -> int:
+        """Host-wide block-I/O latency from biolatency-bpfcc.
+
+        Two rows:
+          1. percentiles (p50 / p95 / p99) + IOPS, with a sparkline of p95
+          2. (left blank — kept simple; future home for read/write split)
+        """
+        h, w = win.getmaxyx()
+        if row + 2 >= h:
+            return row
+        self._section_divider(win, row, "Block I/O latency (host)")
+        row += 1
+        latest = store.biolat_samples[-1] if store.biolat_samples else None
+        if latest is None:
+            safe_addstr(win, row, 2, "no samples yet — first cycle pending",
+                        theme.attr(theme.P_DIM))
+            return row + 2
+        ts, p50, p95, p99, total = latest
+        spark_w = max(15, min(60, w - 70))
+        # Fixed-width formatter: latencies stretch from sub-microsecond
+        # (cache hits) to seconds (failed/queued I/O). Auto-scale to
+        # "us" / "ms" so the columns stay narrow.
+        cells = [
+            (f"  p50 {_fmt_us(p50):>8}  ", theme.attr(theme.P_HEADER)),
+            (f"p95 {_fmt_us(p95):>8}  ", theme.attr(theme.P_HEADER)),
+            (f"p99 {_fmt_us(p99):>8}  ", theme.attr(theme.P_HEADER)),
+            (f"iops {total:>5}  ", theme.attr(theme.P_ACCENT)),
+        ]
+        x = write_row(win, row, 0, cells)
+        series = store.biolat_p95_series()
+        if series:
+            safe_addstr(win, row, x, sparkline(series, width=spark_w),
+                        theme.attr(theme.P_SPARK))
         return row + 2
 
     def _draw_perf(self, win, store, info: ProcInfo, row: int) -> int:

@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.26
-Release:        3%{?dist}.fmi
+Release:        4%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -112,6 +112,18 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.26-4.fmi
+- Block-I/O latency in the Proc panel. Periodically runs
+  `biolatency-bpfcc INTERVAL 1`, parses the power-of-2 microsecond
+  histogram, computes p50 / p95 / p99 plus IOPS, and renders them
+  next to a sparkline of p95 over the retained ring (10 minutes
+  at 5 s cycle). Host-wide rather than per-PID — biolatency
+  operates at the block layer and does not expose a process
+  filter — but on a dedicated SmartMet host the dominant block
+  I/O is smartmetd anyway. Auto-starts alongside the off-CPU
+  sampler when --perf is set; bcc-tools probe gates the loop and
+  surfaces an install hint in the Proc panel when it's missing.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.26-3.fmi
 - Off-CPU flamegraph in the Flame view. Press `o` while the panel
   is open to switch between the existing on-CPU flamegraph and a

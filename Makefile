@@ -90,7 +90,17 @@ check:
 	    import smartmet_top.sources.offcpu, smartmet_top.sources.profile_caps; \
 	    from smartmet_top.panels.proc import _build_flame_tree; \
 	    tree = _build_flame_tree([(("a","b","c"), 100), (("a","b","d"), 50), ("a","b","e")]); \
-	    assert tree["a"][0] == 151 and tree["a"][1]["b"][0] == 151 and tree["a"][1]["b"][1]["c"][0] == 100 and tree["a"][1]["b"][1]["d"][0] == 50 and tree["a"][1]["b"][1]["e"][0] == 1, tree'
+	    assert tree["a"][0] == 151 and tree["a"][1]["b"][0] == 151 and tree["a"][1]["b"][1]["c"][0] == 100 and tree["a"][1]["b"][1]["d"][0] == 50 and tree["a"][1]["b"][1]["e"][0] == 1, tree; \
+	    import smartmet_top.sources.biolat; \
+	    from smartmet_top.sources.biolat import parse_biolatency, percentiles_us; \
+	    sample_text = "Tracing block device I/O...\n\n     usecs               : count     distribution\n         0 -> 1          : 0\n         2 -> 3          : 5\n         4 -> 7          : 27\n         8 -> 15         : 173\n        16 -> 31         : 50\n"; \
+	    bks, unit = parse_biolatency(sample_text); \
+	    assert unit == "usecs" and bks == [(0,1,0),(2,3,5),(4,7,27),(8,15,173),(16,31,50)], (bks, unit); \
+	    p50, p95, p99, tot = percentiles_us(bks, unit); \
+	    assert tot == 255 and p50 == 15 and p95 == 31 and p99 == 31, (p50, p95, p99, tot); \
+	    bks_ms, unit_ms = parse_biolatency("     msecs               : count     distribution\n         0 -> 1          : 100\n"); \
+	    p50ms, _, _, totms = percentiles_us(bks_ms, unit_ms); \
+	    assert unit_ms == "msecs" and totms == 100 and p50ms == 1000, (p50ms, totms, unit_ms)'
 	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
 	bash -n share/smartmet/bstat.sh
 	for t in $(BTOOLS) $(LEGACY); do bash -n bin/$$t; done

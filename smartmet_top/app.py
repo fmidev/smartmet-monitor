@@ -27,6 +27,7 @@ from .sources.adminapi import poll_all
 from .sources.logtail import bulk_load, tail_many
 from .sources.perftop import perf_loop
 from .sources.offcpu import offcpu_loop
+from .sources.biolat import biolat_loop
 from .sources.proc import proc_loop
 from .state.store import Store
 
@@ -270,6 +271,11 @@ class App:
                 offcpu_loop(self.store, self.perf_interval,
                             self.perf_record_seconds)
             ))
+            # Block-I/O latency. Host-wide; biolatency-bpfcc blocks for
+            # its measurement window so the loop self-paces — no extra
+            # sleep needed. Probes for bcc-tools at startup and exits
+            # cleanly with an install hint if missing.
+            tasks.append(asyncio.create_task(biolat_loop(self.store)))
 
         last_draw = 0.0
         try:
