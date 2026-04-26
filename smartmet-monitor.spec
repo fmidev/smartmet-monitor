@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.7.8
+Version:        0.7.9
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,30 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.9-1
+- Logs panel now uses ONLY arrow keys for navigation; the vim-style
+  h/j/k/l bindings are gone because they were shadowing the global
+  panel mnemonics (k = Apikeys, h = Health, l = Logs itself, g =
+  Graphs). The operator can now press k from inside Logs and land
+  on Apikeys directly instead of having to switch to a different
+  panel first. Header help text updated to advertise ←→/↑↓/End/PgUp
+  rather than the vim shortcuts.
+- Logs panel: split arrow keys cleanly. ←→ cycle the focused source
+  (was both ←/↑ for back and →/↓ for next), ↑↓ scroll the log
+  buffer one line at a time. PgUp/PgDn page through 20 lines.
+  Pressing ↓ or PgDn that lands on scroll=0 also re-enables follow
+  so the operator doesn't have to chase the tail with End every
+  time.
+- Logs panel: short buffers now bottom-anchor like real `tail -F`
+  output (lines fill from the bottom of the panel, blank space
+  above) instead of top-aligning. Empty buffers show a "(no lines
+  for this source yet)" placeholder so the panel doesn't look
+  broken when cycling to an idle plugin.
+- Add explicit fallback bindings in case some terminals don't
+  deliver curses.KEY_END as the expected code: Enter and End all
+  jump to live tail. Vim-style G/$ removed for consistency with
+  the no-vim-bindings policy.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.8-1
 - Fix the "title says 'last 60 min' but data spans 24 hours" bug.
   Both the Overview and Plugins panels were doing

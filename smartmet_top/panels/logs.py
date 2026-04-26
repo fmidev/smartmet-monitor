@@ -58,17 +58,29 @@ class LogsPanel(Panel):
 
         labels = self._label_list(store)
 
+        # Logs panel deliberately uses ONLY arrow keys for navigation —
+        # not vim-style h/j/k/l. Those letters are global panel
+        # mnemonics (h = Health, k = Apikeys, l = Logs itself,
+        # g = Graphs) and intercepting them here would prevent the
+        # operator from switching panels with their mnemonics.
         if key == ord("/"):
             self.filter_editing = True
         elif key == 27:
             self.filter = ""
-        elif key in (curses.KEY_LEFT, curses.KEY_UP, ord("h"), ord("k")):
+        elif key == curses.KEY_LEFT:
             self._cycle_source(labels, -1)
-        elif key in (curses.KEY_RIGHT, curses.KEY_DOWN, ord("l"), ord("j")):
-            # `l` is also the global Logs mnemonic, but in-panel
-            # delegate-first means it lands here as "next source".
+        elif key == curses.KEY_RIGHT:
             self._cycle_source(labels, +1)
-        elif key in (10, 13, curses.KEY_ENTER, curses.KEY_END, ord("G")):
+        elif key == curses.KEY_UP:
+            # Scroll one line back (older).
+            self.scroll += 1
+            self.follow = False
+        elif key == curses.KEY_DOWN:
+            # Scroll one line forward (toward live tail).
+            self.scroll = max(0, self.scroll - 1)
+            if self.scroll == 0:
+                self.follow = True
+        elif key in (10, 13, curses.KEY_ENTER, curses.KEY_END):
             # Lock onto the focused source and jump to the live tail.
             self.scroll = 0
             self.follow = True
@@ -77,7 +89,9 @@ class LogsPanel(Panel):
             self.follow = False
         elif key == curses.KEY_NPAGE:
             self.scroll = max(0, self.scroll - 20)
-        elif key == curses.KEY_HOME or key == ord("g"):
+            if self.scroll == 0:
+                self.follow = True
+        elif key == curses.KEY_HOME:
             self.scroll = 10_000_000
             self.follow = False
         else:
@@ -114,7 +128,7 @@ class LogsPanel(Panel):
             f" Logs — {sel_display}  "
             f"{'FOLLOW' if self.follow else 'scrolled'}  "
             f"filter:{self.filter or '<none>'}  "
-            "(←→ source  Enter live  / filter)"
+            "(←→ source  ↑↓ scroll  End live  / filter)"
         )
         safe_addstr(win, 0, 0, hdr.ljust(w - 1),
                     theme.attr(theme.P_TAB_ACTIVE))
@@ -137,14 +151,35 @@ class LogsPanel(Panel):
             f = self.filter.lower()
             lines = [ln for ln in lines if f in ln.lower()]
 
+        if not lines:
+            # Empty buffer — common when the operator just cycled to
+            # an idle plugin. Show a placeholder so it doesn't look
+            # like the panel is broken.
+            placeholder = (
+                "(no lines for this source yet)"
+                if self.selected_source
+                else "(no log lines tailed yet)"
+            )
+            safe_addstr(win, body_top + body_h - 1, 2, placeholder,
+                        theme.attr(theme.P_DIM))
+            if self.filter_editing:
+                safe_addstr(win, h - 1, 0,
+                            f" /{self.filter}_ (enter/esc to stop)".ljust(w - 1),
+                            theme.attr(theme.P_HIGHLIGHT))
+            return
+
         # Scroll semantics: 0 = newest at bottom.
         if self.scroll > max(0, len(lines) - body_h):
             self.scroll = max(0, len(lines) - body_h)
         end = len(lines) - self.scroll
         start = max(0, end - body_h)
         visible = lines[start:end]
+        # Bottom-anchor when there's less data than rows so the panel
+        # visually behaves like `tail -F` (newest at the bottom edge,
+        # blank space above) rather than top-aligned.
+        pad = max(0, body_h - len(visible))
         for i, ln in enumerate(visible):
-            safe_addstr(win, body_top + i, 0, ln)
+            safe_addstr(win, body_top + pad + i, 0, ln)
 
         if self.filter_editing:
             safe_addstr(win, h - 1, 0,
