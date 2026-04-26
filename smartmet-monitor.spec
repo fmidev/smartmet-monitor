@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.26
-Release:        9%{?dist}.fmi
+Release:        10%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -112,6 +112,21 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.26-10.fmi
+- Doc audit. Updated the Proc panel description in the panel
+  listing to enumerate every section it now contains (Memory,
+  I/O, Page faults, Block I/O latency, Run-queue latency, CPU
+  efficiency, Network, Perf top / Flamegraph, smaps_rollup) —
+  the previous wording was from the days before today's metric
+  additions. Added the missing key bindings to the Key reference
+  excerpt: `o` (on-CPU ↔ off-CPU flame toggle), `!` (alerts
+  overlay), and the alerts-overlay arrows / Enter / d / Esc
+  bindings. New "Reading the live monitors" entry for the
+  off-CPU flame: detects, likely causes when one stack dominates,
+  healthy / trouble shapes, what to look at next — same Brendan-
+  Gregg structure as the other entries, with a link to
+  brendangregg.com/offcpuanalysis.html.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.26-9.fmi
 - Cross-panel alert system. Detectors run against every metric
   source (majflt, biolatency, runqlat, perfstat, netstats, perf

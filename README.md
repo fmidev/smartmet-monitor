@@ -284,12 +284,33 @@ direction; the dedicated single-panel views below remain for sortable
 
    ![Active panel: in-flight count sparkline at the top, current requests below](doc/images/monitor_active.png)
 
-10. **P**roc — `/proc`-based memory + I/O for each `smartmetd` process
-   on the host, with RSS-split sparklines (file-backed vs anon vs
-   shmem), `VmPTE`, swap, FDs, and on-demand `smaps_rollup`. Multiple
-   smartmetd PIDs (frontend + backend) are switched via `n`/`N`. With
-   `--perf`, the panel adds a live perf-top symbol view and a Braille
-   flamegraph that updates each cycle (`f` toggles between them).
+10. **P**roc — the most data-rich panel. Sections (top → bottom):
+
+    - **Memory** — RSS-split sparklines (file-backed vs anon vs
+      shmem), `VmPTE`, swap, working-set high-water mark.
+    - **I/O** — per-PID read / write byte rate + FD count from
+      `/proc/PID/io`.
+    - **Page faults (major)** — per-second rate of synchronous
+      reads from `/proc/PID/stat`. The killer SmartMet metric;
+      see "Reading the live monitors" below.
+    - **Block I/O latency (host)** — p50 / p95 / p99 µs + IOPS
+      from `biolatency-bpfcc` (requires `bcc-tools`).
+    - **Run-queue latency (host)** — p50 / p95 / p99 µs of
+      scheduler wait time from `runqlat-bpfcc`.
+    - **CPU efficiency (perf stat)** — IPC + cache miss + branch
+      miss rates for the focused PID.
+    - **Network (host)** — TCP retransmits, listen overflows /
+      drops, per-NIC rx / tx bandwidth from `/proc/net/*`.
+    - **Perf top / Flamegraph** (with `--perf`) — live perf-top
+      symbol view and a Braille flamegraph that updates each
+      cycle. `f` toggles between them.
+    - **smaps_rollup** (on demand, `r` key) — full
+      `/proc/PID/smaps_rollup` snapshot for the focused PID.
+
+    Multiple smartmetd PIDs are switched via `n` / `N` or `1`–`9`.
+    Sections that need an external tool (`biolatency-bpfcc`,
+    `runqlat-bpfcc`, `perf`) auto-hide when the tool is missing
+    so the panel stays clean on minimal installs.
 
    ![Proc panel: memory + I/O + perf-top symbols for the focused smartmetd PID](doc/images/monitor_proc.png)
 
@@ -339,7 +360,10 @@ direction; the dedicated single-panel views below remain for sortable
 | `1` – `9`        | select smartmetd PID by index in the selector at the top of Proc / Flame |
 | `f`              | toggle inline flamegraph (Proc); also the Flame view mnemonic |
 | `↑↓←→` `Enter` `Esc/u` `0` | navigate / zoom in / zoom out / reset (Flame view) |
+| `o`              | on-CPU ↔ off-CPU flame toggle (Flame view)         |
 | `m` / `b` / `i`  | toggle time spark / size spark / idle handlers (Graphs panel) |
+| `!`              | open the alerts overlay (any panel)                |
+| `↑` / `↓` `Enter` `d` `Esc` | navigate / jump+dismiss / dismiss / close (alerts overlay) |
 | `e` / `E`        | export current panel as CSV / JSON                  |
 | `q` / `Ctrl-C`   | quit                                                |
 
@@ -485,6 +509,56 @@ throttled time; the on-CPU flame to confirm work *is* being
 scheduled in pipe bursts rather than continuously; the URLs
 panel for which handlers' p95 follows runqlat's shape — those
 are the operations actually being held off CPU.
+
+#### Off-CPU flamegraph (Flame view, `o` toggle)
+
+**What it measures.** Stacks of threads at the moment they were
+descheduled, weighted by microseconds-blocked rather than
+sample-count. From `bcc-tools`' `offcputime-bpfcc -p PID -f
+SECS`. The sister of the on-CPU flame, answering the inverse
+question: "where is my time going when I am *not* computing?"
+This is the canonical Brendan Gregg "off-CPU profile" — see
+[brendangregg.com/offcpuanalysis.html](https://www.brendangregg.com/offcpuanalysis.html).
+
+**Detects.** Lock contention (stacks ending in
+`futex_wait_queue_me`, `__pthread_cond_wait`); I/O blocking
+(`io_schedule`, `do_swap_page`); kernel sleeps (`schedule_timeout`);
+network reads (`sk_wait_data`, `inet_csk_wait_for_connect`);
+mutex / condition-variable hot paths inside the application;
+threads parked waiting on a thread pool.
+
+**Likely causes when one stack dominates.**
+- *Mostly `futex_wait*` rooted in one application function:*
+  that function is the lock holder. Look at the on-CPU flame
+  for the same function — if it spends real CPU there, the
+  lock's critical section is too big; if not, it's the wait
+  for *someone else's* lock.
+- *Mostly `io_schedule` / `do_swap_page`:* the page-fault and
+  block-I/O alerts will fire alongside; treat the storage as
+  the bottleneck.
+- *Mostly `sk_wait_data` / `tcp_recvmsg`:* the thread is
+  waiting on a backend (database, Redis, an upstream HTTP).
+  The off-CPU stack shows *which* call site, even if the
+  backend is opaque.
+- *A wide spread (no single dominant stack):* the application
+  is healthy and just sleeping in the thread-pool idle loop.
+
+**Healthy shape.** A wide flat tree dominated by the thread
+pool's idle stack (`epoll_wait`, `accept4`) — most of the
+"time" is just threads waiting for work. The lock-and-IO
+arms exist but stay narrow.
+
+**Trouble shape.** A tall narrow spike rooted in one function
+that *should* be parallel — the contention point. Or a
+thick `do_swap_page` arm appearing only at certain times of
+day, matching model-publish boundaries.
+
+**What to look at next.** The on-CPU flame for the function
+the off-CPU work funnels through; the page-fault and
+block-I/O panels if the off-CPU stacks point at storage; the
+URLs panel for which handlers correlate with the off-CPU
+spike — those are the operations actually being held off
+CPU.
 
 #### CPU efficiency — IPC + cache & branch miss rates (Proc panel)
 
