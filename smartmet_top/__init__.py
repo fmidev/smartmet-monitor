@@ -1,3 +1,3 @@
 """smartmet-top: interactive terminal monitor for SmartMet Server."""
 
-__version__ = "0.7.17"
+__version__ = "26.4.26"

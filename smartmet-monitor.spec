@@ -14,8 +14,8 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.7.17
-Release:        1%{?dist}
+Version:        26.4.26
+Release:        1%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -101,6 +101,13 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.26-1.fmi
+- Switch to the YY.M.D calendar versioning scheme used by every
+  other smartmet-* package in the hub (smartmet-library-spine,
+  smartmet-library-macgyver, smartmet-library-newbase, …): two-
+  digit year, one-or-two-digit month, one-or-two-digit day, with
+  Release suffix .fmi. Existing 0.7.x history is preserved below.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.17-1
 - Default --replay-bytes raised from 256 MB to 1 GB. SmartMet
   access logs typically rotate daily and busy services hit several
