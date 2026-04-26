@@ -433,12 +433,18 @@ class PluginsPanel(Panel):
             right_ts = now_ts
             left_ts = now_ts - spark_span_seconds
             mid_ts = now_ts - spark_span_seconds / 2
-            fmt = (lambda t: time.strftime("%H:%M:%S", time.localtime(t))
-                   if eff_resolution == "second" and spark_span_seconds < 60
-                   else lambda t: time.strftime("%H:%M", time.localtime(t)))
-            left_label = fmt(left_ts)
-            mid_label = fmt(mid_ts)
-            right_label = fmt(right_ts)
+            # Earlier this was a ternary-of-lambdas, but `lambda x: A
+            # if B else lambda x: C` parses as one lambda whose body
+            # is a ternary returning either a string or a lambda —
+            # so the second branch evaluated to a function and
+            # subsequent len(label) blew up. Pick the format up front.
+            if eff_resolution == "second" and spark_span_seconds < 60:
+                fmt_str = "%H:%M:%S"
+            else:
+                fmt_str = "%H:%M"
+            left_label = time.strftime(fmt_str, time.localtime(left_ts))
+            mid_label = time.strftime(fmt_str, time.localtime(mid_ts))
+            right_label = time.strftime(fmt_str, time.localtime(right_ts))
             # First spark column starts at the x where the rendering
             # loop placed it (after the header cells); we recover it
             # by reusing the same write_row positions on a dummy

@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        0.7.10
+Version:        0.7.11
 Release:        1%{?dist}
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -100,6 +100,17 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.11-1
+- Fix the "TypeError: object of type 'function' has no len()" error
+  in the Live composite's embedded Plugins panel. The Graphs panel
+  time-axis formatter from 0.7.8 used a ternary-of-lambdas:
+      fmt = (lambda t: ... if cond else lambda t: ...)
+  which Python parses as a SINGLE lambda whose body is the ternary,
+  returning either a string OR a lambda — so when the second branch
+  fired, fmt(t) returned the inner lambda and the subsequent
+  len(label) blew up on a function. Replaced with an explicit
+  if/else picking the strftime format string up front.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 0.7.10-1
 - Remove ALL vim-style movement bindings from every panel. Cursor
   navigation is now arrow keys only (↑↓←→ + Home/End/PgUp/PgDn).
