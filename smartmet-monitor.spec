@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.27
-Release:        8%{?dist}.fmi
+Release:        9%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -112,6 +112,18 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-9.fmi
+- systemd-journal tail in the Logs panel. Spawns
+  `journalctl -u <UNIT> -n 50 -f` and pushes every line into the
+  store as a new [journal] source. The Logs panel's per-source
+  tab bar then carries the journal alongside the access-log
+  sources, so the operator can flip between "what is smartmetd
+  saying" and "what is systemd / the kernel saying about
+  smartmetd" in one keystroke. Default unit `smartmet-server`,
+  override via `--journal-unit UNIT` or disable with
+  `--journal-unit ''`. Auto-recovers if journalctl exits (the
+  unit could be transiently absent during a restart).
+
 * Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-8.fmi
 - New Network panel (mnemonic `n`). Pulls the host-wide TCP and
   per-NIC display out of the overcrowded Proc panel and adds:

@@ -39,6 +39,7 @@ from .sources.runqlat import runqlat_loop
 from .sources.perfstat import perfstat_loop
 from .sources.proc import proc_loop
 from .sources.vmstats import vmstats_loop
+from .sources.journal import journal_loop
 from .state.store import Store
 
 
@@ -55,7 +56,8 @@ class App:
                  enable_perf: bool = False,
                  perf_interval: float = 10.0,
                  perf_record_seconds: int = 3,
-                 malloc_flame_min_bytes: Optional[int] = None) -> None:
+                 malloc_flame_min_bytes: Optional[int] = None,
+                 journal_unit: str = "smartmet-server") -> None:
         self.store = Store()
         for host, _ in admin_urls:
             self.store.register_admin_host(host)
@@ -69,6 +71,7 @@ class App:
         self.perf_interval = perf_interval
         self.perf_record_seconds = perf_record_seconds
         self.malloc_flame_min_bytes = malloc_flame_min_bytes
+        self.journal_unit = journal_unit
         self.store.perf_enabled = enable_perf
         self.panels: List[Panel] = [
             LiveView(),
@@ -385,6 +388,13 @@ class App:
         # Same always-on policy as netstats; surfaces direct-reclaim
         # storms that no other panel catches.
         tasks.append(asyncio.create_task(vmstats_loop(self.store)))
+        # systemd-journal tail. Renders as a [journal] source in the
+        # Logs panel — kernel and systemd messages alongside the
+        # access-log streams. Empty journal_unit disables.
+        if self.journal_unit:
+            tasks.append(asyncio.create_task(
+                journal_loop(self.store, self.journal_unit)
+            ))
         if self.enable_perf:
             tasks.append(asyncio.create_task(
                 perf_loop(self.store, self.perf_interval,
@@ -486,13 +496,15 @@ def run_app(log_paths: List[str], admin_urls: List[tuple],
             include_rotated: bool = False,
             enable_perf: bool = False, perf_interval: float = 10.0,
             perf_record_seconds: int = 3,
-            malloc_flame_min_bytes: Optional[int] = None) -> None:
+            malloc_flame_min_bytes: Optional[int] = None,
+            journal_unit: str = "smartmet-server") -> None:
     app = App(log_paths, admin_urls, admin_interval, replay,
               replay_bytes=replay_bytes,
               include_rotated=include_rotated,
               enable_perf=enable_perf, perf_interval=perf_interval,
               perf_record_seconds=perf_record_seconds,
-              malloc_flame_min_bytes=malloc_flame_min_bytes)
+              malloc_flame_min_bytes=malloc_flame_min_bytes,
+              journal_unit=journal_unit)
 
     def _curses_main(stdscr):
         # asyncio.run inside the curses wrapper keeps teardown correct

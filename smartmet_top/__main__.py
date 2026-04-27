@@ -110,6 +110,13 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
              "the duty cycle is ~30%%.",
     )
     p.add_argument(
+        "--journal-unit", type=str, default="smartmet-server",
+        metavar="UNIT",
+        help="systemd unit name to tail in the Logs panel as a "
+             "[journal] source. Default: smartmet-server. Pass an "
+             "empty string (--journal-unit '') to disable.",
+    )
+    p.add_argument(
         "--malloc-flame", nargs="?", type=int, const=4096, default=None,
         metavar="MIN_BYTES",
         help="Enable the per-allocation flamegraph (Flame view 'A' "
@@ -169,6 +176,7 @@ def main(argv=None) -> int:
             perf_interval=args.perf_interval,
             perf_record_seconds=args.perf_record_seconds,
             malloc_flame_min_bytes=args.malloc_flame,
+            journal_unit=args.journal_unit,
         )
     except KeyboardInterrupt:
         pass

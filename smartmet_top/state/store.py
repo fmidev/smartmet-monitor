@@ -531,6 +531,10 @@ class Store:
         # `!`-overlay) reads from it on every redraw. See state/alerts.py
         # for the full lifecycle description.
         self.alerts: Dict[str, Alert] = {}
+        # systemd-journal tail (set by journal_loop; rendered as a
+        # [journal] source in the Logs panel).
+        self.journal_enabled: bool = False
+        self.journal_status: str = "(journal tail not started)"
         # Major page-fault stack sampler — perf record -e major-faults.
         # Same shape as perfdata: per-PID dict, each entry holding a
         # bounded ring of recent stacks. Stacks are unweighted (one
