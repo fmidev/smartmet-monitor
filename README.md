@@ -424,6 +424,64 @@ storage is keeping up and the latency is purely the time spent
 reading. `RssFile` in the Memory section falling at the same
 moment confirms cache eviction.
 
+#### Page cache and reclaim pressure (Proc panel)
+
+**What it measures.** Host-wide memory-management pressure, all
+of it from `/proc/vmstat` and `/proc/meminfo` — no external
+tools, runs everywhere. Four numbers + one sparkline:
+
+  - **Cache size** — `Cached + Buffers` from `/proc/meminfo`,
+    plus its share of total RAM.
+  - **System major faults / s** — `pgmajfault` rate, host-wide.
+    The cousin of the per-PID major-fault graph above; this
+    one fires when *any* process on the host (not just
+    smartmetd) is reading from disk.
+  - **kswapd reclaim / s** — `pgsteal_kswapd*` rate. Pages that
+    the background reclaim thread freed. Silent, healthy.
+  - **Direct reclaim / s** — `pgsteal_direct*` rate. Pages
+    that an *application thread* was forced to free before its
+    own `malloc()` could complete. **The killer metric here.**
+    Sparklined.
+
+**Detects.** Hidden allocation latency that no other view
+catches. Direct reclaim does not show in CPU utilisation, in
+URL p95, in the on-CPU flame, or in the per-PID major-fault
+counter — but it adds itself to the wall-clock time of every
+malloc that runs while it is happening, including
+`std::vector` resizes deep in a request handler.
+
+**Likely causes when direct reclaim fires.**
+- Working set + transient allocations exceed the
+  `min_free_kbytes` headroom, leaving the page allocator with
+  nothing to hand out without scavenging.
+- A sudden allocation burst — a `fork()` of a large process,
+  a model run starting up, a backup spinning into life.
+- `vm.swappiness` tuned very low while a workload now needs
+  memory that would have been swapped under default settings.
+- NUMA imbalance forcing remote-node allocations. Check
+  `/proc/zoneinfo` for per-zone free counters; one zone may
+  be exhausted while another has plenty.
+
+**Healthy shape.** Cache size growing toward but not exceeding
+the file working set. `kswapd` reclaim noisy at low rates
+under steady load (kernel is doing its job). `direct` reclaim
+flat at zero, the sparkline empty.
+
+**Trouble shape.** Direct reclaim sustained > 0 for more than
+a few cycles — the alert fires here. A *spike* tracks an
+allocation burst that resolved; a *plateau* means the host
+genuinely does not have enough RAM for what's running. Check
+the per-PID major-fault graph at the same moment: if smartmetd
+is the one allocating, the same incident shows in both views.
+
+**What to look at next.** The per-PID major-fault graph above
+(is smartmetd the cause or the victim?); the URLs panel for
+which handler's p95 follows the direct-reclaim spikes; the
+Memory section for `RssFile` falling at the same moment
+(file-cache pages being evicted to satisfy anonymous
+allocations); `cat /proc/zoneinfo` for the kernel's per-zone
+free-page accounting.
+
 #### Block I/O latency (Proc panel)
 
 **What it measures.** Power-of-2 histogram of every block-device
@@ -727,6 +785,7 @@ no matter which panel you happen to be on:
 | `perfstat-low-ipc`       | warn     | Flame           | IPC < 0.3 for ≥ 2 perf-stat cycles. CPU is stalling on memory or cross-core sync. |
 | `netstats-retrans`       | warn     | Proc            | TCP retransmits > 1/s for ≥ 3 cycles. Lossy network path or peer ring-buffer overflow. |
 | `netstats-listen-drops`  | crit     | Flame           | Listen-queue overflow / drops at any positive rate. The application is failing to accept connections fast enough. |
+| `vmstats-direct-reclaim` | warn     | Proc            | Direct memory reclaim active for ≥ 3 vmstat windows. Allocation latency is leaking into request latency. |
 | `perf-record-failed`     | warn     | Flame           | perf record returned a non-zero exit. Usually `perf_event_paranoid` or missing `linux-tools`. |
 
 Every `id` above doubles as a README anchor — the overlay lists

@@ -334,6 +334,8 @@ class ProcPanel(Panel):
         # biolat sampler ran at least once. Render only when enabled
         # (and when there's room) so unrelated hosts without bcc-tools
         # don't see a permanent "(no data)" line.
+        if store.vmstats_enabled and store.vmstats_samples:
+            row = self._draw_vmstats(win, store, row)
         if store.biolat_enabled and store.biolat_samples:
             row = self._draw_biolat(win, store, row)
         if store.runqlat_enabled and store.runqlat_samples:
@@ -627,6 +629,46 @@ class ProcPanel(Panel):
             if row >= h - 2:
                 break
         return row + 1
+
+    def _draw_vmstats(self, win, store, row: int) -> int:
+        """Page-cache size + reclaim rates + system-wide major faults.
+
+        The killer signal is direct reclaim — any sustained positive
+        rate means alloc latency is leaking into request latency.
+        kswapd reclaim is silent and healthy; we still show it so
+        the operator can see the kernel doing its job.
+        """
+        h, w = win.getmaxyx()
+        if row + 2 >= h:
+            return row
+        self._section_divider(win, row, "Page cache + reclaim (host)")
+        row += 1
+        latest = store.vmstats_samples[-1]
+        ts, majflt, kswapd, direct, scan, cache_kb, total_kb, avail_kb = latest
+        cache_pct = (cache_kb / total_kb * 100) if total_kb > 0 else 0
+        # Direct reclaim coloured red on any positive rate — it is
+        # never healthy. kswapd at any rate is fine; we display it
+        # in dim so the eye does not jump.
+        direct_attr = (theme.attr(theme.P_BAD, curses.A_BOLD) if direct > 0
+                       else theme.attr(theme.P_HEADER))
+        cells = [
+            (f"  cache {cache_kb // 1024:>6}MB "
+             f"({cache_pct:>4.1f}% of {total_kb // 1024}MB)  ",
+             theme.attr(theme.P_HEADER)),
+            (f"sys-majflt {majflt:>5.1f}/s  ", theme.attr(theme.P_HEADER)),
+            (f"kswapd {kswapd:>6.0f}/s  ", theme.attr(theme.P_DIM)),
+            (f"direct {direct:>6.0f}/s  ", direct_attr),
+        ]
+        x = write_row(win, row, 0, cells)
+        # Sparkline tracks DIRECT reclaim — that is the variable the
+        # operator should watch for spikes. kswapd is steady-state
+        # noise; sparklining it would hide the signal.
+        spark_w = max(15, min(40, w - x - 2))
+        series = store.vmstats_direct_series()
+        if series and any(s > 0 for s in series):
+            safe_addstr(win, row, x, sparkline(series, width=spark_w),
+                        theme.attr(theme.P_BAD))
+        return row + 2
 
     def _draw_biolat(self, win, store, row: int) -> int:
         """Host-wide block-I/O latency from biolatency-bpfcc.

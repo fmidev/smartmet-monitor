@@ -528,6 +528,14 @@ class Store:
         # `!`-overlay) reads from it on every redraw. See state/alerts.py
         # for the full lifecycle description.
         self.alerts: Dict[str, Alert] = {}
+        # Page-cache and memory-reclaim stats from /proc/vmstat +
+        # /proc/meminfo. Always-on; no external tools required.
+        # Each entry: (ts, majflt_rate, kswapd_rate, direct_rate,
+        # scan_rate, cache_kb, mem_total_kb, mem_avail_kb).
+        # 120 entries × 5 s = 10 min of history at default cycle.
+        self.vmstats_samples: Deque[Tuple[float, float, float, float, float, int, int, int]] = deque(maxlen=120)
+        self.vmstats_enabled: bool = False
+        self.vmstats_status: str = "(vmstats sampler not started)"
 
     def register_admin_host(self, host: str) -> None:
         with self._lock:
@@ -1088,3 +1096,28 @@ class Store:
             for a in self.alerts.values():
                 if not a.dismissed:
                     a.viewed = True
+
+    # -- vmstats (page cache + reclaim) ------------------------------------
+
+    def vmstats_record(self, ts: float, majflt_rate: float,
+                       kswapd_rate: float, direct_rate: float,
+                       scan_rate: float, cache_kb: int,
+                       mem_total_kb: int, mem_avail_kb: int) -> None:
+        with self._lock:
+            self.vmstats_samples.append((
+                ts, majflt_rate, kswapd_rate, direct_rate, scan_rate,
+                cache_kb, mem_total_kb, mem_avail_kb,
+            ))
+
+    def vmstats_direct_series(self) -> List[float]:
+        """Direct-reclaim pages-per-second series for the sparkline."""
+        with self._lock:
+            return [s[3] for s in self.vmstats_samples]
+
+    def vmstats_majflt_series(self) -> List[float]:
+        """Host-wide major-fault rate series — different from the per-PID
+        majflt graph: this includes faults from any process on the host,
+        which is the right reading when something other than smartmetd
+        is reading from disk."""
+        with self._lock:
+            return [s[1] for s in self.vmstats_samples]

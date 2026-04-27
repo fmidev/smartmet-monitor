@@ -147,7 +147,13 @@ check:
 	    assert "/usr/share/bcc/tools" in _pc._BCC_SEARCH_DIRS, _pc._BCC_SEARCH_DIRS; \
 	    assert _pc._find_bcc_tool("definitely-not-installed-bpfcc") is None; \
 	    assert "bcc-tools" in _pc._bcc_install_hint("offcputime"); \
-	    assert "/usr/share/bcc/tools" in _pc._bcc_install_hint("offcputime")'
+	    assert "/usr/share/bcc/tools" in _pc._bcc_install_hint("offcputime"); \
+	    import smartmet_top.sources.vmstats; \
+	    from smartmet_top.sources.vmstats import _coalesce; \
+	    d = {"pgsteal_kswapd_normal": 100, "pgsteal_kswapd_dma32": 50, "pgsteal_direct": 7}; \
+	    assert _coalesce(d, "pgsteal_kswapd", "pgsteal_kswapd_normal") == 100; \
+	    assert _coalesce(d, "pgsteal_direct", "pgsteal_direct_normal") == 7; \
+	    assert _coalesce(d, "missing_key") == 0'
 	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
 	bash -n share/smartmet/bstat.sh
 	for t in $(BTOOLS) $(LEGACY); do bash -n bin/$$t; done

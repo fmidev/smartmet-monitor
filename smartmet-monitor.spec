@@ -14,8 +14,8 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        26.4.26
-Release:        11%{?dist}.fmi
+Version:        26.4.27
+Release:        1%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -112,6 +112,27 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-1.fmi
+- Page-cache and reclaim-pressure stats in the Proc panel from
+  /proc/vmstat + /proc/meminfo. Four numbers: cache size as a
+  percentage of total memory, system-wide major-fault rate
+  (complements the per-PID one), kswapd reclaim rate (silent
+  background work, dimmed), and direct reclaim rate (sparklined
+  in red). Direct reclaim is the operational killer: when an
+  application's malloc cannot find a free page the calling
+  thread reclaims one itself before the allocation returns,
+  adding wall-clock time that no other panel can show. Always-
+  on, no external tools.
+- New detector vmstats-direct-reclaim raises a warn-severity
+  alert as soon as direct reclaim fires for three consecutive
+  vmstat windows. Suggests Proc → Page cache as the next look,
+  with the multi-line detail body covering the four typical
+  root causes (working-set vs min_free_kbytes headroom,
+  allocation bursts, swappiness tuning, NUMA imbalance).
+- README's "Reading the live monitors" gains a Page-cache entry
+  in the Brendan Gregg style. The "Alerts that ship today"
+  table picks up vmstats-direct-reclaim.
+
 * Sun Apr 26 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.26-11.fmi
 - Fix bcc-tools detection on RHEL 8. shutil.which only walks
   $PATH; the bcc-tools package on RHEL 8 installs scripts

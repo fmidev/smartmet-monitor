@@ -294,6 +294,63 @@ def detect_netstats_listen_drops(store) -> None:
     ))
 
 
+def detect_vmstats_direct_reclaim(store) -> None:
+    """Direct memory reclaim active for ≥ 3 consecutive vmstat windows.
+
+    Background reclaim (kswapd) is silent and healthy — the kernel
+    runs ahead of demand to keep the free list populated. Direct
+    reclaim is different: it means a process called malloc, the
+    page allocator could not find free pages, and the *calling
+    thread* had to walk the LRU and reclaim pages itself before the
+    allocation could complete. Allocation latency is now part of
+    request latency. Threshold = any positive direct rate
+    sustained, since the healthy steady state on a sized server is
+    exactly zero.
+    """
+    samples = list(store.vmstats_samples)
+    if len(samples) < 3:
+        return
+    last3 = samples[-3:]
+    # samples tuple: (ts, majflt, kswapd, direct, scan, cache, total, avail)
+    if min(s[3] for s in last3) <= 0:
+        return
+    rate = last3[-1][3]
+    cache_kb = last3[-1][5]
+    total_kb = last3[-1][6]
+    cache_pct = cache_kb / total_kb * 100 if total_kb > 0 else 0
+    store.upsert_alert(_alert(
+        severity="warn",
+        detector="vmstats-direct-reclaim",
+        title=f"Direct memory reclaim active ({rate:.0f} pages/s)",
+        detail=(
+            "Allocations on this host are stalling to reclaim memory. "
+            "When direct reclaim fires, every malloc from any "
+            "process — smartmetd included — adds the time spent "
+            "scanning and freeing pages to its own latency. The "
+            "graph below shows pages-per-second; healthy steady "
+            "state is exactly zero.\n\n"
+            f"Page cache currently {cache_kb//1024} MB "
+            f"({cache_pct:.0f}% of {total_kb//1024} MB total).\n\n"
+            "Likely causes:\n"
+            "  - Working set + transient allocations exceeding "
+            "min_free_kbytes headroom; the kernel ran out of "
+            "ready-to-allocate pages.\n"
+            "  - A sudden allocation burst (a fork() of a large "
+            "process, a model run starting, a backup spinning up).\n"
+            "  - vm.swappiness very low and a workload now needs "
+            "memory that would have been swapped.\n"
+            "  - NUMA imbalance forcing remote-node allocations "
+            "(check /proc/zoneinfo for per-zone free pages).\n\n"
+            "If smartmetd's per-PID major-fault rate is also up, "
+            "the reclaim and the page faults are usually the same "
+            "incident — fix the working-set issue first."
+        ),
+        suggested_panel="p",
+        suggested_action="open Proc → Page cache to see direct/kswapd split",
+        docs_anchor="page-cache-and-reclaim-pressure-proc-panel",
+    ))
+
+
 def detect_perf_record_failed(store) -> None:
     """Surface the most recent perf record failure as an alert so the
     operator notices even if they're not on the Flame panel. perf

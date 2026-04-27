@@ -33,6 +33,7 @@ from .sources.netstats import netstats_loop
 from .sources.runqlat import runqlat_loop
 from .sources.perfstat import perfstat_loop
 from .sources.proc import proc_loop
+from .sources.vmstats import vmstats_loop
 from .state.store import Store
 
 
@@ -372,6 +373,10 @@ class App:
         # eBPF, runs on every Linux. The Proc panel renders the
         # results in its own Network section.
         tasks.append(asyncio.create_task(netstats_loop(self.store)))
+        # Page-cache + reclaim stats from /proc/vmstat + /proc/meminfo.
+        # Same always-on policy as netstats; surfaces direct-reclaim
+        # storms that no other panel catches.
+        tasks.append(asyncio.create_task(vmstats_loop(self.store)))
         if self.enable_perf:
             tasks.append(asyncio.create_task(
                 perf_loop(self.store, self.perf_interval,
