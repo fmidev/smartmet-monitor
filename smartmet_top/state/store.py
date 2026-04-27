@@ -503,6 +503,9 @@ class Store:
         # NIC entries are per-interface deques of (ts, rx_bytes/s, tx_bytes/s).
         self.netstats_tcp: Deque[Tuple[float, float, float, float]] = deque(maxlen=180)
         self.netstats_iface: Dict[str, Deque[Tuple[float, float, float]]] = {}
+        # TCP connection state distribution from /proc/net/tcp{,6}.
+        # Each entry: (ts, {state_name: count}, [(listen_port, recv_q), …]).
+        self.netstats_states: Deque[Tuple[float, Dict[str, int], List[Tuple[int, int]]]] = deque(maxlen=180)
         self.netstats_enabled: bool = False
         self.netstats_status: str = "(network sampler not started)"
         # Run-queue latency sampler (bcc-tools' runqlat-bpfcc).
@@ -1148,6 +1151,28 @@ class Store:
     def netstats_iface_names(self) -> List[str]:
         with self._lock:
             return sorted(self.netstats_iface.keys())
+
+    def netstats_record_states(self, ts: float, counts: Dict[str, int],
+                               listen: List[Tuple[int, int]]) -> None:
+        with self._lock:
+            self.netstats_states.append((ts, dict(counts), list(listen)))
+
+    def netstats_states_latest(self) -> Tuple[Dict[str, int],
+                                              List[Tuple[int, int]]]:
+        """({state: count}, [(port, recv_q), …]) for the most recent
+        snapshot, or ({}, []) if no sample has been taken yet."""
+        with self._lock:
+            if not self.netstats_states:
+                return {}, []
+            _, c, l = self.netstats_states[-1]
+            return dict(c), list(l)
+
+    def netstats_state_series(self, state_name: str) -> List[float]:
+        """History of count-over-time for one connection state, for
+        the Network panel's per-state trend sparklines."""
+        with self._lock:
+            return [float(s[1].get(state_name, 0))
+                    for s in self.netstats_states]
 
     # -- run-queue latency --------------------------------------------------
 

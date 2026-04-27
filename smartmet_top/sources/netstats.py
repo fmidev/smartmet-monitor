@@ -125,6 +125,83 @@ def _read_dev_counters() -> Dict[str, Tuple[int, int]]:
         return {}
 
 
+# /proc/net/tcp{,6} state codes. Hex in the file; we count by the
+# decimal value here. The state field is column 4 (index 3 after the
+# `sl` row number).
+_TCP_STATES = {
+    1:  "ESTABLISHED",
+    2:  "SYN_SENT",
+    3:  "SYN_RECV",
+    4:  "FIN_WAIT1",
+    5:  "FIN_WAIT2",
+    6:  "TIME_WAIT",
+    7:  "CLOSE",
+    8:  "CLOSE_WAIT",
+    9:  "LAST_ACK",
+    10: "LISTEN",
+    11: "CLOSING",
+}
+
+
+def parse_proc_net_tcp(text: str) -> Tuple[Dict[str, int], List[Tuple[int, int]]]:
+    """Return ({state_name: count}, [(listen_port, accept_backlog), …]).
+
+    For each line, column 4 is the state in hex, column 1 is
+    `local_address:port` (also hex), column 5 is `tx_queue:rx_queue`.
+    On LISTEN sockets the kernel reports the *current* accept queue
+    depth as rx_queue — exactly the "Recv-Q" `ss -lnt` shows. Anything
+    non-zero there is a transient backlog; sustained > 0 over multiple
+    samples is the precursor to listen-drop alerts.
+    """
+    counts: Dict[str, int] = {name: 0 for name in _TCP_STATES.values()}
+    listen: List[Tuple[int, int]] = []
+    first = True
+    for line in text.splitlines():
+        if first:
+            first = False  # skip header row
+            continue
+        parts = line.split()
+        if len(parts) < 5:
+            continue
+        try:
+            state = int(parts[3], 16)
+        except ValueError:
+            continue
+        name = _TCP_STATES.get(state)
+        if name is None:
+            continue
+        counts[name] += 1
+        if state == 10:  # LISTEN
+            try:
+                _, port_hex = parts[1].rsplit(":", 1)
+                port = int(port_hex, 16)
+            except (ValueError, IndexError):
+                port = 0
+            try:
+                _, rx_q_hex = parts[4].split(":", 1)
+                rx_q = int(rx_q_hex, 16)
+            except (ValueError, IndexError):
+                rx_q = 0
+            listen.append((port, rx_q))
+    return counts, listen
+
+
+def _read_tcp_state_counts() -> Tuple[Dict[str, int], List[Tuple[int, int]]]:
+    """Aggregate state counts from both /proc/net/tcp and /proc/net/tcp6."""
+    total: Dict[str, int] = {name: 0 for name in _TCP_STATES.values()}
+    all_listen: List[Tuple[int, int]] = []
+    for path in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            text = _read_text(path)
+        except OSError:
+            continue
+        counts, listen = parse_proc_net_tcp(text)
+        for k, v in counts.items():
+            total[k] = total.get(k, 0) + v
+        all_listen.extend(listen)
+    return total, all_listen
+
+
 async def netstats_loop(store, interval: float = 2.0) -> None:
     """Sample TCP + NIC counters at `interval` seconds. Always-on:
     no capability detection, no external tools. The first cycle just
@@ -139,6 +216,13 @@ async def netstats_loop(store, interval: float = 2.0) -> None:
         now = time.time()
         retrans, overflows, drops = _read_tcp_counters()
         dev = _read_dev_counters()
+        # State counts + listen-queue depths come from /proc/net/tcp
+        # directly. They are point-in-time snapshots, not rates; the
+        # Store keeps a small history so the Network panel can show a
+        # trend if the state distribution drifts (TIME_WAIT pile-up,
+        # CLOSE_WAIT leak …).
+        state_counts, listen_socks = _read_tcp_state_counts()
+        store.netstats_record_states(now, state_counts, listen_socks)
         if last_tcp is not None and last_ts > 0 and now > last_ts:
             dt = now - last_ts
             rrate = max(0, retrans - last_tcp[0]) / dt

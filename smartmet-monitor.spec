@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.27
-Release:        7%{?dist}.fmi
+Release:        8%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -112,6 +112,24 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-8.fmi
+- New Network panel (mnemonic `n`). Pulls the host-wide TCP and
+  per-NIC display out of the overcrowded Proc panel and adds:
+    * TCP connection-state distribution from /proc/net/tcp{,6}
+      with per-state trend sparklines. CLOSE_WAIT > 100 is
+      coloured red (socket leak); TIME_WAIT > 5000 is amber
+      (ephemeral-port pressure). ESTABLISHED is rendered green
+      so the working-set count stays visible at a glance.
+    * Listen-socket inspection: every LISTEN port with its
+      current accept-queue depth (the Recv-Q `ss -lnt` shows).
+      Sustained Recv-Q > 0 is the precursor to listen-drop
+      alerts.
+    * Per-interface bandwidth — every NIC, not just the busiest
+      pair shown in the Proc panel's compact view. rx and tx
+      sparklines side by side per row.
+  Always-on, no external tools — same /proc/net/* sources as
+  the existing netstats sampler.
+
 * Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-7.fmi
 - Three new Flame view modes from Brendan Gregg's flamegraph
   catalogue:

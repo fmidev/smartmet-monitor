@@ -21,6 +21,7 @@ from .panels.plugins import PluginsPanel
 from .panels.proc import ProcPanel
 from .panels.services import ServicesPanel
 from .panels.urls import UrlsPanel
+from .panels.network import NetworkPanel
 from .panels.alerts_overlay import draw_alerts_overlay, handle_alerts_key
 from .views.admin import AdminView
 from .views.live import LiveView
@@ -80,6 +81,7 @@ class App:
             ServicesPanel(),
             ActivePanel(),
             ProcPanel(),
+            NetworkPanel(),
             LogsPanel(),
             KeysPanel(),
         ]

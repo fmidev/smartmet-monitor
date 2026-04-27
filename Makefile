@@ -176,6 +176,12 @@ check:
 	    bp = "Attaching 2 probes...\n\n@[\n        malloc+0x0\n        foo+0x10\n        main+0x100\n]: 4096\n@[\n        malloc+0x0\n        bar\n]: 1024\n"; \
 	    pa = parse_bpftrace_stacks(bp); \
 	    assert pa == [(("main","foo","malloc"), 4096), (("bar","malloc"), 1024)], pa; \
+	    from smartmet_top.sources.netstats import parse_proc_net_tcp; \
+	    proc_tcp = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 0100007F:1F40 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0\n   1: 0100007F:0050 0202020A:1234 01 00000000:00000000 00:00000000 00000000     0        0\n   2: 0100007F:0050 0202020A:1235 06 00000000:00000000 00:00000000 00000000     0        0\n"; \
+	    counts, listen = parse_proc_net_tcp(proc_tcp); \
+	    assert counts["LISTEN"] == 1 and counts["ESTABLISHED"] == 1 and counts["TIME_WAIT"] == 1, counts; \
+	    assert listen == [(8000, 0)], listen; \
+	    import smartmet_top.panels.network; \
 	    assert _is_lock_stack(("smartmetd","main","pthread_mutex_lock")); \
 	    assert _is_lock_stack(("smartmetd","worker","__lll_lock_wait")); \
 	    assert _is_lock_stack(("smartmetd","poll","futex_wait_queue_me")); \
