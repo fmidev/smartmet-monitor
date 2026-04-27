@@ -24,6 +24,42 @@ class AdminView(CompositeView):
         "Active in-flight requests (bottom). Switch to c/s/a for "
         "scrollable single-panel views."
     )
+    panel_help = """\
+Three admin-endpoint panels stacked in equal thirds —
+the at-a-glance "is this server healthy?" view. All three
+panels are display-only here; for sorting and scrolling
+switch to the dedicated single-panel views.
+
+Top — Services:
+  Per-handler request rates (last1m, last1h, last24h) and
+  mean wall-clock duration. The fastest signal that a
+  particular endpoint is taking off or grinding to a halt.
+
+Middle — Active:
+  Requests currently in flight, sorted by descending
+  duration. Sparkline of in-flight count at the top of the
+  region tracks "how many things are happening at once?"
+  over the recent admin-poll history.
+
+Bottom — Caches:
+  Per-cache hit rate and trend. Cache misery is rarely the
+  cause of an active incident (the application would have
+  been slow long before), so caches sit at the bottom —
+  available for the day-2 "why is this never quite as fast
+  as I'd like?" question rather than the day-0 "everything
+  is on fire" one.
+
+To sort, scroll, or export, switch to the dedicated
+mnemonics:
+  s  → Services panel
+  a  → Active panel
+  c  → Caches panel
+
+On a tall terminal all three regions fit comfortably; on a
+small one the bottom region drops off gracefully (the
+composite view's geometry skips regions below a minimum
+height rather than overlap them).
+"""
 
     def __init__(self) -> None:
         super().__init__()

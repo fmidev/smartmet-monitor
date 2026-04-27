@@ -42,6 +42,61 @@ class UrlsPanel(Panel):
         "Latency per URL. Sort: s cycles, [/] resize window, "
         "Enter drills in, / filters, ↑↓/PgUp/PgDn/Home/End navigate."
     )
+    panel_help = """\
+Live request statistics aggregated by URL path + query string.
+Built from access-log lines (smtop tails *-access-log files
+directly) and from the admin plugin's lastrequests feed when
+that's also available. Updated continuously.
+
+Columns:
+  reqs   request count in the active time window.
+  p50    median latency (50th percentile) in ms — the typical
+         user experience for this URL.
+  p95    95th percentile latency. The number SLO conversations
+         and slow-page complaints are usually about.
+  max    worst single request seen in the window. Outliers,
+         not statistical.
+  avg_sz mean response size, human-readable (KB/MB/GB/TB).
+  total  total bytes shipped for this URL in the window.
+  err%   share of responses with HTTP status ≥ 400.
+  spark  Braille sparkline of the per-minute mean latency over
+         the retained history (default 24 h, configurable via
+         --history-minutes).
+  path   URL path; for handlers that take query strings the
+         distinct (path, query-name-set) tuple is treated as
+         one row so GetMap and GetCapabilities don't merge.
+
+Time window:
+  [ shrinks the window (1 → 5 → 15 → 60 min, then back to 1).
+  ] grows it. The currently-selected window is shown in the
+  panel header. Smtop auto-widens to the next window if the
+  selected one has no requests.
+
+Sorting:
+  s cycles forward through reqs / p50 / p95 / max / avg_sz /
+    total / err%.
+  S cycles backward.
+  r reverses the current sort direction.
+
+Filtering:
+  / opens a regex-style substring filter on the path.
+    Esc / ← clears it.
+
+Drill-in:
+  Enter on a row opens a per-URL detail view: windowed stats,
+  60-minute mean-latency sparkline, exponential-bucket histogram
+  of request times, status-code breakdown, and the top API keys
+  hitting that URL. Inside the drill-in: ↑/↓ walks through URLs
+  without leaving the view; Esc / ← returns.
+
+Keys:
+  ↑ ↓ PgUp PgDn Home End   navigate
+  Enter                    drill into selected URL
+  /                        filter
+  s / S / r                sort cycle / reverse / direction
+  [ / ]                    shrink / grow time window
+  e / E                    export as CSV / JSON
+"""
 
     def __init__(self) -> None:
         self.sort_idx = 1  # p95

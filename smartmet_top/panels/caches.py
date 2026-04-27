@@ -28,6 +28,42 @@ class CachesPanel(Panel):
     name = "Caches"
     hotkey = "c"
     help_text = "Cache stats polled from /admin?what=cachestats."
+    panel_help = """\
+Per-cache statistics polled from `?what=cachestats` on the
+admin endpoint. Each row is one named cache inside spine /
+the engines (querydata, geonames, contour, etc).
+
+Columns:
+  name       cache identity (e.g. `querydata::content`,
+             `contour::isobands`).
+  size       current entries.
+  max        maxsize — the cache's configured upper bound.
+             A consistent `size == max` means the cache is
+             saturated; its eviction policy is now in play.
+  hits/min   hit-rate sample over the last minute.
+  ins/min    insertion rate (cache misses that produced a
+             new entry).
+  hit%       cumulative hit rate since startup. Below 50%
+             usually means the cache is too small or the
+             working set is wider than the cache assumes.
+  hitrate    horizontal bar from 0% to 100% plus a Braille
+             sparkline of the recent trend.
+
+What the numbers mean:
+  - hit% near 100% with hits/min high  → cache is doing its
+    job; nothing to fix.
+  - hit% high but ins/min also high    → cache is churning;
+    insertions are evicting hot entries. Either undersized or
+    the request mix is wider than the cache assumes.
+  - hit% low and ins/min low           → little traffic uses
+    this cache; not necessarily a problem.
+  - size pinned at max with low hit%   → resize the cache
+    upward in spine config.
+
+Keys:
+  ↑ ↓ PgUp PgDn   scroll
+  e / E           export as CSV / JSON
+"""
 
     def __init__(self):
         self.cursor = 0

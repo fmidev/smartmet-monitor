@@ -21,6 +21,45 @@ class ServicesPanel(Panel):
     name = "Services"
     hotkey = "s"
     help_text = "Per-handler throughput from /admin?what=servicestats."
+    panel_help = """\
+Per-handler throughput, polled from `?what=servicestats` on the
+admin endpoint. One row per registered HTTP request handler.
+
+Columns:
+  handler   — fully-qualified handler path (e.g. /timeseries,
+              /wms?service=WMS&request=GetMap, /admin?…).
+              The same name spine uses to register the handler.
+  last1m    — requests served in the last full minute. The
+              fastest-moving column; what to watch during a
+              traffic surge.
+  last1h    — requests served in the last hour. Useful for
+              "is this handler trending up?" without minute-
+              level noise.
+  last24h   — requests in the last day. Long-term baseline.
+  avg_ms    — wall-clock mean duration over the rolling
+              window (which window depends on spine version
+              but is typically the last 1 h). Per-request CPU
+              time is not yet exposed by spine; that work is
+              tracked separately.
+  trend     — Braille sparkline of req/min over the recent
+              admin-poll history. Same width and sample
+              cadence as the Caches panel.
+
+Reading the panel:
+  - Sort changes nothing about the data; it just decides which
+    handlers fill the visible rows on a tall list.
+  - A handler whose last1h is high but last1m is zero is in
+    a quiet spot — could be the next surge candidate or could
+    just be a low-priority background task.
+  - last1m + high avg_ms together = saturation. Pair with the
+    URLs panel: which URLs of this handler are slow?
+
+Keys:
+  ↑ ↓ PgUp PgDn Home End   navigate
+  s / S    cycle sort column
+  r        reverse sort
+  e / E    export as CSV / JSON
+"""
 
     def __init__(self):
         self.cursor = 0

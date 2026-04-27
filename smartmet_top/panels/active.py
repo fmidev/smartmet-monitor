@@ -14,6 +14,50 @@ class ActivePanel(Panel):
     name = "Active"
     hotkey = "a"
     help_text = "In-flight requests from /admin?what=activerequests."
+    panel_help = """\
+What is being processed RIGHT NOW. Polled from
+`?what=activerequests` on the admin endpoint, refreshed every
+admin cycle.
+
+Top of panel:
+  In-flight count sparkline tracking how many requests have
+  been simultaneously active over the recent admin-poll
+  history (~10 min at the default cadence). The peak number
+  shown in the header tells you the worst burst seen since
+  the app started polling.
+
+Columns (each row is one in-flight request):
+  host        admin host the request was reported from.
+              Multi-host setups: `?what=activerequests` is
+              polled per host so requests on different
+              backends sit in the same table together.
+  id          spine's internal request id — useful when
+              cross-referencing with logs or with
+              `?what=lastrequests` on the same host.
+  dur_s       seconds since the request started, on the
+              moment of the most recent admin poll. Coloured
+              by latency: green up to a few seconds, amber
+              into the tens, red beyond — long-running
+              requests stand out at a glance.
+  client      remote IP of the requestor.
+  apikey      FMI API key string if the request carried one,
+              "-" otherwise. Useful for "who is hammering us
+              right now?".
+  request     the request line, query string included.
+
+Reading the panel:
+  - Many short-duration rows = healthy throughput.
+  - A few rows with very large dur_s = stuck or slow
+    upstream; cross-check the URLs panel for that handler's
+    p95.
+  - Pile-up of in-flight count alongside listen-drops in the
+    Network panel = the application can no longer keep up
+    with new connections.
+
+Keys:
+  ↑ ↓ PgUp PgDn   scroll
+  e / E           export as CSV / JSON
+"""
 
     def __init__(self):
         self.scroll = 0

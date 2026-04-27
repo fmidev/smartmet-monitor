@@ -25,6 +25,38 @@ class LiveView(CompositeView):
         "Live access-log monitoring: per-plugin (top) + per-URL (bottom). "
         "Switch to g or u for sortable/filterable interaction."
     )
+    panel_help = """\
+The default startup view when log files are configured. Two
+panels stacked vertically, both rendering their default sort
+and filter — the Live view is display-only. For sortable /
+filterable interaction switch to the dedicated Graphs (`g`) or
+URLs (`u`) views.
+
+Top region (60% of screen) — Graphs:
+  One row per tailed access-log source (plugin). Same columns
+  the dedicated Graphs panel uses: req/s, mean, p95, err%, plus
+  two Braille sparklines per row (response time + response
+  size). Time window is fixed at 60m here so plugins with any
+  activity in the last hour stay visible — the dedicated
+  Graphs panel uses 5m by default, which is right for focused
+  live monitoring but crushes the visible list on the
+  composite.
+
+Bottom region (40% of screen) — URLs:
+  Per-URL latency table. Same columns the dedicated URLs panel
+  uses: reqs, p50, p95, max, avg_sz, total, err%, latency
+  sparkline, path. Default sort by p95 descending so the
+  current slow-side outliers float to the top.
+
+Operator goal: "which plugin is busy? which URLs inside it
+are slow?" The two panels answer the two questions at the
+same time, side by side.
+
+This view is display-only. To sort, filter, drill in, or
+adjust time windows, switch with the lowercase mnemonics:
+  g  → Graphs panel (the per-plugin half)
+  u  → URLs panel (the per-URL half)
+"""
 
     def __init__(self) -> None:
         super().__init__()

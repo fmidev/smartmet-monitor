@@ -32,6 +32,45 @@ class KeysPanel(Panel):
         "API keys. s/S sort, [/] resize window, / filter, "
         "Enter drills into a key to see top URLs."
     )
+    panel_help = """\
+Per-API-key aggregate stats from access logs. The K in
+"ApiKeys" is the mnemonic (lowercase `k` selects this panel)
+to avoid colliding with `a`=Active.
+
+Columns:
+  reqs    request count from this key in the active window.
+  p50     median request latency in ms.
+  p95     95th-percentile latency.
+  max     worst single request seen.
+  bytes   total response bytes shipped to this key.
+  err%    share of responses with HTTP status ≥ 400.
+  apikey  the key string. The "-" pseudo-key is the bucket
+          for unauthenticated traffic.
+
+Time window:
+  Default 60 minutes (keys are usually long-lived; minute-
+  level aggregation is too noisy for ranking). [ shrinks,
+  ] grows.
+
+Drill-in:
+  Enter on a row opens a per-key detail view: top URLs the
+  key calls, ranked by request count. Useful for "this key
+  is hammering us — what is it actually requesting?". Inside
+  the drill-in: ↑/↓ walks through keys without leaving the
+  view; Esc / ← returns.
+
+Filtering:
+  / opens a substring filter on the apikey field. Esc / ←
+  clears.
+
+Keys:
+  ↑ ↓ PgUp PgDn Home End   navigate
+  Enter                    drill into selected key
+  /                        filter
+  s / S / r                sort cycle / reverse / direction
+  [ / ]                    shrink / grow time window
+  e / E                    export as CSV / JSON
+"""
 
     def __init__(self):
         self.sort_idx = 0

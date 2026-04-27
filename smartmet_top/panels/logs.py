@@ -35,6 +35,44 @@ class LogsPanel(Panel):
         "live, / type a substring filter for the focused log, Esc "
         "clears the filter."
     )
+    panel_help = """\
+Live tail across every configured source: each `*-access-log`
+file plus the systemd journal of the smartmet-server unit (when
+--journal-unit is non-empty). All sources share the same
+viewer; press ←/→ on the top tab bar to flip between them.
+
+Source tab bar (top of panel):
+  Each source label is the short name (`wms`, `timeseries`, …)
+  for access-log files, or `[journal]` for journalctl output.
+  An `[all]` virtual entry pulls from a merged ring across
+  every other source — useful when the operator does not yet
+  know which plugin is involved in an incident.
+
+Body:
+  - Lines from the focused source, oldest at top.
+  - Bottom-anchored: when the panel is following the live tail
+    new lines push the older ones up.
+  - When NOT following, position is preserved across redraws so
+    you can read older context without the cursor drifting.
+
+Keys:
+  ← →                cycle source tabs (also ↑ / ↓)
+  Enter / End / 0 / >   jump to live tail (multiple bindings
+                        because some terminals don't deliver
+                        End cleanly)
+  PgUp / PgDn        scroll without leaving the source
+  /                  start a substring filter on the focused
+                     source. Typing narrows the visible set;
+                     Esc clears.
+  e / E              export the focused source's recent ring
+                     as CSV / JSON
+
+The journal source is the place to look for kernel- and
+systemd-side events that access logs cannot show: OOM killer
+intervention, cgroup throttling messages, segfault traces,
+restart loops. When the access log goes quiet during an
+incident, [journal] usually has the answer.
+"""
 
     def __init__(self) -> None:
         # Currently-focused source; "" means the [all] merged view.

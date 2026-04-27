@@ -63,6 +63,53 @@ class PluginsPanel(Panel):
         "size, last 60s @ 1Hz). m toggles time mean↔p95, b toggles "
         "size mean↔throughput, s cycles sort, r reverses sort."
     )
+    panel_help = """\
+One row per tailed access-log source — i.e. one row per plugin
+(`wms`, `timeseries`, `download`, `wfs`, …). All numbers come
+directly from access-log lines smtop tails; the panel does NOT
+poll the admin endpoint, so it works on hosts where you don't
+want admin access enabled.
+
+Columns:
+  plugin    short label derived from the access-log filename
+            (`wms-access-log` → `wms`).
+  req/s    requests per second over the active time window.
+  mean     mean latency in ms.
+  p95      95th-percentile latency. The slow-side number.
+  err%     share of responses with HTTP status ≥ 400.
+
+Two Braille sparklines per row:
+  resp-mean / resp-p95
+            request latency over time. Press `m` to toggle
+            between mean and p95. Per-row max scaling so a
+            quiet plugin's shape is visible alongside a busy
+            one — the visual height is *relative*, not
+            absolute.
+  resp-size / resp-B/s
+            response payload. Press `b` to toggle between
+            mean response size and throughput in bytes/sec.
+
+Time window:
+  [ shrinks the window (60 s → 5 m → 15 m → 60 m, then back).
+  ] grows it. Each tick of the sparklines covers an
+  interval that scales with the window. Smtop auto-widens
+  past empty windows.
+
+Drill-in:
+  Enter on a row jumps to the URLs panel pre-filtered to
+  that plugin's URLs. Press `i` to flip back from the
+  drill-in.
+
+Keys:
+  ↑ ↓ PgUp PgDn Home End   navigate
+  Enter                    drill into URLs filtered by plugin
+  m                        toggle time spark mean ↔ p95
+  b                        toggle size spark mean ↔ throughput
+  i                        toggle visibility of idle handlers
+  s / S / r                sort cycle / reverse / direction
+  [ / ]                    shrink / grow time window
+  e / E                    export as CSV / JSON
+"""
 
     def __init__(self, default_window_idx: int = 0,
                  default_cursor: int = 0,

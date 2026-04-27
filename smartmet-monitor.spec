@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.27
-Release:        11%{?dist}.fmi
+Release:        12%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -112,6 +112,19 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-12.fmi
+- panel_help backfilled across every remaining panel that
+  previously showed only the keys table when `?` was pressed:
+  Active, Caches, Services, URLs, Apikeys, Logs, Overview,
+  Graphs (Plugins), plus the two composite views Live and
+  Health. Each entry explains every column / sparkline /
+  drill-in flow on that panel and which dedicated panel to
+  switch to for sortable / filterable interaction (composite
+  views are display-only). Section-heading detection in
+  HelpPanel relaxed to bold any short line ending in `:`
+  rather than only all-uppercase lines, so the new headings
+  ("Columns:", "Memory:", "Keys:", etc.) render correctly.
+
 * Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-11.fmi
 - Context-aware help. `?` (or F1) still toggles the help
   overlay, but it now renders the active panel's contextual

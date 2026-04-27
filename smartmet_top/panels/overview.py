@@ -22,6 +22,46 @@ class OverviewPanel(Panel):
     name = "Overview"
     hotkey = "o"
     help_text = "Global sparklines: request rate, latency, bandwidth, errors."
+    panel_help = """\
+Host-wide totals across every tailed access-log source. The "is
+the server healthy at a glance?" view — totals, no per-handler
+or per-URL breakdown.
+
+Top of panel — three windowed totals (1 minute, 5 minutes, 60
+minutes), each carrying:
+  reqs       request count in that window.
+  mean_ms    average request duration.
+  p50 / p95  median and 95th percentile latency.
+  max_ms     worst single request seen.
+  bytes      total response bytes shipped.
+  err%       share of responses with HTTP status ≥ 400.
+
+Below the totals — four full-width sparklines covering the
+entire retained history (default 24 h, override with
+--history-minutes; up to a week with --history-minutes 10080).
+Each sparkline is downsampled to fit the panel width:
+
+  requests/min   how busy the server has been over time.
+                 Drops to zero are downtime; sustained climb
+                 is a load increase.
+  mean ms        latency trend. Ramps without a corresponding
+                 rps climb are the operationally interesting
+                 case — the server got slower without getting
+                 busier.
+  MB/min         response throughput. Saturating an interface's
+                 line rate caps total throughput here, regardless
+                 of how many requests are queueing.
+  error %        4xx + 5xx rate. Steady non-zero floor of 4xx
+                 is usually clients sending bad params; a 5xx
+                 climb is a server-side problem.
+
+X-axis labels under each sparkline are HH:MM clock times so
+the operator can pinpoint when something started without
+counting back from "now".
+
+Keys:
+  e / E    export the windowed-totals table as CSV / JSON
+"""
 
     def export_snapshot(self, store):
         headers = ["window_min", "reqs", "mean_ms", "p50_ms", "p95_ms",

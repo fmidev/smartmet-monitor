@@ -82,12 +82,19 @@ class HelpPanel(Panel):
             for line in prev.panel_help.splitlines():
                 if row >= h - 4:
                     break
-                # Section headings end with `:` (per the panel_help
-                # format convention) — render those bold.
+                # Section headings end with `:` and are short
+                # (e.g. "Columns:", "Memory:", "Keys:"). Render
+                # those bold; everything else as body text.
                 stripped = line.strip()
+                is_heading = (stripped.endswith(":")
+                              and 0 < len(stripped) <= 40
+                              and " " not in stripped[:-1].lstrip()[:0]
+                              # at most a few words before the colon —
+                              # weeds out sentences that happen to end
+                              # with `:`.
+                              and stripped[:-1].count(" ") <= 4)
                 attr = (theme.attr(theme.P_HEADER, curses.A_BOLD)
-                        if stripped.endswith(":") and stripped == stripped.upper()
-                        else 0)
+                        if is_heading else 0)
                 safe_addstr(win, row, 4, line, attr)
                 row += 1
             row += 1
