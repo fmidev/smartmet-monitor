@@ -1,0 +1,33 @@
+#!/bin/bash
+# bperf — capture an N-second perf profile of smartmetd, filter to
+# SmartMet components, and emit folded.txt + graph.dot + flame.svg.
+# Thin wrapper around share/smartmet/bperf.py.
+
+set -o pipefail
+
+LIB="${SMARTMET_MONITOR_LIB_BPERF:-/usr/share/smartmet/bperf.py}"
+if [ ! -r "$LIB" ]; then
+    # Fall back to the sibling script when running from the source tree.
+    here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+    if [ -r "$here/../share/smartmet/bperf.py" ]; then
+        LIB="$here/../share/smartmet/bperf.py"
+        # The script imports from the in-tree smartmet_top package; add
+        # the repo root to PYTHONPATH so the import resolves without
+        # requiring a system-wide install.
+        export PYTHONPATH="$here/..${PYTHONPATH:+:$PYTHONPATH}"
+    fi
+fi
+
+if [ ! -r "$LIB" ]; then
+    echo "bperf: library not found at $LIB" >&2
+    exit 1
+fi
+
+# RHEL 8 has python3.9 as the explicit interpreter (python3 = 3.6).
+# Match smtop's logic so install-time PYTHON= overrides flow through.
+PY="${PYTHON:-python3}"
+if ! command -v "$PY" >/dev/null 2>&1; then
+    PY=python3
+fi
+
+exec "$PY" "$LIB" "$@"

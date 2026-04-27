@@ -29,6 +29,14 @@ import curses
 from typing import Dict, List, Optional, Tuple
 
 from .. import theme
+from ..sources.smartmet_filter import (
+    THREAD_CLASS_ALL,
+    THREAD_CLASS_BACKGROUND,
+    THREAD_CLASS_REQUEST,
+    collapse_to_smartmet,
+    is_request_stack,
+    keep_for_thread_class,
+)
 from ..state.store import ProcInfo
 from ..widgets.bars import human_count, sparkline
 from .base import Panel, safe_addstr, write_label, write_row
@@ -81,6 +89,40 @@ def _is_lock_stack(stack) -> bool:
         return False
     leaf = stack[-1]
     return any(p in leaf for p in _LOCK_LEAF_PATTERNS)
+
+
+def _apply_filters(items, thread_class: str, smartmet_only: bool):
+    """Drop / collapse stacks per the active SmartMet-only and thread
+    filters. Accepts both shapes the flame tree builder accepts:
+
+      * bare stack tuples (on-CPU, page-fault, wakeup, block-I/O)
+      * `(stack, weight)` 2-tuples (off-CPU µs blocked; malloc bytes)
+
+    Returns the same shape, with the SmartMet-only collapse applied to
+    the stack component when enabled. The two filters compose: the
+    thread filter runs on the *original* stack so the request-entry
+    symbol is still visible, then the SmartMet collapse drops any
+    non-SmartMet frames.
+    """
+    out = []
+    for item in items:
+        if (isinstance(item, tuple) and len(item) == 2
+                and isinstance(item[0], tuple)
+                and isinstance(item[1], (int, float))):
+            stack, weight = item
+            weighted = True
+        else:
+            stack, weight = item, None
+            weighted = False
+        if not keep_for_thread_class(stack, thread_class):
+            continue
+        if smartmet_only:
+            collapsed = collapse_to_smartmet(stack)
+            if collapsed is None:
+                continue
+            stack = collapsed
+        out.append((stack, weight) if weighted else stack)
+    return out
 
 
 # ---- pure helpers ----------------------------------------------------------
@@ -174,7 +216,10 @@ class FlamePanel(Panel):
         "↑↓←→ navigate, Enter zoom in, Esc/u zoom out, 0 reset zoom, "
         "n/N next/prev PID. Mode keys: C on-CPU, B off-CPU "
         "(blocked), L locks, M memory faults, W wakeup, I block-I/O, "
-        "A allocations (dev-only, --malloc-flame). Requires --perf."
+        "A allocations (dev-only, --malloc-flame). "
+        "S toggles SmartMet-only filter (collapses to SmartMet frames "
+        "+ ≤1 syscall leaf); T cycles thread class (all / request / "
+        "background). Requires --perf."
     )
     panel_help = """\
 A flamegraph stacks function calls vertically: the bottom row is the
@@ -224,6 +269,26 @@ level. 0 / Home reset to the full root. n / N switch the focused
 smartmetd PID; backend processes are preferred over frontend by
 default.
 
+Filters (compose on top of the active mode):
+
+S  smartmet-only   Collapse each stack to its SmartMet frames plus
+                   at most one non-SmartMet leaf (the syscall / libc
+                   the SmartMet code is calling into). Default ON
+                   because the raw flame is dominated by libc and
+                   kernel frames that crowd out the SmartMet code
+                   the operator is investigating. Toggle off (S)
+                   to see the full unfiltered stacks.
+
+T  thread class    Cycle all → request → background. A stack is
+                   "request" when it contains
+                   SmartMetPlugin::callRequestHandler — i.e. the
+                   thread was actively serving an HTTP request when
+                   sampled. "background" is everything else
+                   (cleanup, schedulers, cache eviction, etc).
+                   Classification is by stack content rather than
+                   thread name because spine does not pthread_setname_np;
+                   every thread reports comm=smartmetd.
+
 The bottom of the panel carries the "Top X functions" list —
 re-skinned per mode (top symbols / blocked-on / contended locks /
 fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
@@ -253,6 +318,18 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
         # State is per-panel so switching to another view and back
         # does not jump back to on-CPU unexpectedly.
         self.mode: str = "on-cpu"
+        # SmartMet-only filter: collapse each stack to its SmartMet
+        # frames plus at most one syscall / libc leaf. Default ON
+        # because that's the view the operator wants by design — the
+        # raw flame is dominated by libc / kernel frames that crowd
+        # out the SmartMet code we're trying to see. Toggle with `S`.
+        self.smartmet_only: bool = True
+        # Thread-class filter (request / background / all). Classified
+        # by stack content (presence of SmartMetPlugin::callRequestHandler)
+        # rather than thread name — smartmetd does not pthread_setname_np,
+        # so every thread shows comm=smartmetd and comm-based filtering
+        # would be useless. Toggle with `T`.
+        self.thread_class: str = THREAD_CLASS_ALL
 
     # ---- key handling ------------------------------------------------------
 
@@ -321,6 +398,32 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
                 self.cursor_path = ()
                 self._last_root = {}
                 self._last_frames = []
+            return True
+
+        # `S` toggles SmartMet-only filtering. Frame symbols change
+        # shape (frames disappear or new roots appear) so we drop the
+        # zoom path and cursor — staying zoomed into a frame that just
+        # vanished is confusing.
+        if key == ord("S"):
+            self.smartmet_only = not self.smartmet_only
+            self.zoom_path = ()
+            self.cursor_path = ()
+            self._last_root = {}
+            self._last_frames = []
+            return True
+
+        # `T` cycles the thread-class filter: all → request → background.
+        # Symbols themselves don't change, only which stacks are kept,
+        # so the existing zoom-walk-back logic in the draw paths handles
+        # the case where the cursor's subtree disappears.
+        if key == ord("T"):
+            cycle = (THREAD_CLASS_ALL, THREAD_CLASS_REQUEST,
+                     THREAD_CLASS_BACKGROUND)
+            try:
+                idx = cycle.index(self.thread_class)
+            except ValueError:
+                idx = -1
+            self.thread_class = cycle[(idx + 1) % len(cycle)]
             return True
 
         # Flame navigation only meaningful when perf is on AND we have data.
@@ -440,6 +543,20 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
         self.zoom_path = self.cursor_path
         # Cursor stays at the new root (shown as the topmost frame).
 
+    def _empty_after_filter_msg(self) -> str:
+        """Diagnostic shown when the SmartMet-only / thread-class filter
+        leaves zero stacks. Names the active filter so the operator
+        knows which key to press to widen it."""
+        bits = []
+        if self.thread_class != THREAD_CLASS_ALL:
+            bits.append(f"thread={self.thread_class}")
+        if self.smartmet_only:
+            bits.append("SmartMet-only")
+        if not bits:
+            return "no samples in the retained ring"
+        return (f"no stacks match active filter ({', '.join(bits)}); "
+                f"press T or S to widen")
+
     def _zoom_out(self) -> None:
         if not self.zoom_path:
             return
@@ -509,13 +626,18 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
                      row: int) -> None:
         h, w = win.getmaxyx()
         breadcrumb = " > ".join(self.zoom_path) if self.zoom_path else "(root)"
+        # Compact filter badge — present in every mode's header so the
+        # operator can always see whether they're looking at the
+        # SmartMet-only / thread-filtered view or the raw stacks.
+        filt = (f"smartmet-only={'on' if self.smartmet_only else 'off'} "
+                f"thread={self.thread_class}")
         if self.mode == "off-cpu":
             total_us = store.offcpu_last_total_us(info.pid)
             ms = total_us // 1000
             header = (
                 f" Flame off-CPU — pid={info.pid}  "
                 f"status={store.offcpu_status}  "
-                f"last_off={ms} ms  zoom={breadcrumb}"
+                f"last_off={ms} ms  zoom={breadcrumb}  {filt}"
             )
         elif self.mode == "off-cpu-locks":
             total_us = store.offcpu_last_total_us(info.pid)
@@ -523,28 +645,28 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
             header = (
                 f" Flame off-CPU (locks only) — pid={info.pid}  "
                 f"status={store.offcpu_status}  "
-                f"last_off={ms} ms  zoom={breadcrumb}"
+                f"last_off={ms} ms  zoom={breadcrumb}  {filt}"
             )
         elif self.mode == "pagefault":
             sample_count = store.pagefault_last_sample_count(info.pid)
             header = (
                 f" Flame page-faults — pid={info.pid}  "
                 f"status={store.pagefault_status}  "
-                f"last={sample_count} faults  zoom={breadcrumb}"
+                f"last={sample_count} faults  zoom={breadcrumb}  {filt}"
             )
         elif self.mode == "wakeup":
             sample_count = store.wakeup_last_sample_count(info.pid)
             header = (
                 f" Flame wakeup — pid={info.pid}  "
                 f"status={store.wakeup_status}  "
-                f"last={sample_count} wakeups  zoom={breadcrumb}"
+                f"last={sample_count} wakeups  zoom={breadcrumb}  {filt}"
             )
         elif self.mode == "blockflame":
             sample_count = store.blockflame_last_sample_count(info.pid)
             header = (
                 f" Flame block-I/O issue — pid={info.pid}  "
                 f"status={store.blockflame_status}  "
-                f"last={sample_count} requests  zoom={breadcrumb}"
+                f"last={sample_count} requests  zoom={breadcrumb}  {filt}"
             )
         elif self.mode == "malloc":
             total_bytes = store.malloc_last_total_bytes(info.pid)
@@ -558,7 +680,7 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
             sample_count = store.perf_last_sample_count(info.pid)
             header = (
                 f" Flame on-CPU — pid={info.pid}  status={store.perf_status}  "
-                f"last={sample_count}  zoom={breadcrumb}"
+                f"last={sample_count}  zoom={breadcrumb}  {filt}"
             )
         safe_addstr(win, row, 0, header.ljust(w - 1),
                     theme.attr(theme.P_TAB_ACTIVE))
@@ -601,6 +723,15 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
         if not stacks:
             safe_addstr(win, top, 2,
                         "no stack samples yet — waiting for first perf cycle…",
+                        theme.attr(theme.P_DIM))
+            self._last_frames = []
+            self._last_root = {}
+            return top + 1
+        stacks = _apply_filters(stacks, self.thread_class,
+                                self.smartmet_only)
+        if not stacks:
+            safe_addstr(win, top, 2,
+                        self._empty_after_filter_msg(),
                         theme.attr(theme.P_DIM))
             self._last_frames = []
             self._last_root = {}
@@ -681,6 +812,8 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
             # entries — answers "where am I sleeping on a lock?"
             # specifically.
             weighted = [(s, w) for s, w in weighted if _is_lock_stack(s)]
+        weighted = _apply_filters(weighted, self.thread_class,
+                                  self.smartmet_only)
         if not weighted:
             empty_msg = ("no off-CPU samples yet — waiting for first cycle…"
                          if self.mode == "off-cpu"
@@ -762,6 +895,15 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
             self._last_frames = []
             self._last_root = {}
             return top + 1
+        stacks = _apply_filters(stacks, self.thread_class,
+                                self.smartmet_only)
+        if not stacks:
+            safe_addstr(win, top, 2,
+                        self._empty_after_filter_msg(),
+                        theme.attr(theme.P_DIM))
+            self._last_frames = []
+            self._last_root = {}
+            return top + 1
         full_root = _build_flame_tree(stacks)
         self._last_root = full_root
         if self.zoom_path:
@@ -827,6 +969,15 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
             self._last_frames = []
             self._last_root = {}
             return top + 1
+        stacks = _apply_filters(stacks, self.thread_class,
+                                self.smartmet_only)
+        if not stacks:
+            safe_addstr(win, top, 2,
+                        self._empty_after_filter_msg(),
+                        theme.attr(theme.P_DIM))
+            self._last_frames = []
+            self._last_root = {}
+            return top + 1
         full_root = _build_flame_tree(stacks)
         return self._render_with_zoom(win, full_root, top)
 
@@ -888,6 +1039,15 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
             safe_addstr(win, top, 2,
                         "no allocation samples yet — waiting for first "
                         "bpftrace cycle…",
+                        theme.attr(theme.P_DIM))
+            self._last_frames = []
+            self._last_root = {}
+            return top + 1
+        weighted = _apply_filters(weighted, self.thread_class,
+                                  self.smartmet_only)
+        if not weighted:
+            safe_addstr(win, top, 2,
+                        self._empty_after_filter_msg(),
                         theme.attr(theme.P_DIM))
             self._last_frames = []
             self._last_root = {}
@@ -1235,6 +1395,18 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
         x = write_label(win, h - 1, x, " reset  ", 0, base, base)
         x = write_label(win, h - 1, x, "s", 0, base, hot)
         x = write_label(win, h - 1, x, " seconds  ", 0, base, base)
+        # SmartMet-only toggle — show the active state inline so the
+        # operator does not need to glance up at the header.
+        s_label = "S" + ("●" if self.smartmet_only else "○")
+        x = write_label(win, h - 1, x, s_label[:1], 0, base, hot)
+        x = write_label(win, h - 1, x, s_label[1:] + " smartmet-only  ",
+                        0, base, base)
+        # Thread-class cycle — render the active class's first letter
+        # so the operator can read the cycle position at a glance.
+        t_letter = self.thread_class[:1].upper()  # A / R / B
+        x = write_label(win, h - 1, x, "T", 0, base, hot)
+        x = write_label(win, h - 1, x, f"({t_letter}) thread  ",
+                        0, base, base)
         # Mode keys, with the active mode's letter shown in reverse
         # video so the operator can see where they are at a glance.
         for ch, mode in (("C", "on-cpu"), ("B", "off-cpu"),

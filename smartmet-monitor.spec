@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.27
-Release:        13%{?dist}.fmi
+Release:        14%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -85,6 +85,7 @@ make install \
 %{_bindir}/burls
 %{_bindir}/bstatus
 %{_bindir}/bkeys
+%{_bindir}/bperf
 # Legacy compatibility aliases. These all call `bstat -i <X>` and
 # remain supported so existing operator workflows and documentation
 # do not break during gradual rollouts.
@@ -95,6 +96,7 @@ make install \
 %{_bindir}/bstat60
 %{_bindir}/bstat24
 %{_datadir}/smartmet/bstat.sh
+%{_datadir}/smartmet/bperf.py
 %{_mandir}/man1/smtop.1*
 %{_mandir}/man1/bstat.1*
 %{_mandir}/man1/bchart.1*
@@ -112,6 +114,46 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-14.fmi
+- New `bperf` offline profiler — the batch companion to smtop's
+  live Flame view. Runs `perf record -F 99 -g --call-graph=dwarf`
+  for N seconds against a smartmetd PID, post-processes the
+  captured stacks through the same SmartMet-only and request-vs-
+  background filters smtop uses, and writes three artifacts:
+    * folded.txt — Brendan-Gregg folded-stack format
+    * graph.dot  — GraphViz call graph (render with `dot -Tsvg`)
+    * flame.svg  — self-contained click-to-zoom flamegraph
+  Default 30s capture, default --threads all, default
+  --smartmet-only on. SVG is hand-rolled (~30 lines of inline
+  JS) so no flamegraph.pl / inferno runtime dependency is added.
+  GraphViz `.dot` is emitted as text — operators run `dot` if /
+  when they want a rendered graph, so no graphviz RPM dep either.
+  Pre-flight checks: `perf` in PATH, kernel.perf_event_paranoid
+  ≤ 2, PID exists; warns when > 50% of frames are `[unknown]`
+  (debuginfo not installed).
+- Flame panel gains two new filter toggles, both default-on for
+  the workflow the user actually wants on day one:
+    S — smartmet-only: collapse each stack to its SmartMet
+        frames + at most one syscall / libc leaf. Drops the
+        libc and kernel scaffolding that crowds out the
+        SmartMet code in the unfiltered flame.
+    T — thread class: cycle all → request → background. A
+        stack is "request" iff it contains
+        SmartMetPlugin::callRequestHandler — i.e. that thread
+        was actively serving an HTTP request when sampled.
+        Stack-content classification is used because spine
+        does not pthread_setname_np; every thread shows
+        comm=smartmetd and a comm-based filter would be
+        useless.
+  Both filters compose with the existing on-CPU / off-CPU /
+  locks / pagefault / wakeup / blockflame / malloc modes.
+  Footer shows the active filter state inline; the panel
+  header shows `smartmet-only=on/off thread=all/request/background`.
+- Shared filter logic lives in
+  smartmet_top/sources/smartmet_filter.py so bperf and the TUI
+  panel agree by construction on what counts as a SmartMet
+  frame and a request stack.
+
 * Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-13.fmi
 - Services panel gains a `cpu%` column showing the fraction
   of avg_ms each handler spends ON CPU. Read from the

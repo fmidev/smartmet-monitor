@@ -23,7 +23,7 @@ SITEDIR = $(DESTDIR)$(PYSITELIB)/smartmet_top
 all:
 	@echo "smartmet-monitor is a no-build package. Use 'make install' or 'make rpm'."
 
-BTOOLS = bstat bchart burls bstatus bkeys
+BTOOLS = bstat bchart burls bstatus bkeys bperf
 LEGACY = bstat1s bstat10s bstat1 bstat10 bstat60 bstat24
 MANPAGES = smtop.1 bstat.1 bchart.1 burls.1 bstatus.1 bkeys.1 \
            bstat1s.1 bstat10s.1 bstat1.1 bstat10.1 bstat60.1 bstat24.1
@@ -38,6 +38,9 @@ install:
 	$(foreach t,$(LEGACY),install -m 0755 bin/$(t) $(BINDIR)/$(t); )
 	# shared library that all bstat-family wrappers source
 	install -m 0644 share/smartmet/bstat.sh $(SHAREDIR)/bstat.sh
+	# bperf is a Python script (heavier than awk warrants); the wrapper
+	# in $(BINDIR)/bperf execs it with python3.9.
+	install -m 0644 share/smartmet/bperf.py $(SHAREDIR)/bperf.py
 	# python package
 	install -m 0644 smartmet_top/*.py         $(SITEDIR)/
 	install -m 0644 smartmet_top/panels/*.py  $(SITEDIR)/panels/
@@ -59,6 +62,7 @@ uninstall:
 	$(foreach t,$(BTOOLS),rm -f $(BINDIR)/$(t); )
 	$(foreach t,$(LEGACY),rm -f $(BINDIR)/$(t); )
 	rm -f $(SHAREDIR)/bstat.sh
+	rm -f $(SHAREDIR)/bperf.py
 	$(foreach m,$(MANPAGES),rm -f $(MANDIR)/$(m); )
 	rm -rf $(DOCDIR)
 	rm -rf $(SITEDIR)
@@ -182,6 +186,35 @@ check:
 	    assert counts["LISTEN"] == 1 and counts["ESTABLISHED"] == 1 and counts["TIME_WAIT"] == 1, counts; \
 	    assert listen == [(8000, 0)], listen; \
 	    import smartmet_top.panels.network; \
+	    from smartmet_top.sources.smartmet_filter import collapse_to_smartmet, is_request_stack, keep_for_thread_class, THREAD_CLASS_REQUEST, THREAD_CLASS_BACKGROUND, THREAD_CLASS_ALL; \
+	    assert collapse_to_smartmet(("__libc_start_main","main","SmartMet::Spine::Reactor::run","SmartMet::Spine::SmartMetPlugin::callRequestHandler","pthread_mutex_lock","futex_wait","do_syscall_64")) == ("SmartMet::Spine::Reactor::run","SmartMet::Spine::SmartMetPlugin::callRequestHandler","pthread_mutex_lock"); \
+	    assert collapse_to_smartmet(("main","libc_only","futex_wait")) is None; \
+	    assert is_request_stack(("SmartMet::Spine::SmartMetPlugin::callRequestHandler","x")); \
+	    assert not is_request_stack(("SmartMet::Engine::Cache::cleanup",)); \
+	    assert keep_for_thread_class(("SmartMet::Spine::SmartMetPlugin::callRequestHandler","x"), THREAD_CLASS_REQUEST); \
+	    assert keep_for_thread_class(("SmartMet::Engine::Cache::cleanup",), THREAD_CLASS_BACKGROUND); \
+	    assert keep_for_thread_class((), THREAD_CLASS_ALL); \
+	    from smartmet_top.panels.flame import _apply_filters; \
+	    _af = _apply_filters([("main","SmartMet::A","pthread_mutex_lock","futex_wait"), ("main","libc_only","free")], thread_class=THREAD_CLASS_ALL, smartmet_only=True); \
+	    assert _af == [("SmartMet::A","pthread_mutex_lock")], _af; \
+	    _afw = _apply_filters([(("main","SmartMet::B","free"), 4096)], thread_class=THREAD_CLASS_ALL, smartmet_only=True); \
+	    assert _afw == [(("SmartMet::B","free"), 4096)], _afw; \
+	    import importlib.util as _ilu; \
+	    _bp_spec = _ilu.spec_from_file_location("bperf_test", "share/smartmet/bperf.py"); \
+	    _bp = _ilu.module_from_spec(_bp_spec); _bp_spec.loader.exec_module(_bp); \
+	    _bp_text = "smartmetd 1 [0] 1.0:    99 cycles:\n    deadbeef pthread_mutex_lock+0x0 (libc.so)\n    deadbeef SmartMet::X::handle+0x0 (libsm.so)\n    deadbeef main+0x0 (smartmetd)\n\n"; \
+	    _bp_st = _bp.parse_perf_script(_bp_text); \
+	    assert _bp_st == [("main","SmartMet::X::handle","pthread_mutex_lock")], _bp_st; \
+	    _bp_flt = _bp.filter_stacks(_bp_st, "all", smartmet_only=True); \
+	    assert _bp_flt == [("SmartMet::X::handle","pthread_mutex_lock")], _bp_flt; \
+	    import tempfile as _tf, os as _os; \
+	    _tmpd = _tf.mkdtemp(prefix="bperf-test-"); \
+	    _bp.write_folded(_bp.fold_stacks(_bp_flt), _os.path.join(_tmpd, "f.txt")); \
+	    _bp.write_dot(_bp.fold_stacks(_bp_flt), _os.path.join(_tmpd, "g.dot"), "test"); \
+	    _bp.write_svg(_bp.fold_stacks(_bp_flt), _os.path.join(_tmpd, "f.svg"), "test"); \
+	    assert _os.path.getsize(_os.path.join(_tmpd, "f.svg")) > 200; \
+	    assert "digraph bperf" in open(_os.path.join(_tmpd, "g.dot")).read(); \
+	    import shutil as _sh; _sh.rmtree(_tmpd, ignore_errors=True); \
 	    assert _is_lock_stack(("smartmetd","main","pthread_mutex_lock")); \
 	    assert _is_lock_stack(("smartmetd","worker","__lll_lock_wait")); \
 	    assert _is_lock_stack(("smartmetd","poll","futex_wait_queue_me")); \
@@ -200,6 +233,7 @@ check:
 	    assert _stp2.proc_default_pid() == 900, _stp2.proc_default_pid(); \
 	    assert _S2().proc_default_pid() is None'
 	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
+	$(PYTHON) -m py_compile share/smartmet/bperf.py
 	bash -n share/smartmet/bstat.sh
 	for t in $(BTOOLS) $(LEGACY); do bash -n bin/$$t; done
 	# End-to-end: each wrapper must load the library and print at least
