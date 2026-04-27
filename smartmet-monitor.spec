@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.27
-Release:        6%{?dist}.fmi
+Release:        7%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -112,6 +112,35 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-7.fmi
+- Three new Flame view modes from Brendan Gregg's flamegraph
+  catalogue:
+    W → wakeup (perf -e sched:sched_wakeup)
+    I → block-I/O issue (perf -e block:block_rq_issue)
+    A → allocations via bpftrace uprobe on malloc — DEV ONLY
+  Wakeup is the dual of off-CPU: it shows who is unblocking
+  threads, the standard recipe for finding the *holder* side of
+  a lock when off-CPU shows the waiter side. Block-I/O issue
+  catches direct reads/writes/fsyncs in addition to page-cache
+  misses, complementing the page-fault flame.
+- The malloc flame is gated on the explicit --malloc-flame CLI
+  flag because uprobe-on-malloc has measurable overhead. Default
+  filter min-bytes is 4096 (focuses on operationally interesting
+  allocations and drops noise from millions of small allocs);
+  --malloc-flame 0 traces every malloc with extreme overhead.
+  Allocator (jemalloc, mimalloc, glibc) is auto-detected by
+  scanning /proc/PID/maps. Strong warning shown in the panel
+  when 'A' is pressed without --malloc-flame, so a junior
+  developer cannot accidentally enable it on production by
+  pressing the wrong key.
+- Wakeup and block-I/O auto-start with --perf since they are
+  pure perf and have negligible overhead. Allocation flame
+  remains off until --malloc-flame is set.
+- Footer shows all seven mode keys with the active mode in
+  reverse video. Flame view help text and README updated to
+  cover the workflow including the production-safety notes for
+  the malloc flame.
+
 * Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-6.fmi
 - Flame view: replace the `o` mode-cycle with direct mnemonic
   keys.

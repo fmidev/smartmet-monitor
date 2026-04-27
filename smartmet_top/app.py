@@ -29,6 +29,9 @@ from .sources.logtail import bulk_load, tail_many
 from .sources.perftop import perf_loop
 from .sources.offcpu import offcpu_loop
 from .sources.pagefault import pagefault_loop
+from .sources.wakeup import wakeup_loop
+from .sources.blockflame import blockflame_loop
+from .sources.mallocflame import mallocflame_loop
 from .sources.biolat import biolat_loop
 from .sources.netstats import netstats_loop
 from .sources.runqlat import runqlat_loop
@@ -50,7 +53,8 @@ class App:
                  include_rotated: bool = False,
                  enable_perf: bool = False,
                  perf_interval: float = 10.0,
-                 perf_record_seconds: int = 3) -> None:
+                 perf_record_seconds: int = 3,
+                 malloc_flame_min_bytes: Optional[int] = None) -> None:
         self.store = Store()
         for host, _ in admin_urls:
             self.store.register_admin_host(host)
@@ -63,6 +67,7 @@ class App:
         self.enable_perf = enable_perf
         self.perf_interval = perf_interval
         self.perf_record_seconds = perf_record_seconds
+        self.malloc_flame_min_bytes = malloc_flame_min_bytes
         self.store.perf_enabled = enable_perf
         self.panels: List[Panel] = [
             LiveView(),
@@ -400,6 +405,28 @@ class App:
                 pagefault_loop(self.store, self.perf_interval,
                                self.perf_record_seconds)
             ))
+            # Wakeup flamegraph — pure perf, no bcc. Stable on every
+            # supported kernel via sched:sched_wakeup tracepoint.
+            tasks.append(asyncio.create_task(
+                wakeup_loop(self.store, self.perf_interval,
+                            self.perf_record_seconds)
+            ))
+            # Block-I/O issue flamegraph — pure perf via
+            # block:block_rq_issue tracepoint. Catches direct reads,
+            # writes, fsyncs (i.e. all device I/O, not just the
+            # subset routed through page-cache misses).
+            tasks.append(asyncio.create_task(
+                blockflame_loop(self.store, self.perf_interval,
+                                self.perf_record_seconds)
+            ))
+            # Allocation flamegraph — gated on the explicit
+            # --malloc-flame CLI flag because uprobe-on-malloc has
+            # measurable overhead on a busy server.
+            if self.malloc_flame_min_bytes is not None:
+                tasks.append(asyncio.create_task(
+                    mallocflame_loop(self.store,
+                                     min_bytes=self.malloc_flame_min_bytes)
+                ))
             # Block-I/O latency. Host-wide; biolatency-bpfcc blocks for
             # its measurement window so the loop self-paces — no extra
             # sleep needed. Probes for bcc-tools at startup and exits
@@ -456,12 +483,14 @@ def run_app(log_paths: List[str], admin_urls: List[tuple],
             replay_bytes: int = 1024 * 1024 * 1024,
             include_rotated: bool = False,
             enable_perf: bool = False, perf_interval: float = 10.0,
-            perf_record_seconds: int = 3) -> None:
+            perf_record_seconds: int = 3,
+            malloc_flame_min_bytes: Optional[int] = None) -> None:
     app = App(log_paths, admin_urls, admin_interval, replay,
               replay_bytes=replay_bytes,
               include_rotated=include_rotated,
               enable_perf=enable_perf, perf_interval=perf_interval,
-              perf_record_seconds=perf_record_seconds)
+              perf_record_seconds=perf_record_seconds,
+              malloc_flame_min_bytes=malloc_flame_min_bytes)
 
     def _curses_main(stdscr):
         # asyncio.run inside the curses wrapper keeps teardown correct

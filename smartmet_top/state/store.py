@@ -536,6 +536,30 @@ class Store:
         self.pagefault_enabled: bool = False
         self.pagefault_status: str = "(page-fault sampler not started)"
         self.pagefault_last_error: str = ""
+        # Wakeup stack sampler — perf record -e sched:sched_wakeup.
+        # Each sample is one wakeup event; flame width measures
+        # "this code path generated N wakeups for the focused PID".
+        self.wakeup_data: Dict[int, "PerfData"] = {}
+        self.wakeup_enabled: bool = False
+        self.wakeup_status: str = "(wakeup sampler not started)"
+        self.wakeup_last_error: str = ""
+        # Block-I/O issue stack sampler — perf record -e
+        # block:block_rq_issue. Each sample is one block-layer
+        # request issued; flame width measures "this code path
+        # issued N block requests".
+        self.blockflame_data: Dict[int, "PerfData"] = {}
+        self.blockflame_enabled: bool = False
+        self.blockflame_status: str = "(block-I/O sampler not started)"
+        self.blockflame_last_error: str = ""
+        # Allocation stack sampler — bpftrace uprobe on malloc.
+        # Stacks are weighted by total bytes allocated. Off by
+        # default; only runs when smtop is started with
+        # --malloc-flame because the uprobe overhead can be heavy.
+        self.malloc_data: Dict[int, "OffCpuData"] = {}
+        self.malloc_enabled: bool = False
+        self.malloc_status: str = "(malloc flame not started; pass --malloc-flame to enable)"
+        self.malloc_last_error: str = ""
+        self.malloc_allocator: str = ""
         # Page-cache and memory-reclaim stats from /proc/vmstat +
         # /proc/meminfo. Always-on; no external tools required.
         # Each entry: (ts, majflt_rate, kswapd_rate, direct_rate,
@@ -972,6 +996,98 @@ class Store:
         with self._lock:
             pd = self.pagefault_data.get(pid)
             return pd.last_sample_count if pd else 0
+
+    # -- wakeup flame data --------------------------------------------------
+
+    def wakeup_record_samples(self, pid: int, ts: float, stacks) -> None:
+        with self._lock:
+            pd = self.wakeup_data.get(pid)
+            if pd is None:
+                pd = PerfData(pid=pid)
+                self.wakeup_data[pid] = pd
+            n = 0
+            for stack in stacks:
+                if not stack:
+                    continue
+                pd.recent_stacks.append(stack)
+                n += 1
+            pd.last_sample_ts = ts
+            pd.last_sample_count = n
+
+    def wakeup_recent_stacks(self, pid: int):
+        with self._lock:
+            pd = self.wakeup_data.get(pid)
+            if pd is None:
+                return []
+            return list(pd.recent_stacks)
+
+    def wakeup_last_sample_count(self, pid: int) -> int:
+        with self._lock:
+            pd = self.wakeup_data.get(pid)
+            return pd.last_sample_count if pd else 0
+
+    # -- block-I/O flame data ----------------------------------------------
+
+    def blockflame_record_samples(self, pid: int, ts: float, stacks) -> None:
+        with self._lock:
+            pd = self.blockflame_data.get(pid)
+            if pd is None:
+                pd = PerfData(pid=pid)
+                self.blockflame_data[pid] = pd
+            n = 0
+            for stack in stacks:
+                if not stack:
+                    continue
+                pd.recent_stacks.append(stack)
+                n += 1
+            pd.last_sample_ts = ts
+            pd.last_sample_count = n
+
+    def blockflame_recent_stacks(self, pid: int):
+        with self._lock:
+            pd = self.blockflame_data.get(pid)
+            if pd is None:
+                return []
+            return list(pd.recent_stacks)
+
+    def blockflame_last_sample_count(self, pid: int) -> int:
+        with self._lock:
+            pd = self.blockflame_data.get(pid)
+            return pd.last_sample_count if pd else 0
+
+    # -- malloc flame data --------------------------------------------------
+
+    def malloc_record_samples(self, pid: int, ts: float,
+                              stacks_with_bytes) -> None:
+        """Each item is (stack, bytes_allocated). The flame view weights
+        frames by bytes summed, so a code path that allocates ten 1 MB
+        buffers shows as ten times the width of one that allocates ten
+        100 KB buffers."""
+        with self._lock:
+            od = self.malloc_data.get(pid)
+            if od is None:
+                od = OffCpuData(pid=pid)
+                self.malloc_data[pid] = od
+            total = 0
+            for stack, n in stacks_with_bytes:
+                if not stack or n <= 0:
+                    continue
+                od.recent_stacks.append((stack, n))
+                total += n
+            od.last_sample_ts = ts
+            od.last_total_us = total  # repurposed: "total bytes" for malloc
+
+    def malloc_recent_stacks(self, pid: int):
+        with self._lock:
+            od = self.malloc_data.get(pid)
+            if od is None:
+                return []
+            return list(od.recent_stacks)
+
+    def malloc_last_total_bytes(self, pid: int) -> int:
+        with self._lock:
+            od = self.malloc_data.get(pid)
+            return od.last_total_us if od else 0
 
     # -- block-I/O latency --------------------------------------------------
 

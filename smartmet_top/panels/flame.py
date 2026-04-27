@@ -43,11 +43,15 @@ from .proc import _build_flame_tree, _flame_color, draw_pid_selector
 PERF_SECONDS_PRESETS = (1, 3, 5, 10, 20, 30)
 
 
-# Valid Flame view modes. Selection is direct via the C/B/L/M keys
-# in the panel's handle_key — no cycling. Order here is purely the
-# logical workflow ordering (running → blocked → locks → memory)
-# used by the README's "What's it for?" diagrams.
-_MODES = ("on-cpu", "off-cpu", "off-cpu-locks", "pagefault")
+# Valid Flame view modes. Selection is direct via the
+# C/B/L/M/W/I/A keys in the panel's handle_key — no cycling.
+# Order here is the logical workflow ordering used by the
+# README's diagrams: where is the CPU going → where are
+# threads stuck → narrow to lock contention → where do faults
+# land → who is doing the unblocking → where do block-I/O
+# requests originate → which code path allocates memory.
+_MODES = ("on-cpu", "off-cpu", "off-cpu-locks", "pagefault",
+          "wakeup", "blockflame", "malloc")
 
 
 # Substring patterns that mark a stack leaf as lock-related. Used by
@@ -169,7 +173,8 @@ class FlamePanel(Panel):
         "Live flamegraph for the focused smartmetd PID. "
         "↑↓←→ navigate, Enter zoom in, Esc/u zoom out, 0 reset zoom, "
         "n/N next/prev PID. Mode keys: C on-CPU, B off-CPU "
-        "(blocked), L locks, M memory faults. Requires --perf."
+        "(blocked), L locks, M memory faults, W wakeup, I block-I/O, "
+        "A allocations (dev-only, --malloc-flame). Requires --perf."
     )
 
     def __init__(self) -> None:
@@ -252,6 +257,9 @@ class FlamePanel(Panel):
             ord("B"): "off-cpu",        # Blocked
             ord("L"): "off-cpu-locks",  # Locks
             ord("M"): "pagefault",      # Memory faults
+            ord("W"): "wakeup",         # Wakeup (who woke us)
+            ord("I"): "blockflame",     # Block-I/O issue
+            ord("A"): "malloc",         # Allocations (gated)
         }
         if key in mode_keys:
             new_mode = mode_keys[key]
@@ -472,6 +480,28 @@ class FlamePanel(Panel):
                 f"status={store.pagefault_status}  "
                 f"last={sample_count} faults  zoom={breadcrumb}"
             )
+        elif self.mode == "wakeup":
+            sample_count = store.wakeup_last_sample_count(info.pid)
+            header = (
+                f" Flame wakeup — pid={info.pid}  "
+                f"status={store.wakeup_status}  "
+                f"last={sample_count} wakeups  zoom={breadcrumb}"
+            )
+        elif self.mode == "blockflame":
+            sample_count = store.blockflame_last_sample_count(info.pid)
+            header = (
+                f" Flame block-I/O issue — pid={info.pid}  "
+                f"status={store.blockflame_status}  "
+                f"last={sample_count} requests  zoom={breadcrumb}"
+            )
+        elif self.mode == "malloc":
+            total_bytes = store.malloc_last_total_bytes(info.pid)
+            header = (
+                f" Flame malloc — pid={info.pid}  "
+                f"status={store.malloc_status}  "
+                f"last={total_bytes} bytes  alloc={store.malloc_allocator}  "
+                f"zoom={breadcrumb}"
+            )
         else:
             sample_count = store.perf_last_sample_count(info.pid)
             header = (
@@ -491,6 +521,24 @@ class FlamePanel(Panel):
             return self._draw_off_cpu_flame(win, store, info, top)
         if self.mode == "pagefault":
             return self._draw_pagefault_flame(win, store, info, top)
+        if self.mode == "wakeup":
+            return self._draw_perf_event_flame(
+                win, store, info, top,
+                store.wakeup_recent_stacks(info.pid),
+                store.wakeup_enabled,
+                store.wakeup_last_error,
+                "wakeup samples", "perf",
+            )
+        if self.mode == "blockflame":
+            return self._draw_perf_event_flame(
+                win, store, info, top,
+                store.blockflame_recent_stacks(info.pid),
+                store.blockflame_enabled,
+                store.blockflame_last_error,
+                "block-I/O issue samples", "perf",
+            )
+        if self.mode == "malloc":
+            return self._draw_malloc_flame(win, store, info, top)
         # If a previous cycle failed, surface that in place of the flame.
         if store.perf_last_error:
             self._draw_perf_error(win, top, h - 2, store.perf_last_error)
@@ -698,6 +746,142 @@ class FlamePanel(Panel):
         bottom = _max_depth(frames) if frames else flame_top
         return bottom + 1
 
+    def _draw_perf_event_flame(self, win, store, info: ProcInfo,
+                               top: int, stacks, enabled: bool,
+                               last_error: str,
+                               sample_label: str, backend: str) -> int:
+        """Generic perf-event flame (wakeup, block-I/O issue, etc).
+
+        Same renderer as on-CPU and pagefault — different stack source,
+        different empty / disabled / error messages.
+        """
+        h, w = win.getmaxyx()
+        if not enabled:
+            safe_addstr(win, top, 2,
+                        f"this flame mode needs --perf ({backend})",
+                        theme.attr(theme.P_BAD, curses.A_BOLD))
+            self._last_frames = []
+            self._last_root = {}
+            return min(top + 4, h - 2)
+        if last_error:
+            self._draw_perf_error(win, top, h - 2, last_error)
+            self._last_frames = []
+            self._last_root = {}
+            return h - 2
+        if not stacks:
+            safe_addstr(win, top, 2,
+                        f"no {sample_label} yet — waiting for first cycle…",
+                        theme.attr(theme.P_DIM))
+            self._last_frames = []
+            self._last_root = {}
+            return top + 1
+        full_root = _build_flame_tree(stacks)
+        return self._render_with_zoom(win, full_root, top)
+
+    def _draw_malloc_flame(self, win, store, info: ProcInfo,
+                           top: int) -> int:
+        """Allocation flame: stacks weighted by total bytes allocated.
+
+        Gated on the operator passing --malloc-flame at startup. When
+        the recorder isn't running we surface an explicit warning so
+        a junior dev cannot accidentally enable it on production by
+        pressing 'A' while connected to the wrong host.
+        """
+        h, w = win.getmaxyx()
+        if not store.malloc_enabled:
+            safe_addstr(win, top, 2,
+                        "Malloc flamegraph is OFF",
+                        theme.attr(theme.P_BAD, curses.A_BOLD))
+            safe_addstr(win, top + 1, 2,
+                        "Status: " + store.malloc_status,
+                        theme.attr(theme.P_DIM))
+            safe_addstr(win, top + 3, 2,
+                        "WARNING: do NOT enable on production servers.",
+                        theme.attr(theme.P_BAD, curses.A_BOLD))
+            safe_addstr(win, top + 4, 2,
+                        "The recorder uses bpftrace uprobes on every "
+                        "malloc() in",
+                        theme.attr(theme.P_DIM))
+            safe_addstr(win, top + 5, 2,
+                        "smartmetd; the per-call kernel breakpoint can add "
+                        "measurable",
+                        theme.attr(theme.P_DIM))
+            safe_addstr(win, top + 6, 2,
+                        "latency to every alloc and slow request handling "
+                        "visibly.",
+                        theme.attr(theme.P_DIM))
+            safe_addstr(win, top + 8, 2,
+                        "On a dev / staging host, restart smtop with:",
+                        theme.attr(theme.P_DIM))
+            safe_addstr(win, top + 9, 4,
+                        "smtop --perf --malloc-flame …",
+                        theme.attr(theme.P_HEADER))
+            safe_addstr(win, top + 10, 2,
+                        "Default min-bytes = 4096; raise to filter more, "
+                        "or pass 0",
+                        theme.attr(theme.P_DIM))
+            safe_addstr(win, top + 11, 2,
+                        "to trace every allocation (extreme overhead).",
+                        theme.attr(theme.P_DIM))
+            self._last_frames = []
+            self._last_root = {}
+            return min(top + 13, h - 2)
+        if store.malloc_last_error:
+            self._draw_perf_error(win, top, h - 2, store.malloc_last_error)
+            self._last_frames = []
+            self._last_root = {}
+            return h - 2
+        weighted = store.malloc_recent_stacks(info.pid)
+        if not weighted:
+            safe_addstr(win, top, 2,
+                        "no allocation samples yet — waiting for first "
+                        "bpftrace cycle…",
+                        theme.attr(theme.P_DIM))
+            self._last_frames = []
+            self._last_root = {}
+            return top + 1
+        full_root = _build_flame_tree(weighted)
+        return self._render_with_zoom(win, full_root, top)
+
+    def _render_with_zoom(self, win, full_root, top: int) -> int:
+        """Shared zoom + render path used by all flame modes that
+        carry a fully-built tree at this point."""
+        h, w = win.getmaxyx()
+        self._last_root = full_root
+        if self.zoom_path:
+            visible_root = _subtree_at(full_root, self.zoom_path)
+            if visible_root is None or not visible_root:
+                while self.zoom_path:
+                    self.zoom_path = self.zoom_path[:-1]
+                    visible_root = (_subtree_at(full_root, self.zoom_path)
+                                    if self.zoom_path else full_root)
+                    if visible_root:
+                        break
+                if not visible_root:
+                    visible_root = full_root
+        else:
+            visible_root = full_root
+        flame_top = top
+        flame_max_y = max(flame_top + 2, h - 12)
+        self._ensure_cursor()
+        frames = _render_flame(
+            win, flame_top, flame_max_y, 0, w - 1,
+            visible_root, self.zoom_path, self.cursor_path,
+        )
+        self._last_frames = frames
+        if not self._frame_at(self.cursor_path):
+            self._ensure_cursor()
+            target = self._frame_at(self.cursor_path)
+            if target is not None:
+                y, xs, xe, sym, _cnt, _path = target
+                cw = xe - xs
+                label = sym[:cw] if len(sym) > cw else sym + " " * (cw - len(sym))
+                safe_addstr(win, y, xs, label,
+                            theme.attr(theme.P_HIGHLIGHT,
+                                       curses.A_BOLD | curses.A_UNDERLINE))
+        bottom = _max_depth(frames) if frames else flame_top
+        return bottom + 1
+
     def _draw_offcpu_unavailable(self, win, store, top: int) -> None:
         """Surface the install hint inline when no off-CPU backend is
         present. The hint comes from profile_caps.offcpu_backend()
@@ -729,6 +913,26 @@ class FlamePanel(Panel):
             return
         if self.mode == "pagefault":
             self._draw_top_pagefault_leaves(win, store, info, start_row)
+            return
+        if self.mode == "wakeup":
+            self._draw_top_count_leaves(
+                win, info, start_row,
+                store.wakeup_recent_stacks(info.pid),
+                "Top wakeup-causing functions", "wakeups",
+            )
+            return
+        if self.mode == "blockflame":
+            self._draw_top_count_leaves(
+                win, info, start_row,
+                store.blockflame_recent_stacks(info.pid),
+                "Top block-I/O issuing functions", "I/Os",
+            )
+            return
+        if self.mode == "malloc":
+            self._draw_top_byte_leaves(
+                win, info, start_row,
+                store.malloc_recent_stacks(info.pid),
+            )
             return
         # Divider
         safe_addstr(win, start_row, 0,
@@ -817,6 +1021,92 @@ class FlamePanel(Panel):
             ]
             write_row(win, y, 0, cells)
 
+    def _draw_top_count_leaves(self, win, info: ProcInfo,
+                               start_row: int, stacks,
+                               title: str, unit: str) -> None:
+        """Generic 'top leaf-symbol counts' summary used by the wakeup
+        and block-I/O flame modes. Each input stack contributes 1 to
+        its leaf — same shape as the on-CPU summary."""
+        h, w = win.getmaxyx()
+        safe_addstr(win, start_row, 0,
+                    f"─ {title} "
+                    + "─" * max(0, w - len(title) - 3),
+                    theme.attr(theme.P_DIM))
+        body_top = start_row + 1
+        avail = h - body_top - 1
+        if avail < 1:
+            return
+        if not stacks:
+            safe_addstr(win, body_top, 2, "no samples yet",
+                        theme.attr(theme.P_DIM))
+            return
+        leaf_count: Dict[str, int] = {}
+        total = 0
+        for stack in stacks:
+            if not stack:
+                continue
+            leaf = stack[-1]
+            leaf_count[leaf] = leaf_count.get(leaf, 0) + 1
+            total += 1
+        if total <= 0:
+            return
+        rows = sorted(leaf_count.items(), key=lambda kv: -kv[1])[:avail]
+        for i, (sym, n) in enumerate(rows):
+            y = body_top + i
+            if y >= h - 1:
+                break
+            pct = n / total * 100
+            label = sym[:max(0, w - 26)]
+            cells = [
+                (f"  {pct:>5.1f}%  ", theme.attr(theme.P_HEADER)),
+                (f"{n:>6} {unit:<8}  ", theme.attr(theme.P_ACCENT)),
+                (label, 0),
+            ]
+            write_row(win, y, 0, cells)
+
+    def _draw_top_byte_leaves(self, win, info: ProcInfo,
+                              start_row: int,
+                              stacks_with_bytes) -> None:
+        """Allocation-flame leaf summary: bytes allocated per leaf."""
+        h, w = win.getmaxyx()
+        title = "Top allocation-causing functions (malloc flame)"
+        safe_addstr(win, start_row, 0,
+                    f"─ {title} "
+                    + "─" * max(0, w - len(title) - 3),
+                    theme.attr(theme.P_DIM))
+        body_top = start_row + 1
+        avail = h - body_top - 1
+        if avail < 1:
+            return
+        if not stacks_with_bytes:
+            safe_addstr(win, body_top, 2, "no allocations recorded yet",
+                        theme.attr(theme.P_DIM))
+            return
+        leaf_bytes: Dict[str, int] = {}
+        total = 0
+        for stack, n in stacks_with_bytes:
+            if not stack or n <= 0:
+                continue
+            leaf = stack[-1]
+            leaf_bytes[leaf] = leaf_bytes.get(leaf, 0) + n
+            total += n
+        if total <= 0:
+            return
+        rows = sorted(leaf_bytes.items(), key=lambda kv: -kv[1])[:avail]
+        for i, (sym, n) in enumerate(rows):
+            y = body_top + i
+            if y >= h - 1:
+                break
+            pct = n / total * 100
+            label = sym[:max(0, w - 32)]
+            from ..widgets.bars import human_bytes
+            cells = [
+                (f"  {pct:>5.1f}%  ", theme.attr(theme.P_HEADER)),
+                (f"{human_bytes(n):>10}  ", theme.attr(theme.P_ACCENT)),
+                (label, 0),
+            ]
+            write_row(win, y, 0, cells)
+
     def _draw_top_pagefault_leaves(self, win, store, info: ProcInfo,
                                    start_row: int) -> None:
         """Top fault-causing functions: leaf-symbol counts summed across
@@ -896,7 +1186,9 @@ class FlamePanel(Panel):
         # Mode keys, with the active mode's letter shown in reverse
         # video so the operator can see where they are at a glance.
         for ch, mode in (("C", "on-cpu"), ("B", "off-cpu"),
-                         ("L", "off-cpu-locks"), ("M", "pagefault")):
+                         ("L", "off-cpu-locks"), ("M", "pagefault"),
+                         ("W", "wakeup"), ("I", "blockflame"),
+                         ("A", "malloc")):
             attr = (curses.A_REVERSE | curses.A_BOLD if mode == self.mode
                     else hot)
             x = write_label(win, h - 1, x, ch, 0, base, attr)

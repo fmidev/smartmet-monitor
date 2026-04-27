@@ -109,6 +109,21 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
              "window. Combined with the default --perf-interval=10 "
              "the duty cycle is ~30%%.",
     )
+    p.add_argument(
+        "--malloc-flame", nargs="?", type=int, const=4096, default=None,
+        metavar="MIN_BYTES",
+        help="Enable the per-allocation flamegraph (Flame view 'A' "
+             "mode). Records every malloc() ≥ MIN_BYTES from "
+             "smartmetd via a bpftrace uprobe and weights stacks by "
+             "total bytes allocated. Default MIN_BYTES is 4096; pass "
+             "an explicit number to override (e.g. --malloc-flame 1024). "
+             "MIN_BYTES=0 traces every malloc — extreme overhead. "
+             "WARNING: NOT FOR PRODUCTION. Uprobes on a hot allocator "
+             "function can add measurable latency to every alloc; on a "
+             "busy SmartMet backend this can slow request handling "
+             "visibly. Use on dev / staging only. Allocator is "
+             "auto-detected (jemalloc / mimalloc / glibc).",
+    )
     return p.parse_args(argv)
 
 
@@ -153,6 +168,7 @@ def main(argv=None) -> int:
             enable_perf=args.perf,
             perf_interval=args.perf_interval,
             perf_record_seconds=args.perf_record_seconds,
+            malloc_flame_min_bytes=args.malloc_flame,
         )
     except KeyboardInterrupt:
         pass

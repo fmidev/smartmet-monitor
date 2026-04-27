@@ -169,7 +169,13 @@ check:
 	    assert picks2 == [("busiest","eth0")], picks2; \
 	    import smartmet_top.sources.pagefault; \
 	    from smartmet_top.panels.flame import _is_lock_stack, _MODES; \
-	    assert _MODES == ("on-cpu","off-cpu","off-cpu-locks","pagefault"); \
+	    assert "on-cpu" in _MODES and "wakeup" in _MODES and "blockflame" in _MODES and "malloc" in _MODES; \
+	    import smartmet_top.sources.wakeup, smartmet_top.sources.blockflame; \
+	    import smartmet_top.sources.mallocflame; \
+	    from smartmet_top.sources.mallocflame import parse_bpftrace_stacks; \
+	    bp = "Attaching 2 probes...\n\n@[\n        malloc+0x0\n        foo+0x10\n        main+0x100\n]: 4096\n@[\n        malloc+0x0\n        bar\n]: 1024\n"; \
+	    pa = parse_bpftrace_stacks(bp); \
+	    assert pa == [(("main","foo","malloc"), 4096), (("bar","malloc"), 1024)], pa; \
 	    assert _is_lock_stack(("smartmetd","main","pthread_mutex_lock")); \
 	    assert _is_lock_stack(("smartmetd","worker","__lll_lock_wait")); \
 	    assert _is_lock_stack(("smartmetd","poll","futex_wait_queue_me")); \

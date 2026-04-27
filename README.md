@@ -234,7 +234,7 @@ direction; the dedicated single-panel views below remain for sortable
    restarting smtop. The lower portion of the screen carries the
    perf-top symbol list so nothing is wasted on shallow stacks.
 
-   Four flame modes selected by single keys:
+   Seven flame modes selected by single uppercase keys:
 
    - **`C`** — **on-CPU** (default), sampled at 99 Hz via `perf
      record`. Where the CPU is going.
@@ -252,10 +252,64 @@ direction; the dedicated single-panel views below remain for sortable
      pairs with the page-fault sparkline in the Proc panel: when
      that spikes, this flame names the function that caused the
      spike.
+   - **`W`** — **wakeup**, stack at every wakeup the focused PID
+     initiated (`perf record -e sched:sched_wakeup`). The dual
+     of off-CPU: shows the *other* side of a contention pair.
+     The classic Brendan Gregg recipe — see
+     [brendangregg.com/FlameGraphs/offcpuflamegraphs.html](https://www.brendangregg.com/FlameGraphs/offcpuflamegraphs.html)
+     — is to walk from a tall narrow stack in **off-CPU (locks)**
+     to its dual in this view: same lock, opposite side.
+   - **`I`** — **block-I/O issue**, stack at every block-layer
+     request the PID issued (`perf record -e
+     block:block_rq_issue`). Catches direct reads, writes,
+     fsyncs — every block I/O, not just the subset routed
+     through page-cache misses. Pairs with the **Block I/O
+     latency** sparkline the way the page-fault flame pairs
+     with the page-fault sparkline.
+   - **`A`** — **allocations** (DEVELOPMENT ONLY, gated). Stack
+     at every `malloc()` ≥ N bytes via a `bpftrace` uprobe.
+     **Off by default;** a strong warning is shown when the
+     mode is opened without the recorder running. See
+     **The malloc flame caveat** below.
 
    Mode keys are uppercase so the lowercase panel mnemonics
    (`l`=Logs, `c`=Caches, `o`=Overview, `p`=Proc) still reach
    the global panel switcher when pressed from the Flame view.
+
+   #### The malloc flame caveat
+
+   ⚠ **Do NOT enable on production servers.** ⚠
+
+   The allocation flamegraph attaches a bpftrace uprobe to the
+   allocator's `malloc()` entry point. *Every* allocation in
+   smartmetd then triggers a kernel breakpoint that bpftrace
+   has to handle. On a busy SmartMet backend this can mean
+   millions of breakpoints per second and add measurable
+   latency to every alloc — sometimes enough to slow request
+   handling visibly. The recorder is intended for development
+   and staging hosts where the perf cost is acceptable.
+
+   Mitigation by size-filtering. The recorder only traces
+   allocations of at least `MIN_BYTES` (default 4096). Most
+   production overhead comes from millions of small
+   allocations (string concat, small struct copies); a 4 KB
+   threshold removes those from the trace and keeps the bigger
+   allocations — vector resizes, buffer pools, deserialisation
+   output — which are the ones an operator actually wants to
+   see.
+
+   ```sh
+   smtop --perf --malloc-flame              # enable, default 4 KB filter
+   smtop --perf --malloc-flame 1024         # custom 1 KB filter
+   smtop --perf --malloc-flame 0            # trace EVERY alloc — extreme overhead
+   ```
+
+   Allocator support: jemalloc (`libjemalloc.so.2`), mimalloc
+   (`libmimalloc.so`), and stock glibc malloc are all
+   auto-detected by scanning `/proc/PID/maps` for the loaded
+   library. Both jemalloc and mimalloc export `malloc` as
+   their public entry point, so the uprobe target is the same
+   regardless of allocator.
 
    The "Top X functions" list at the bottom of the panel shifts
    to match the active mode (top blocked-on functions, top
@@ -394,7 +448,7 @@ direction; the dedicated single-panel views below remain for sortable
 | `1` – `9`        | select smartmetd PID by index in the selector at the top of Proc / Flame |
 | `f`              | toggle inline flamegraph (Proc); also the Flame view mnemonic |
 | `↑↓←→` `Enter` `Esc/u` `0` | navigate / zoom in / zoom out / reset (Flame view) |
-| `C` / `B` / `L` / `M` | Flame mode: on-CPU / off-CPU / locks / memory faults |
+| `C` / `B` / `L` / `M` / `W` / `I` / `A` | Flame mode: on-CPU / off-CPU / locks / memory faults / wakeup / block-I/O issue / allocations (dev-only) |
 | `+` / `-`        | grow / shrink sparkline height in the Proc panel (1–6 rows; default 2) |
 | `m` / `b` / `i`  | toggle time spark / size spark / idle handlers (Graphs panel) |
 | `!`              | open the alerts overlay (any panel)                |
