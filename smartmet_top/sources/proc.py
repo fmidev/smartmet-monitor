@@ -169,6 +169,24 @@ def read_majflt(pid: int) -> int:
         return 0
 
 
+def read_cpu_times(pid: int):
+    """Cumulative (utime, stime) in jiffies from /proc/PID/stat.
+
+    utime is field 14 (user-mode), stime field 15 (kernel-mode).
+    After the comm-strip in _read_stat_fields they land at indexes
+    11 and 12. Returned together so the panel can show a "user vs
+    kernel" CPU split — large kernel-time spikes are the canonical
+    "syscall storm" signal.
+    """
+    fields = _read_stat_fields(pid)
+    if fields is None or len(fields) <= 12:
+        return 0, 0
+    try:
+        return int(fields[11]), int(fields[12])
+    except ValueError:
+        return 0, 0
+
+
 _BOOT_TIME_CACHE: Optional[float] = None
 
 
@@ -253,6 +271,7 @@ async def proc_loop(store) -> None:
             if do_fd:
                 pids[pid]["fds"] = count_fds(pid)
             majflt = read_majflt(pid)
+            utime, stime = read_cpu_times(pid)
             store.proc_update(
                 pid=pid,
                 ts=now,
@@ -269,6 +288,8 @@ async def proc_loop(store) -> None:
                 io_write_bytes=io.get("write_bytes", 0),
                 fds=pids[pid].get("fds", 0),
                 majflt=majflt,
+                utime=utime,
+                stime=stime,
             )
             # Run the page-fault-storm detector against the freshly
             # updated sample ring. Detectors live in detectors.py so

@@ -292,6 +292,11 @@ class ProcSample:
     # so storing the cumulative value keeps the math identical to how
     # io_read_bytes / io_write_bytes are turned into rates.
     majflt: int = 0
+    # Cumulative CPU jiffies (/proc/PID/stat fields 14, 15). Divide
+    # delta by SC_CLK_TCK and the wall-clock sample interval to get
+    # "fraction of one core" used between samples.
+    utime: int = 0
+    stime: int = 0
 
 
 @dataclass

@@ -11,6 +11,7 @@ launched with `--perf` and the operator opts in to the sampling load.
 from __future__ import annotations
 
 import curses
+import os
 import time
 from typing import Dict, List
 
@@ -87,6 +88,36 @@ def _majflt_rate_series(samples: List[ProcSample]) -> List[float]:
             continue
         out.append(max(0, b.majflt - a.majflt) / dt)
     return out
+
+
+def _cpu_cores(samples: List[ProcSample]):
+    """Return (user_cores, sys_cores) computed from the last sample
+    pair. "Cores" here means "fraction of one CPU continuously busy"
+    — 1.0 = one core fully utilised, 4.0 = four full cores worth of
+    CPU. Computed as `Δ jiffies / SC_CLK_TCK / Δt`.
+
+    Per-handler CPU is not yet available — that needs a spine-side
+    change to expose CPU time alongside AverageDuration in
+    ?what=servicestats. The value returned here is the host-side
+    proxy: total smartmetd CPU usage. Useful for "did this deploy
+    make the process more or less expensive overall?" even without
+    the per-handler split.
+    """
+    if len(samples) < 2:
+        return 0.0, 0.0
+    a, b = samples[-2], samples[-1]
+    dt = b.ts - a.ts
+    if dt <= 0:
+        return 0.0, 0.0
+    try:
+        clk = os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError):
+        clk = 100
+    if clk <= 0:
+        clk = 100
+    u = max(0, b.utime - a.utime) / clk / dt
+    s = max(0, b.stime - a.stime) / clk / dt
+    return u, s
 
 
 def _io_rate_series(samples: List[ProcSample], field_name: str) -> List[float]:
@@ -396,7 +427,7 @@ class ProcPanel(Panel):
                      top: int = 0) -> int:
         """Status line for the focused PID. The PID list above already
         carries the cmdline + role, so this row is just live numbers
-        (uptime, threads) that wouldn't fit there.
+        (uptime, threads, CPU usage) that wouldn't fit there.
         """
         h, w = win.getmaxyx()
         latest = info.samples[-1] if info.samples else None
@@ -405,9 +436,14 @@ class ProcPanel(Panel):
             _format_uptime(time.time() - info.started_at)
             if info.started_at > 0 else "?"
         )
+        cpu_user, cpu_sys = _cpu_cores(list(info.samples))
+        cpu_total = cpu_user + cpu_sys
+        cpu_str = (f"CPU {cpu_total:.2f}c (u{cpu_user:.2f} s{cpu_sys:.2f})"
+                   if cpu_total > 0 else "CPU —")
         header = (
             f" Proc — pid={info.pid}  uptime={uptime}  "
-            f"threads={threads}  ({n_procs} PID{'s' if n_procs != 1 else ''})"
+            f"threads={threads}  {cpu_str}  "
+            f"({n_procs} PID{'s' if n_procs != 1 else ''})"
         )
         safe_addstr(win, top, 0, header.ljust(w - 1),
                     theme.attr(theme.P_TAB_ACTIVE))

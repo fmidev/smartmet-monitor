@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.27
-Release:        9%{?dist}.fmi
+Release:        10%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -112,6 +112,22 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-10.fmi
+- Per-PID CPU usage in the Proc panel header. /proc/PID/stat
+  fields 14 (utime) and 15 (stime) sampled on every poll cycle;
+  the panel header now shows "CPU N.NNc (uN.NN sN.NN)" alongside
+  uptime and thread count, with N.NN = "fraction of one core
+  continuously busy". A reading of 4.0 means smartmetd is using
+  4 full cores worth of CPU. The user/system split exposes
+  syscall storms as elevated `s` time without the user time
+  rising to match.
+- Per-HANDLER CPU time (the Graphs panel improvement originally
+  proposed) is deferred: it requires a spine-side change to
+  ?what=servicestats to expose CPU time alongside the existing
+  AverageDuration wall-clock value. The fix is small (~10 lines
+  in spine's ServiceStats accumulator) and will land alongside
+  the malloc_stats_print spine integration in the next round.
+
 * Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-9.fmi
 - systemd-journal tail in the Logs panel. Spawns
   `journalctl -u <UNIT> -n 50 -f` and pushes every line into the
