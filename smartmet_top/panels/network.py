@@ -48,6 +48,50 @@ class NetworkPanel(Panel):
         "Network section, which auto-picks the busiest interfaces "
         "and is duplicated here in full detail."
     )
+    panel_help = """\
+TCP host-wide:
+  retrans/s          retransmitted segments per second.
+                     Sustained > 1/s = lossy network or peer
+                     ring-buffer overflow.
+  listen-overflow/s  SYNs dropped because the kernel's accept
+                     queue was full. Application is not calling
+                     accept() fast enough. Always a bug.
+  listen-drop/s      same situation, different counter family.
+
+TCP connection states (from /proc/net/tcp{,6}):
+  ESTABLISHED  the working set — your active connections.
+  TIME_WAIT    half-closed connections waiting for late
+               packets. Normal up to a few thousand; > 5000
+               sustained = ephemeral-port pressure (amber).
+  CLOSE_WAIT   peer closed but the application has not yet
+               called close(). > 100 sustained = the
+               application is leaking sockets (red — definite
+               bug).
+  SYN_SENT/RECV  connections still in the 3-way handshake.
+                 Persistent SYN_SENT = peer slow to ACK or
+                 unreachable.
+  FIN_WAIT1/2  graceful shutdown stages.
+  LAST_ACK / CLOSING  same.
+
+  Each state has a per-row trend sparkline so drift is visible
+  before the absolute count crosses a threshold.
+
+Listen sockets:
+  Recv-Q is the CURRENT accept-queue depth (not the maximum
+  configured by listen()). Sustained > 0 is the precursor to
+  listen-drop alerts: connections done with the 3-way handshake
+  but still waiting for the application to call accept().
+
+Per-interface bandwidth:
+  rx and tx in bytes/s plus sparklines. Loopback is skipped at
+  source. Saturating an interface's line rate (e.g. ~120 MB/s
+  on 1 Gbit, ~1.2 GB/s on 10 Gbit) caps total response
+  throughput; the URLs panel will show every handler queueing.
+
+Keys:
+  + / -    grow / shrink sparkline height (1-6 rows)
+  e / E    export connection-state distribution as CSV / JSON
+"""
 
     def __init__(self) -> None:
         # Spark height for the per-NIC + per-state rows. 2 rows

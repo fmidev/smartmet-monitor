@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.27
-Release:        10%{?dist}.fmi
+Release:        11%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -112,6 +112,22 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-11.fmi
+- Context-aware help. `?` (or F1) still toggles the help
+  overlay, but it now renders the active panel's contextual
+  help FIRST — what every section / metric / sparkline on
+  THAT panel actually measures — before the global keys
+  reference. The help text is carried by each panel as a
+  new `panel_help` class attribute; panels that have not yet
+  defined one fall through gracefully ("no contextual help
+  written yet"). Initial coverage: Flame, Proc, and Network
+  panels — the three densest, most perf-loaded views where
+  "what is this number?" comes up most often. Other panels
+  (URLs, Caches, Services, Apikeys, Active, Logs, Overview,
+  Graphs) are covered by the existing keys table for now;
+  contextual help can be backfilled gradually without
+  changing any code outside the panels themselves.
+
 * Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-10.fmi
 - Per-PID CPU usage in the Proc panel header. /proc/PID/stat
   fields 14 (utime) and 15 (stime) sampled on every poll cycle;

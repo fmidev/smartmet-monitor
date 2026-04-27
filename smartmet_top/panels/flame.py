@@ -176,6 +176,58 @@ class FlamePanel(Panel):
         "(blocked), L locks, M memory faults, W wakeup, I block-I/O, "
         "A allocations (dev-only, --malloc-flame). Requires --perf."
     )
+    panel_help = """\
+A flamegraph stacks function calls vertically: the bottom row is the
+program's entry point and each row above is a function called by the
+row below. Frame WIDTH is what each mode measures — wider = more time
+or more events in that path. Press the mode keys to switch what is
+being measured:
+
+C  on-CPU         where the CPU is going. Each sample is the call
+                  stack at the moment of a 99 Hz timer tick.
+                  Wide frames = functions actually running on a CPU.
+
+B  off-CPU        where threads are BLOCKED. Each sample is one
+                  context-switch out, weighted by µs blocked.
+                  Wide frames = functions where threads spend most
+                  of their NOT-running time. Read this when
+                  on-CPU is healthy but request latency is up.
+
+L  off-CPU (locks) the off-CPU view filtered to leaves that look
+                  like lock waits (futex_*, pthread_mutex_*, etc).
+                  Ranks the worst contention points by total wait
+                  time. The natural follow-up to B.
+
+M  page-faults    where in code smartmetd touches cold pages.
+                  Each sample is one major fault — a synchronous
+                  read from disk. Pairs with the page-fault
+                  sparkline in the Proc panel.
+
+W  wakeup         who is doing the unblocking. Dual of B/L:
+                  off-CPU shows the lock-WAITER, wakeup shows the
+                  lock-HOLDER. Walk between them to find a
+                  contention pair.
+
+I  block-I/O      where smartmetd issues block requests. Catches
+                  every read/write/fsync, not just the ones routed
+                  through page-cache misses. Pairs with the
+                  Block I/O latency sparkline in the Proc panel.
+
+A  allocations    (DEV-ONLY) bpftrace uprobe on malloc(); each
+                  sample is one allocation, weighted by bytes.
+                  Uses jemalloc / mimalloc / glibc auto-detected.
+                  Off by default; pass --malloc-flame to enable.
+
+Navigation: ↑↓←→ move the cursor frame. Enter zooms IN (the
+selected frame becomes the new visible root). Esc / u zoom out one
+level. 0 / Home reset to the full root. n / N switch the focused
+smartmetd PID; backend processes are preferred over frontend by
+default.
+
+The bottom of the panel carries the "Top X functions" list —
+re-skinned per mode (top symbols / blocked-on / contended locks /
+fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
+"""
 
     def __init__(self) -> None:
         # Currently-zoomed root: empty tuple = whole tree.

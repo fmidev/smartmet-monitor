@@ -88,7 +88,10 @@ class App:
             LogsPanel(),
             KeysPanel(),
         ]
-        self.help_panel = HelpPanel()
+        # HelpPanel needs the App back-reference so it can render the
+        # contextual help of whichever panel was active when ? was
+        # pressed. We pass self after self.panels is populated.
+        self.help_panel = HelpPanel(self)
         self.panel_idx = 0  # default: Live composite (Graphs + URLs)
         self.show_help = False
         self.running = True

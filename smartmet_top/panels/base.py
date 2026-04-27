@@ -19,6 +19,13 @@ class Panel:
     hotkey: str = "?"
     mnemonic_pos: int = 0
     help_text: str = ""
+    # Multi-line contextual help shown by HelpPanel when the operator
+    # presses `?` while this panel is active. Format: paragraphs
+    # separated by blank lines; first line of each section can be a
+    # heading by ending with `:`. Useful for panels showing several
+    # different metrics where each metric needs its own explanation
+    # (the perf-related panels are the primary use case).
+    panel_help: str = ""
 
     def draw(self, win, store) -> None:  # pragma: no cover
         raise NotImplementedError

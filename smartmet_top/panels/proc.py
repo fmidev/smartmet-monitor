@@ -261,6 +261,77 @@ class ProcPanel(Panel):
         "flamegraph). n/N next/prev PID, r smaps_rollup, "
         "f flamegraph toggle, +/- adjust sparkline height."
     )
+    panel_help = """\
+Sections, top → bottom:
+
+Memory:
+  RSS    total resident-set size (file-mapped + anon + shmem).
+  File   file-backed pages (memory-mapped QueryData files etc).
+         A drop here during a fault storm = page-cache eviction.
+  Anon   anonymous (heap) pages — what malloc returns from.
+  Shmem  shared memory.
+  VmSize total virtual address space; VmPTE page-table size;
+  Swap   bytes swapped out (red when > 0 — production should
+         never swap); HWM peak RSS since process start.
+
+I/O:
+  R / W   bytes/s read / written via /proc/PID/io. Includes
+          page-cache reads — not exactly "disk traffic" but the
+          best per-PID number /proc exposes.
+  FDs     open file descriptors.
+
+Page faults (major):
+  Synchronous reads from disk because a page wasn't in RAM.
+  Sustained > 100/s = working set exceeds page cache. Killer
+  signal for SmartMet's mmapped QueryData. See the matching
+  Page-fault flame mode (M) for "where in code".
+
+Page cache + reclaim (host):
+  cache  Cached + Buffers as % of MemTotal.
+  sys-majflt    host-wide major-fault rate (complements the
+                per-PID one above; catches faults from any
+                process).
+  kswapd        background reclaim — silent and healthy.
+  direct        DIRECT reclaim — application thread had to
+                free pages itself before its malloc could
+                return. Sparklined in red because any
+                positive sustained value is bad.
+
+Block I/O latency (host):
+  p50/p95/p99   from biolatency-bpfcc; weighted by IOPS.
+  Multi-ms p95 = storage saturation.
+
+Run-queue latency (host):
+  p50/p95/p99 of "ready-but-not-running" wait time from
+  runqlat-bpfcc. p95 ≥ 1 ms means the scheduler is the
+  bottleneck — usually CFS quota throttling or noisy-neighbour
+  VM. Critical on virtualised hosts.
+
+CPU efficiency (perf stat):
+  IPC          instructions per cycle for the focused PID.
+               <0.3 = memory-stalled; ≥1.0 = healthy.
+  cache-miss   LLC miss rate. >30% = working set exceeds L3.
+  branch-miss  >5% = unpredictable hot-loop branches.
+
+Network (host):
+  Compact summary of TCP retransmits, listen drops + the
+  busiest rx/tx NIC pair. The dedicated Network panel (n)
+  carries the full detail.
+
+Perf top / Flamegraph (with --perf):
+  f toggles between perf-top symbol list and an inline
+  flamegraph for the focused PID. Either way, the dedicated
+  Flame view (mnemonic f at panel level) is a fuller renderer.
+
+Keys:
+  n / N      next / prev smartmetd PID
+  1 - 9      jump to PID by index in the selector
+  r          read /proc/PID/smaps_rollup (expensive — runs
+             only when pressed)
+  f          toggle inline flame ↔ perf-top
+  + / -      grow / shrink sparkline height (1-6 rows)
+  e / E      export panel as CSV / JSON
+"""
 
     # Sparkline height bounds. Default 2 elevates the data density of
     # the per-section rate and percentile graphs above the bottom-of-
