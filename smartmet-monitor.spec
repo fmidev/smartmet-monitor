@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.27
-Release:        3%{?dist}.fmi
+Release:        4%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -112,6 +112,31 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-4.fmi
+- Two new flame modes: page-fault and off-CPU (locks). The Flame
+  view's `o` key now cycles through four modes:
+    on-CPU → off-CPU → off-CPU (locks) → page-faults → on-CPU
+- New page-fault sampler (sources/pagefault.py) runs
+  `perf record -e major-faults -c 1 -ag -p PID -- sleep N` and
+  pushes stacks into a parallel ring on the Store. Each sample is
+  one synchronous block read — the flame's frame width measures
+  fault count per function. Pure perf, auto-starts alongside the
+  on-CPU sampler when --perf is set; same access requirements,
+  no bcc dependency.
+- Off-CPU (locks) is a filter on top of the existing off-CPU
+  recorder. Stacks whose leaf matches a known lock-wait symbol
+  (futex_*, pthread_mutex_*, pthread_cond_*, pthread_rwlock_*,
+  pthread_spin_*, __lll_*) are kept; everything else is dropped.
+  Ranks contention points by total wait time using the off-CPU
+  recorder's existing microsecond weighting.
+- The "Top X functions" list at the bottom of the Flame view
+  shifts to match the active mode: top blocked-on functions for
+  off-CPU, top contended locks for off-CPU (locks), top
+  fault-causing functions for page-faults.
+- README "Reading the live monitors" gains a Page-fault
+  flamegraph entry and the off-CPU entry now mentions the
+  locks-only filter as the natural follow-up.
+
 * Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-3.fmi
 - Proc panel sparklines are now multi-row Braille charts by
   default (height = 2). The metric rates and percentile graphs

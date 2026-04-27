@@ -528,6 +528,14 @@ class Store:
         # `!`-overlay) reads from it on every redraw. See state/alerts.py
         # for the full lifecycle description.
         self.alerts: Dict[str, Alert] = {}
+        # Major page-fault stack sampler — perf record -e major-faults.
+        # Same shape as perfdata: per-PID dict, each entry holding a
+        # bounded ring of recent stacks. Stacks are unweighted (one
+        # sample = one fault), so the flame tree builder just counts.
+        self.pagefault_data: Dict[int, "PerfData"] = {}
+        self.pagefault_enabled: bool = False
+        self.pagefault_status: str = "(page-fault sampler not started)"
+        self.pagefault_last_error: str = ""
         # Page-cache and memory-reclaim stats from /proc/vmstat +
         # /proc/meminfo. Always-on; no external tools required.
         # Each entry: (ts, majflt_rate, kswapd_rate, direct_rate,
@@ -910,6 +918,39 @@ class Store:
         with self._lock:
             od = self.offcpu_data.get(pid)
             return od.last_total_us if od else 0
+
+    # -- page-fault flame data ---------------------------------------------
+
+    def pagefault_record_samples(self, pid: int, ts: float,
+                                 stacks) -> None:
+        """Append a batch of major-fault stacks to the per-PID ring.
+        Each stack counts as one sample (one major fault); the flame
+        view weights frames by occurrence."""
+        with self._lock:
+            pd = self.pagefault_data.get(pid)
+            if pd is None:
+                pd = PerfData(pid=pid)
+                self.pagefault_data[pid] = pd
+            n = 0
+            for stack in stacks:
+                if not stack:
+                    continue
+                pd.recent_stacks.append(stack)
+                n += 1
+            pd.last_sample_ts = ts
+            pd.last_sample_count = n
+
+    def pagefault_recent_stacks(self, pid: int):
+        with self._lock:
+            pd = self.pagefault_data.get(pid)
+            if pd is None:
+                return []
+            return list(pd.recent_stacks)
+
+    def pagefault_last_sample_count(self, pid: int) -> int:
+        with self._lock:
+            pd = self.pagefault_data.get(pid)
+            return pd.last_sample_count if pd else 0
 
     # -- block-I/O latency --------------------------------------------------
 

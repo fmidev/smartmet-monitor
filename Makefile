@@ -166,7 +166,15 @@ check:
 	    [_st2.netstats_record_iface(0.0+i, "eth0", 5_000_000, 9_000_000) for i in range(15)]; \
 	    [_st2.netstats_record_iface(0.0+i, "lo", 50_000, 50_000) for i in range(15)]; \
 	    picks2 = ProcPanel._pick_busiest_ifaces(_st2, ["eth0","lo"]); \
-	    assert picks2 == [("busiest","eth0")], picks2'
+	    assert picks2 == [("busiest","eth0")], picks2; \
+	    import smartmet_top.sources.pagefault; \
+	    from smartmet_top.panels.flame import _is_lock_stack, _MODE_CYCLE; \
+	    assert _MODE_CYCLE == ("on-cpu","off-cpu","off-cpu-locks","pagefault"); \
+	    assert _is_lock_stack(("smartmetd","main","pthread_mutex_lock")); \
+	    assert _is_lock_stack(("smartmetd","worker","__lll_lock_wait")); \
+	    assert _is_lock_stack(("smartmetd","poll","futex_wait_queue_me")); \
+	    assert not _is_lock_stack(("smartmetd","main","io_schedule")); \
+	    assert not _is_lock_stack(())'
 	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
 	bash -n share/smartmet/bstat.sh
 	for t in $(BTOOLS) $(LEGACY); do bash -n bin/$$t; done

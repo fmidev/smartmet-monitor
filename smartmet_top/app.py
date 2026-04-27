@@ -28,6 +28,7 @@ from .sources.adminapi import poll_all
 from .sources.logtail import bulk_load, tail_many
 from .sources.perftop import perf_loop
 from .sources.offcpu import offcpu_loop
+from .sources.pagefault import pagefault_loop
 from .sources.biolat import biolat_loop
 from .sources.netstats import netstats_loop
 from .sources.runqlat import runqlat_loop
@@ -390,6 +391,14 @@ class App:
             tasks.append(asyncio.create_task(
                 offcpu_loop(self.store, self.perf_interval,
                             self.perf_record_seconds)
+            ))
+            # Page-fault flamegraph sampler. Pure perf, low frequency
+            # (events fire only when smartmetd actually faults), so
+            # the duty-cycle cost is negligible compared to the
+            # on-CPU sampler.
+            tasks.append(asyncio.create_task(
+                pagefault_loop(self.store, self.perf_interval,
+                               self.perf_record_seconds)
             ))
             # Block-I/O latency. Host-wide; biolatency-bpfcc blocks for
             # its measurement window so the loop self-paces — no extra

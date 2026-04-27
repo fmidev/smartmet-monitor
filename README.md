@@ -234,17 +234,31 @@ direction; the dedicated single-panel views below remain for sortable
    restarting smtop. The lower portion of the screen carries the
    perf-top symbol list so nothing is wasted on shallow stacks.
 
-   Press **`o`** to toggle between the on-CPU flamegraph (default)
-   and a parallel **off-CPU** flamegraph that shows where threads
-   are blocked: futex / mutex waits, I/O, sleeps. Off-CPU stacks
-   come from `bcc-tools`' `offcputime-bpfcc -p PID -f SECS`,
-   weighted by microseconds-blocked per stack. The Flame view
+   Press **`o`** to cycle through four flame modes:
+
+   - **on-CPU** (default) — sampled at 99 Hz via `perf record`.
+     Where the CPU is going.
+   - **off-CPU** — every thread descheduled, weighted by µs
+     blocked, via `bcc-tools`' `offcputime-bpfcc`. Where threads
+     are stuck (I/O, sleeps, lock waits, anything).
+   - **off-CPU (locks)** — same off-CPU data filtered to leaves
+     that look like lock waits (`futex_*`, `pthread_mutex_*`,
+     `pthread_cond_*`, `pthread_rwlock_*`, `pthread_spin_*`,
+     `__lll_*`). Ranks the worst contention points by total
+     wait time.
+   - **page-faults** — every major page fault on this PID gets
+     a stack via `perf record -e major-faults`. Shows *where*
+     in the codebase smartmetd hits cold pages — pairs with
+     the page-fault sparkline in the Proc panel: when that
+     spikes, this flame names the function that caused the spike.
+
+   The "Top X functions" list at the bottom of the panel shifts
+   to match the active mode (top blocked-on functions, top
+   contended locks, top fault-causing functions). The Flame view
    surfaces an install hint inline when `bcc-tools` is missing
-   (`sudo dnf install bcc-tools` on RHEL 8 / Fedora). The "Top
-   blocked-on functions" list at the bottom of the panel
-   replaces the on-CPU top-symbols list when in this mode. This
-   is the canonical answer to "the request is slow but on-CPU
-   shows nothing".
+   (`sudo dnf install bcc-tools` on RHEL 8 / Fedora); on-CPU and
+   page-fault modes need only `perf`, which is already a
+   Recommends.
 
    ![Flame view: live flamegraph for smartmetd plus perf-top symbol list](doc/images/monitor_flame.png)
 
@@ -620,7 +634,52 @@ the off-CPU work funnels through; the page-fault and
 block-I/O panels if the off-CPU stacks point at storage; the
 URLs panel for which handlers correlate with the off-CPU
 spike — those are the operations actually being held off
-CPU.
+CPU. Press `o` again to land in **off-CPU (locks)** which
+filters the same data to mutex / futex / cond stacks only —
+when the operator question is specifically "where is my
+contention?", the lock-only view is faster to read.
+
+#### Page-fault flamegraph (Flame view, `o` cycle, `pagefault` mode)
+
+**What it measures.** Stacks at every major page fault on the
+focused smartmetd PID, captured via `perf record -e
+major-faults -c 1 -ag`. Each sample is one synchronous block
+read; the flame's frame width measures fault count per
+function.
+
+**Detects.** Which code path is hitting cold pages. The
+Proc panel's page-fault sparkline tells you *that* a fault
+storm is happening; this flame names *where* in the codebase.
+Together they make the diagnosis — sparkline says "200/s
+right now", the flame says "all of them under
+`Engine::QueryData::loadVolume → mmap_read_page`".
+
+**Likely causes when one stack dominates.**
+- A plugin entered a code path that touches a previously
+  unread mmapped file — broad parameter enumeration, fresh
+  request after a model publish.
+- A producer just rolled in new files large enough to evict
+  the previous working set.
+- A serialization path that copies between mappings — those
+  copies generate faults on first read of each source page.
+
+**Healthy shape.** Empty or near-empty tree on a steady-state
+server. Bursts of activity tied to model-publish boundaries
+are normal at the moment of publish; sustained activity is not.
+
+**Trouble shape.** A tall narrow stack rooted in one function
+under steady traffic — that function is a fault funnel. Or a
+broad shallow tree that grows during a request burst — many
+functions touching cold pages, classic "working set fell out
+of cache".
+
+**What to look at next.** Cross-check the page-fault rate
+sparkline in the Proc panel — if both views point at the same
+moment, the diagnosis is conclusive. Then consider whether
+the offending function can be:
+- Avoided (caching the result somewhere upstream).
+- Pre-warmed (background touch of pages before request time).
+- Refactored to read fewer or smaller files.
 
 #### CPU efficiency — IPC + cache & branch miss rates (Proc panel)
 

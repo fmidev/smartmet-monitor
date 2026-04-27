@@ -43,6 +43,42 @@ from .proc import _build_flame_tree, _flame_color, draw_pid_selector
 PERF_SECONDS_PRESETS = (1, 3, 5, 10, 20, 30)
 
 
+# Flame view mode cycle. `o` walks this list. The order matches the
+# typical operator workflow: see what's running first, then where it
+# is blocked, then narrow to lock contention, then switch to memory
+# faults — each mode answers a more specific question than the last.
+_MODE_CYCLE = ("on-cpu", "off-cpu", "off-cpu-locks", "pagefault")
+
+
+# Substring patterns that mark a stack leaf as lock-related. Used by
+# the off-cpu-locks filter. We match on substring rather than equality
+# because glibc / pthreads frame names vary across kernels and libc
+# versions (`__pthread_mutex_lock` vs `pthread_mutex_lock` vs
+# `__lll_lock_wait`, etc.); the substrings here cover all the common
+# spellings.
+_LOCK_LEAF_PATTERNS = (
+    "futex_wait", "futex_q", "do_futex",        # kernel
+    "__lll_lock", "__lll_unlock",                # glibc low-level lock
+    "pthread_mutex", "pthread_cond",
+    "pthread_rwlock", "pthread_spin",
+    "__pthread_mutex", "__pthread_cond",
+)
+
+
+def _is_lock_stack(stack) -> bool:
+    """True when the stack's leaf frame looks like a lock wait.
+
+    Used to filter the off-CPU stack ring down to mutex/futex/cond
+    contention only. Walking just the leaf is intentional: the *kind*
+    of off-CPU event is determined by the kernel function the thread
+    parked in, and that's always the leaf.
+    """
+    if not stack:
+        return False
+    leaf = stack[-1]
+    return any(p in leaf for p in _LOCK_LEAF_PATTERNS)
+
+
 # ---- pure helpers ----------------------------------------------------------
 
 def _subtree_at(root: Dict[str, list],
@@ -132,7 +168,8 @@ class FlamePanel(Panel):
     help_text = (
         "Live flamegraph for the focused smartmetd PID. "
         "↑↓←→ navigate, Enter zoom in, Esc/u zoom out, 0 reset zoom, "
-        "n/N next/prev PID. Requires --perf."
+        "n/N next/prev PID, o cycles on-CPU → off-CPU → off-CPU "
+        "(locks) → page-faults. Requires --perf."
     )
 
     def __init__(self) -> None:
@@ -149,10 +186,16 @@ class FlamePanel(Panel):
         # `s`-keyed record-duration selection overlay state.
         self._seconds_menu_open: bool = False
         self._seconds_menu_idx: int = 0
-        # `o` toggles between on-CPU (default) and off-CPU views. State
-        # is per-panel so switching to another view and back doesn't
-        # jump back to on-CPU unexpectedly.
-        self.mode: str = "on-cpu"  # 'on-cpu' | 'off-cpu'
+        # `o` cycles through four modes:
+        #   on-cpu          — perf record -F 99 -ag (default)
+        #   off-cpu         — bcc-tools' offcputime, weighted by us-blocked
+        #   off-cpu-locks   — same data filtered to lock-related leaves
+        #                     (futex_*, pthread_mutex/cond/rwlock/spin)
+        #   pagefault       — perf record -e major-faults, where in code
+        #                     are the page-cache misses landing
+        # State is per-panel so switching to another view and back
+        # does not jump back to on-CPU unexpectedly.
+        self.mode: str = "on-cpu"
 
     # ---- key handling ------------------------------------------------------
 
@@ -192,11 +235,14 @@ class FlamePanel(Panel):
             self._open_seconds_menu(store)
             return True
 
-        # `o` toggles between on-CPU and off-CPU. Reset cursor and zoom
-        # because the two views have completely different stack sets;
-        # carrying the path across modes leads to "no selection" states.
+        # `o` cycles through the four flame modes. Reset cursor and
+        # zoom on every change because each mode has a completely
+        # different stack set; carrying the path across modes lands
+        # the operator in a "no selection" state immediately.
         if key == ord("o"):
-            self.mode = "off-cpu" if self.mode == "on-cpu" else "on-cpu"
+            self.mode = _MODE_CYCLE[
+                (_MODE_CYCLE.index(self.mode) + 1) % len(_MODE_CYCLE)
+            ]
             self.zoom_path = ()
             self.cursor_path = ()
             self._last_root = {}
@@ -397,6 +443,21 @@ class FlamePanel(Panel):
                 f"status={store.offcpu_status}  "
                 f"last_off={ms} ms  zoom={breadcrumb}"
             )
+        elif self.mode == "off-cpu-locks":
+            total_us = store.offcpu_last_total_us(info.pid)
+            ms = total_us // 1000
+            header = (
+                f" Flame off-CPU (locks only) — pid={info.pid}  "
+                f"status={store.offcpu_status}  "
+                f"last_off={ms} ms  zoom={breadcrumb}"
+            )
+        elif self.mode == "pagefault":
+            sample_count = store.pagefault_last_sample_count(info.pid)
+            header = (
+                f" Flame page-faults — pid={info.pid}  "
+                f"status={store.pagefault_status}  "
+                f"last={sample_count} faults  zoom={breadcrumb}"
+            )
         else:
             sample_count = store.perf_last_sample_count(info.pid)
             header = (
@@ -412,8 +473,10 @@ class FlamePanel(Panel):
         bottom row index it used so the top-symbols list knows where
         to start."""
         h, w = win.getmaxyx()
-        if self.mode == "off-cpu":
+        if self.mode in ("off-cpu", "off-cpu-locks"):
             return self._draw_off_cpu_flame(win, store, info, top)
+        if self.mode == "pagefault":
+            return self._draw_pagefault_flame(win, store, info, top)
         # If a previous cycle failed, surface that in place of the flame.
         if store.perf_last_error:
             self._draw_perf_error(win, top, h - 2, store.perf_last_error)
@@ -496,14 +559,96 @@ class FlamePanel(Panel):
             self._last_root = {}
             return h - 2
         weighted = store.offcpu_recent_stacks(info.pid)
+        if self.mode == "off-cpu-locks":
+            # Filter to stacks whose leaf is a known lock-wait symbol.
+            # Keeps the off-CPU recorder's wait-time weighting intact
+            # so the flame still measures milliseconds-blocked, but
+            # restricted to mutex / futex / cond / rwlock / spin
+            # entries — answers "where am I sleeping on a lock?"
+            # specifically.
+            weighted = [(s, w) for s, w in weighted if _is_lock_stack(s)]
         if not weighted:
-            safe_addstr(win, top, 2,
-                        "no off-CPU samples yet — waiting for first cycle…",
-                        theme.attr(theme.P_DIM))
+            empty_msg = ("no off-CPU samples yet — waiting for first cycle…"
+                         if self.mode == "off-cpu"
+                         else "no lock-wait stacks in the retained ring")
+            safe_addstr(win, top, 2, empty_msg, theme.attr(theme.P_DIM))
             self._last_frames = []
             self._last_root = {}
             return top + 1
         full_root = _build_flame_tree(weighted)
+        self._last_root = full_root
+        if self.zoom_path:
+            visible_root = _subtree_at(full_root, self.zoom_path)
+            if visible_root is None or not visible_root:
+                while self.zoom_path:
+                    self.zoom_path = self.zoom_path[:-1]
+                    visible_root = (_subtree_at(full_root, self.zoom_path)
+                                    if self.zoom_path else full_root)
+                    if visible_root:
+                        break
+                if not visible_root:
+                    visible_root = full_root
+        else:
+            visible_root = full_root
+        flame_top = top
+        flame_max_y = max(flame_top + 2, h - 12)
+        self._ensure_cursor()
+        frames = _render_flame(
+            win, flame_top, flame_max_y, 0, w - 1,
+            visible_root, self.zoom_path, self.cursor_path,
+        )
+        self._last_frames = frames
+        if not self._frame_at(self.cursor_path):
+            self._ensure_cursor()
+            target = self._frame_at(self.cursor_path)
+            if target is not None:
+                y, xs, xe, sym, _cnt, _path = target
+                cw = xe - xs
+                label = sym[:cw] if len(sym) > cw else sym + " " * (cw - len(sym))
+                safe_addstr(win, y, xs, label,
+                            theme.attr(theme.P_HIGHLIGHT,
+                                       curses.A_BOLD | curses.A_UNDERLINE))
+        bottom = _max_depth(frames) if frames else flame_top
+        return bottom + 1
+
+    def _draw_pagefault_flame(self, win, store, info: ProcInfo,
+                              top: int) -> int:
+        """Page-fault flame: where in code does smartmetd touch cold pages?
+
+        Each sample is one major fault — a synchronous read from disk
+        — so the flame width measures fault count per stack. The most
+        useful pairing is with the per-PID page-fault sparkline in the
+        Proc panel: when that sparkline spikes, this flame names the
+        function that caused the spike.
+        """
+        h, w = win.getmaxyx()
+        if not store.pagefault_enabled:
+            safe_addstr(win, top, 2,
+                        "page-fault flame needs --perf",
+                        theme.attr(theme.P_BAD, curses.A_BOLD))
+            safe_addstr(win, top + 1, 2,
+                        "Same perf access as the on-CPU sampler. "
+                        "Press 'o' to switch back.",
+                        theme.attr(theme.P_DIM))
+            self._last_frames = []
+            self._last_root = {}
+            return min(top + 4, h - 2)
+        if store.pagefault_last_error:
+            self._draw_perf_error(win, top, h - 2,
+                                  store.pagefault_last_error)
+            self._last_frames = []
+            self._last_root = {}
+            return h - 2
+        stacks = store.pagefault_recent_stacks(info.pid)
+        if not stacks:
+            safe_addstr(win, top, 2,
+                        "no page-fault samples yet — waiting for first "
+                        "fault on this PID…",
+                        theme.attr(theme.P_DIM))
+            self._last_frames = []
+            self._last_root = {}
+            return top + 1
+        full_root = _build_flame_tree(stacks)
         self._last_root = full_root
         if self.zoom_path:
             visible_root = _subtree_at(full_root, self.zoom_path)
@@ -564,8 +709,12 @@ class FlamePanel(Panel):
         h, w = win.getmaxyx()
         if start_row >= h - 2:
             return
-        if self.mode == "off-cpu":
-            self._draw_top_off_cpu_leaves(win, store, info, start_row)
+        if self.mode in ("off-cpu", "off-cpu-locks"):
+            self._draw_top_off_cpu_leaves(win, store, info, start_row,
+                                          locks_only=(self.mode == "off-cpu-locks"))
+            return
+        if self.mode == "pagefault":
+            self._draw_top_pagefault_leaves(win, store, info, start_row)
             return
         # Divider
         safe_addstr(win, start_row, 0,
@@ -601,25 +750,32 @@ class FlamePanel(Panel):
                             theme.attr(theme.P_SPARK))
 
     def _draw_top_off_cpu_leaves(self, win, store, info: ProcInfo,
-                                 start_row: int) -> None:
+                                 start_row: int,
+                                 locks_only: bool = False) -> None:
         """Top blocked-on functions = leaf-symbol weights summed across
-        the off-CPU stack ring. Per-minute history isn't tracked for
-        off-CPU (not yet) so the row carries time-blocked instead of a
-        sparkline."""
+        the off-CPU stack ring. With locks_only=True the input is
+        filtered to lock-related leaves so the list ranks the
+        contention points by total wait time. Per-minute history isn't
+        tracked for off-CPU (not yet) so the row carries time-blocked
+        instead of a sparkline."""
         h, w = win.getmaxyx()
+        title = ("Top contended locks (retained ring)" if locks_only
+                 else "Top blocked-on functions (off-CPU, retained ring)")
         safe_addstr(win, start_row, 0,
-                    "─ Top blocked-on functions (off-CPU, retained ring) "
-                    + "─" * max(0, w - 53),
+                    f"─ {title} "
+                    + "─" * max(0, w - len(title) - 3),
                     theme.attr(theme.P_DIM))
         body_top = start_row + 1
         avail = h - body_top - 1
         if avail < 1:
             return
         weighted = store.offcpu_recent_stacks(info.pid)
+        if locks_only:
+            weighted = [(s, us) for s, us in weighted if _is_lock_stack(s)]
         if not weighted:
-            safe_addstr(win, body_top, 2,
-                        "no off-CPU samples yet",
-                        theme.attr(theme.P_DIM))
+            msg = ("no lock-wait stacks in the retained ring"
+                   if locks_only else "no off-CPU samples yet")
+            safe_addstr(win, body_top, 2, msg, theme.attr(theme.P_DIM))
             return
         # Aggregate microseconds-blocked per leaf symbol.
         leaf_us: Dict[str, int] = {}
@@ -643,6 +799,51 @@ class FlamePanel(Panel):
             cells = [
                 (f"  {pct:>5.1f}%  ", theme.attr(theme.P_HEADER)),
                 (f"{ms:>10.1f} ms  ", theme.attr(theme.P_ACCENT)),
+                (label, 0),
+            ]
+            write_row(win, y, 0, cells)
+
+    def _draw_top_pagefault_leaves(self, win, store, info: ProcInfo,
+                                   start_row: int) -> None:
+        """Top fault-causing functions: leaf-symbol counts summed across
+        the page-fault stack ring. Each sample is one major fault, so
+        the percentages express the fraction of recent faults each
+        function caused."""
+        h, w = win.getmaxyx()
+        safe_addstr(win, start_row, 0,
+                    "─ Top fault-causing functions (page-fault flame) "
+                    + "─" * max(0, w - 51),
+                    theme.attr(theme.P_DIM))
+        body_top = start_row + 1
+        avail = h - body_top - 1
+        if avail < 1:
+            return
+        stacks = store.pagefault_recent_stacks(info.pid)
+        if not stacks:
+            safe_addstr(win, body_top, 2,
+                        "no page-fault samples yet",
+                        theme.attr(theme.P_DIM))
+            return
+        leaf_count: Dict[str, int] = {}
+        total = 0
+        for stack in stacks:
+            if not stack:
+                continue
+            leaf = stack[-1]
+            leaf_count[leaf] = leaf_count.get(leaf, 0) + 1
+            total += 1
+        if total <= 0:
+            return
+        rows = sorted(leaf_count.items(), key=lambda kv: -kv[1])[:avail]
+        for i, (sym, n) in enumerate(rows):
+            y = body_top + i
+            if y >= h - 1:
+                break
+            pct = n / total * 100
+            label = sym[:max(0, w - 26)]
+            cells = [
+                (f"  {pct:>5.1f}%  ", theme.attr(theme.P_HEADER)),
+                (f"{n:>6} faults  ", theme.attr(theme.P_ACCENT)),
                 (label, 0),
             ]
             write_row(win, y, 0, cells)
@@ -679,7 +880,7 @@ class FlamePanel(Panel):
         x = write_label(win, h - 1, x, "s", 0, base, hot)
         x = write_label(win, h - 1, x, " seconds  ", 0, base, base)
         x = write_label(win, h - 1, x, "o", 0, base, hot)
-        x = write_label(win, h - 1, x, " on/off-CPU", 0, base, base)
+        x = write_label(win, h - 1, x, f" mode={self.mode}", 0, base, base)
         if n_procs > 1:
             x = write_label(win, h - 1, x, "  ", 0, base, base)
             x = write_label(win, h - 1, x, "n", 0, base, hot)
