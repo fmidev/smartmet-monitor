@@ -267,6 +267,12 @@ def _update_service_history(history, rows, ts: float) -> None:
                 "req_per_hour": _to_float(r.get("LastHour")),
                 "req_per_day": _to_float(r.get("Last24Hours")),
                 "avg_ms": _to_float(r.get("AverageDuration")),
+                # AverageCPUMs is added by spine 26.4.27+. Older
+                # spine versions silently omit the field; we read 0
+                # in that case and the panel renders "—" so the
+                # operator can tell the spine on the host has not
+                # been upgraded yet.
+                "avg_cpu_ms": _to_float(r.get("AverageCPUMs")),
             },
         )
     history.prune(names)

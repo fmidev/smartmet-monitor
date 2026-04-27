@@ -38,9 +38,21 @@ Columns:
   last24h   — requests in the last day. Long-term baseline.
   avg_ms    — wall-clock mean duration over the rolling
               window (which window depends on spine version
-              but is typically the last 1 h). Per-request CPU
-              time is not yet exposed by spine; that work is
-              tracked separately.
+              but is typically the last 1 h).
+  cpu%      — fraction of avg_ms the handler spent ON CPU
+              (the rest was off-CPU: lock waits, I/O,
+              upstream calls). Computed from the
+              AverageCPUMs field added in spine 26.4.27. The
+              cell is coloured by ratio:
+                green  ≥ 50%  CPU-bound; the on-CPU flame is
+                              the next stop.
+                blue   ≤ 10%  wait-bound; open the off-CPU
+                              flame to see what it is
+                              waiting on.
+                neutral 10-50% mixed.
+                "—"          spine on this host is older than
+                              26.4.27 — upgrade to read this
+                              column.
   trend     — Braille sparkline of req/min over the recent
               admin-poll history. Same width and sample
               cadence as the Caches panel.
@@ -80,7 +92,7 @@ Keys:
 
     def export_snapshot(self, store):
         headers = ["host", "handler", "req_per_min", "req_per_hour",
-                   "req_per_day", "avg_ms"]
+                   "req_per_day", "avg_ms", "avg_cpu_ms"]
         rows = []
         for host in store.admin_hosts:
             snap = store.servicestats.get(host)
@@ -94,6 +106,7 @@ Keys:
                     _f(r.get("LastHour")),
                     _f(r.get("Last24Hours")),
                     _f(r.get("AverageDuration")),
+                    _f(r.get("AverageCPUMs")),
                 ])
         return headers, rows
 
@@ -140,16 +153,16 @@ Keys:
         host_col = 18 if multi else 0
         # Layout math: fixed columns on the left, then the bar absorbs
         # whatever's left (after reserving 20 cols for the trend spark).
-        # Without this, on a 140-col terminal the previous fixed-25 bar
-        # left ~15 cols of whitespace and crushed bars for low-traffic
-        # handlers down to nothing.
-        fixed_left = (host_col + 1 if multi else 0) + 80
+        # The new cpu% column is 6 chars wide — a percentage with one
+        # decimal plus a trailing space.
+        fixed_left = (host_col + 1 if multi else 0) + 86
         trend_w = 20
         bar_w = max(10, w - fixed_left - trend_w - 4)
         hdr_line = (
             (f"{'host':<{host_col}} " if multi else "")
             + f"{'handler':<40} {'req/min':>8} {'req/h':>8} {'req/d':>10} "
-            f"{'avg_ms':>8}  {'last min':<{bar_w}}  {'trend':<{trend_w}}"
+            f"{'avg_ms':>8} {'cpu%':>5}  "
+            f"{'last min':<{bar_w}}  {'trend':<{trend_w}}"
         )
         safe_addstr(win, 2, 0, hdr_line, theme.attr(theme.P_HEADER, curses.A_BOLD))
         safe_addstr(win, 3, 0, "─" * (w - 1), theme.attr(theme.P_DIM))
@@ -187,6 +200,25 @@ Keys:
             m60 = _f(r.get("LastHour"))
             d24 = _f(r.get("Last24Hours"))
             avg = _f(r.get("AverageDuration"))
+            cpu = _f(r.get("AverageCPUMs"))
+            # cpu/wall ratio is the diagnostic: > 0.5 = CPU-bound
+            # (green; optimisation lives in the on-CPU flame), < 0.1
+            # = wait-bound (blue; off-CPU flame is the next stop),
+            # in-between is mixed. "—" when AverageCPUMs is absent
+            # (older spine) so the operator can see they need to
+            # upgrade to read the ratio.
+            if avg > 0 and cpu > 0:
+                cpu_ratio = cpu / avg
+                cpu_str = f"{cpu_ratio * 100:>4.0f}%"
+                if cpu_ratio >= 0.5:
+                    cpu_attr = theme.attr(theme.P_GOOD)
+                elif cpu_ratio <= 0.1:
+                    cpu_attr = theme.attr(theme.P_SPARK)
+                else:
+                    cpu_attr = theme.attr(theme.P_HEADER)
+            else:
+                cpu_str = "   — "
+                cpu_attr = theme.attr(theme.P_DIM)
             y_top = body_top + i * per_service
             row_attr = curses.A_REVERSE if self.scroll + i == self.cursor else 0
             hist = store.service_history.get(host)
@@ -199,7 +231,8 @@ Keys:
                 (f"{int(m1):>8d} ", 0),
                 (f"{int(m60):>8d} ", 0),
                 (f"{int(d24):>10d} ", 0),
-                (f"{human_ms(avg):>8}  ", theme.latency_color(avg)),
+                (f"{human_ms(avg):>8} ", theme.latency_color(avg)),
+                (f"{cpu_str:>5}  ", cpu_attr),
                 (hbar(m1, mx1, bar_w), theme.attr(theme.P_SPARK)),
                 ("  ", 0),
             ]

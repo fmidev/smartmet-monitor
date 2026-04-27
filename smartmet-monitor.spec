@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.27
-Release:        12%{?dist}.fmi
+Release:        13%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -112,6 +112,23 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-13.fmi
+- Services panel gains a `cpu%` column showing the fraction
+  of avg_ms each handler spends ON CPU. Read from the
+  AverageCPUMs field added in spine 26.4.27-2.fmi. Coloured
+  by ratio: green ≥ 50% (CPU-bound, on-CPU flame is the
+  next stop), blue ≤ 10% (wait-bound, off-CPU flame), neutral
+  in between. Renders "—" when polling an older spine that
+  does not expose AverageCPUMs, so the operator can tell
+  the data is missing rather than zero.
+- adminapi parser, panel header / row layout, export_snapshot
+  CSV/JSON columns, and the panel_help section all updated
+  for the new column. The fixed-left columns block grew by
+  6 chars; on terminals at the lower end of the 80-col
+  threshold the bar column shrinks automatically per the
+  existing `bar_w = max(10, w - fixed_left - trend_w - 4)`
+  formula.
+
 * Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-12.fmi
 - panel_help backfilled across every remaining panel that
   previously showed only the keys table when `?` was pressed:
