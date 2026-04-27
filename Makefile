@@ -153,7 +153,20 @@ check:
 	    d = {"pgsteal_kswapd_normal": 100, "pgsteal_kswapd_dma32": 50, "pgsteal_direct": 7}; \
 	    assert _coalesce(d, "pgsteal_kswapd", "pgsteal_kswapd_normal") == 100; \
 	    assert _coalesce(d, "pgsteal_direct", "pgsteal_direct_normal") == 7; \
-	    assert _coalesce(d, "missing_key") == 0'
+	    assert _coalesce(d, "missing_key") == 0; \
+	    from smartmet_top.panels.proc import ProcPanel; \
+	    from smartmet_top.state.store import Store; \
+	    _st = Store(); \
+	    [_st.netstats_record_iface(0.0+i, "eth0", 5_000_000, 1_000_000) for i in range(15)]; \
+	    [_st.netstats_record_iface(0.0+i, "eth1", 100_000, 9_000_000) for i in range(15)]; \
+	    [_st.netstats_record_iface(0.0+i, "lo", 50_000, 50_000) for i in range(15)]; \
+	    picks = ProcPanel._pick_busiest_ifaces(_st, ["eth0","eth1","lo"]); \
+	    assert picks == [("rx-busy","eth0"),("tx-busy","eth1")], picks; \
+	    _st2 = Store(); \
+	    [_st2.netstats_record_iface(0.0+i, "eth0", 5_000_000, 9_000_000) for i in range(15)]; \
+	    [_st2.netstats_record_iface(0.0+i, "lo", 50_000, 50_000) for i in range(15)]; \
+	    picks2 = ProcPanel._pick_busiest_ifaces(_st2, ["eth0","lo"]); \
+	    assert picks2 == [("busiest","eth0")], picks2'
 	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
 	bash -n share/smartmet/bstat.sh
 	for t in $(BTOOLS) $(LEGACY); do bash -n bin/$$t; done

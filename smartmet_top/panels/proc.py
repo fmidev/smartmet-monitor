@@ -602,33 +602,83 @@ class ProcPanel(Panel):
             safe_addstr(win, row, x, sparkline(retrans, width=spark_w),
                         theme.attr(theme.P_SPARK))
         row += 1
-        # Per-interface rx/tx. One row per NIC; truncate after
-        # (h - row - 4) NICs so the perf section underneath still fits.
+        # Per-interface rx/tx. To keep the panel scannable on hosts
+        # with many NICs (think bonded interfaces + VLANs + tap
+        # devices on a shared backend), auto-select the busiest
+        # interface for INCOMING traffic and the busiest for
+        # OUTGOING traffic over a recent window. They are usually
+        # the same NIC; when they differ (e.g. NFS-bound rx on a
+        # storage VLAN, public tx on a separate uplink) we render
+        # both. Interface names are always shown so the operator
+        # can see which NIC is being graphed.
         ifaces = store.netstats_iface_names()
-        max_rows = max(1, h - row - 4)
-        for iface in ifaces[:max_rows]:
-            rx, tx = store.netstats_iface_series(iface)
-            rx_now = rx[-1] if rx else 0.0
-            tx_now = tx[-1] if tx else 0.0
-            cells = [
-                (f"  {iface:<8} ", theme.attr(theme.P_HEADER)),
-                (f"rx {human_bytes(rx_now):>10}/s  ", 0),
-            ]
-            x = write_row(win, row, 0, cells)
-            if rx:
-                safe_addstr(win, row, x, sparkline(rx, width=spark_w),
-                            theme.attr(theme.P_SPARK))
-            x += spark_w + 2
-            safe_addstr(win, row, x, f"tx {human_bytes(tx_now):>10}/s  ",
-                        theme.attr(theme.P_HEADER))
-            x += 18
-            if tx:
-                safe_addstr(win, row, x, sparkline(tx, width=spark_w),
-                            theme.attr(theme.P_SPARK))
-            row += 1
-            if row >= h - 2:
-                break
+        if ifaces:
+            picks = self._pick_busiest_ifaces(store, ifaces)
+            for label, iface in picks:
+                if row >= h - 2:
+                    break
+                self._draw_iface_row(win, store, row, label, iface, spark_w)
+                row += 1
         return row + 1
+
+    @staticmethod
+    def _pick_busiest_ifaces(store, ifaces):
+        """Return [(label, iface), …] picking the busiest rx and tx
+        interfaces over the last ~12 samples (a minute at the default
+        5 s netstats cycle).
+
+        If the busiest rx and tx are the same NIC — typical on a
+        single-uplink server — we return one entry labeled "busiest".
+        If they diverge (the textbook case is a storage VLAN
+        carrying rx and a public uplink carrying tx), we return two
+        rows so neither is hidden.
+        """
+        WINDOW = 12
+
+        def avg_tail(seq):
+            if not seq:
+                return 0.0
+            tail = seq[-WINDOW:]
+            return sum(tail) / len(tail)
+
+        rx_max = (-1.0, ifaces[0])
+        tx_max = (-1.0, ifaces[0])
+        for iface in ifaces:
+            rx, tx = store.netstats_iface_series(iface)
+            r, t = avg_tail(rx), avg_tail(tx)
+            if r > rx_max[0]:
+                rx_max = (r, iface)
+            if t > tx_max[0]:
+                tx_max = (t, iface)
+        if rx_max[1] == tx_max[1]:
+            return [("busiest", rx_max[1])]
+        return [
+            ("rx-busy", rx_max[1]),
+            ("tx-busy", tx_max[1]),
+        ]
+
+    def _draw_iface_row(self, win, store, row: int, label: str,
+                         iface: str, spark_w: int) -> None:
+        h, w = win.getmaxyx()
+        rx, tx = store.netstats_iface_series(iface)
+        rx_now = rx[-1] if rx else 0.0
+        tx_now = tx[-1] if tx else 0.0
+        cells = [
+            (f"  {label:<7} ", theme.attr(theme.P_DIM)),
+            (f"{iface:<8} ", theme.attr(theme.P_HEADER)),
+            (f"rx {human_bytes(rx_now):>10}/s  ", 0),
+        ]
+        x = write_row(win, row, 0, cells)
+        if rx:
+            safe_addstr(win, row, x, sparkline(rx, width=spark_w),
+                        theme.attr(theme.P_SPARK))
+        x += spark_w + 2
+        safe_addstr(win, row, x, f"tx {human_bytes(tx_now):>10}/s  ",
+                    theme.attr(theme.P_HEADER))
+        x += 18
+        if tx and x + spark_w < w:
+            safe_addstr(win, row, x, sparkline(tx, width=spark_w),
+                        theme.attr(theme.P_SPARK))
 
     def _draw_vmstats(self, win, store, row: int) -> int:
         """Page-cache size + reclaim rates + system-wide major faults.

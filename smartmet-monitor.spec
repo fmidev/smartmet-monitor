@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.27
-Release:        1%{?dist}.fmi
+Release:        2%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -112,6 +112,18 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-2.fmi
+- Network section now auto-picks the busiest rx and tx NICs
+  rather than rendering a row per interface. On a hosts with
+  one uplink the panel shows that NIC labelled `busiest`. When
+  rx and tx peak on different interfaces — a storage VLAN
+  pulling data in while a public uplink pushes responses out —
+  the panel shows two rows labelled `rx-busy` and `tx-busy`
+  so neither half is hidden. Selection averages over the last
+  ~12 samples so a brief burst on an otherwise quiet NIC does
+  not flip the pick. The interface name is always rendered
+  next to the label.
+
 * Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-1.fmi
 - Page-cache and reclaim-pressure stats in the Proc panel from
   /proc/vmstat + /proc/meminfo. Four numbers: cache size as a

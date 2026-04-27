@@ -684,6 +684,17 @@ drops per second. Plus per-NIC rx/tx bytes-per-second from
 `/proc/net/dev` (loopback omitted). Both saturation (listen
 drops) and error (retransmits) signals.
 
+**NIC selection.** On hosts with one uplink the panel shows
+exactly that interface, labelled `busiest`. On hosts where rx
+and tx peak on different NICs (a storage VLAN carrying inbound
+data, a public uplink carrying outbound responses) the panel
+shows both rows, labelled `rx-busy` and `tx-busy`, so neither
+half of the picture is hidden. The choice is made on the
+average rate over the last twelve samples (≈ one minute at
+the default 5 s cycle), so a brief burst on an otherwise quiet
+NIC does not flip the selection. The interface name is always
+shown next to the label.
+
 **Detects.** Network saturation between this host and any peer
 (retransmits); the application failing to call `accept()` fast
 enough (listen drops, listen overflows); a NIC reaching its
