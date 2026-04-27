@@ -308,9 +308,12 @@ direction; the dedicated single-panel views below remain for sortable
       `/proc/PID/smaps_rollup` snapshot for the focused PID.
 
     Multiple smartmetd PIDs are switched via `n` / `N` or `1`–`9`.
-    Sections that need an external tool (`biolatency-bpfcc`,
-    `runqlat-bpfcc`, `perf`) auto-hide when the tool is missing
-    so the panel stays clean on minimal installs.
+    Sparkline height is `+` / `-` adjustable (default 2 rows;
+    range 1–6); the Braille encoding gives `4 × height` levels of
+    vertical resolution per metric. Sections that need an external
+    tool (`biolatency-bpfcc`, `runqlat-bpfcc`, `perf`) auto-hide
+    when the tool is missing so the panel stays clean on minimal
+    installs.
 
    ![Proc panel: memory + I/O + perf-top symbols for the focused smartmetd PID](doc/images/monitor_proc.png)
 
@@ -361,6 +364,7 @@ direction; the dedicated single-panel views below remain for sortable
 | `f`              | toggle inline flamegraph (Proc); also the Flame view mnemonic |
 | `↑↓←→` `Enter` `Esc/u` `0` | navigate / zoom in / zoom out / reset (Flame view) |
 | `o`              | on-CPU ↔ off-CPU flame toggle (Flame view)         |
+| `+` / `-`        | grow / shrink sparkline height in the Proc panel (1–6 rows; default 2) |
 | `m` / `b` / `i`  | toggle time spark / size spark / idle handlers (Graphs panel) |
 | `!`              | open the alerts overlay (any panel)                |
 | `↑` / `↓` `Enter` `d` `Esc` | navigate / jump+dismiss / dismiss / close (alerts overlay) |

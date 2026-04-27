@@ -17,7 +17,7 @@ from typing import Dict, List
 from .. import theme
 from ..sources.proc import read_smaps_rollup
 from ..state.store import ProcInfo, ProcSample
-from ..widgets.bars import human_bytes, human_count, sparkline
+from ..widgets.bars import human_bytes, human_count, sparkline, vchart
 from .base import Panel, safe_addstr, write_label, write_row
 
 
@@ -225,14 +225,26 @@ class ProcPanel(Panel):
     name = "Proc"
     hotkey = "p"
     help_text = (
-        "Per-process memory + I/O + (with --perf) live perf-top and "
-        "flamegraph for smartmetd. n/N next/prev, r smaps_rollup, "
-        "f flamegraph toggle."
+        "Per-process memory + I/O + host-wide reclaim, network and "
+        "scheduler metrics (with --perf, also live perf-top + "
+        "flamegraph). n/N next/prev PID, r smaps_rollup, "
+        "f flamegraph toggle, +/- adjust sparkline height."
     )
+
+    # Sparkline height bounds. Default 2 elevates the data density of
+    # the per-section rate and percentile graphs above the bottom-of-
+    # panel perf-top symbols list, which carries less actionable
+    # information for live operational diagnosis. Tunable via `+` /
+    # `-` so an operator on a tall terminal can fit even more
+    # vertical resolution.
+    SPARK_H_MIN = 1
+    SPARK_H_MAX = 6
+    SPARK_H_DEFAULT = 2
 
     def __init__(self) -> None:
         self.rollup_msg = ""
         self.flame_view = False  # toggled by 'f'
+        self._spark_h = self.SPARK_H_DEFAULT
 
     # ---- key handling ------------------------------------------------------
 
@@ -262,9 +274,39 @@ class ProcPanel(Panel):
             self._run_rollup(store)
         elif key == ord("f"):
             self.flame_view = not self.flame_view
+        elif key in (ord("+"), ord("=")):
+            # `=` is the same physical key as `+` without Shift — accept
+            # both so the operator does not have to think about layout.
+            self._spark_h = min(self.SPARK_H_MAX, self._spark_h + 1)
+        elif key == ord("-"):
+            self._spark_h = max(self.SPARK_H_MIN, self._spark_h - 1)
         else:
             return False
         return True
+
+    def _draw_spark(self, win, y: int, x: int, values, attr: int,
+                    width: int, maxval: float = 0.0) -> None:
+        """Render a sparkline at (y, x), spanning `self._spark_h`
+        rows downward when h > 1. Uses vchart() for the multi-row
+        case so each rendered cell has 4 dot rows of vertical
+        resolution; a height of 2 thus packs 8 levels into the
+        section, four times what a single-row sparkline gives.
+        """
+        if not values:
+            return
+        h_avail = win.getmaxyx()[0] - y
+        if h_avail < 1:
+            return
+        height = min(self._spark_h, h_avail)
+        if height <= 1:
+            safe_addstr(win, y, x, sparkline(values, width=width,
+                                             maxval=maxval), attr)
+            return
+        rows = vchart(values, height=height, width=width, maxval=maxval)
+        for j, line in enumerate(rows):
+            if y + j >= win.getmaxyx()[0]:
+                break
+            safe_addstr(win, y + j, x, line, attr)
 
     def _run_rollup(self, store) -> None:
         pid = store.proc_selected()
@@ -379,7 +421,10 @@ class ProcPanel(Panel):
 
     def _draw_memory(self, win, info: ProcInfo, row: int) -> int:
         h, w = win.getmaxyx()
-        if row + 5 >= h:
+        # 4 stacked sparklines × spark_h rows each + divider — bail
+        # early if the section will not fit so we don't half-render.
+        section_h = 1 + 4 * self._spark_h
+        if row + section_h >= h:
             return row
         latest = info.samples[-1] if info.samples else ProcSample()
         rss_series = [s.vm_rss_kb / 1024.0 for s in info.samples]
@@ -403,25 +448,28 @@ class ProcPanel(Panel):
             (f"HWM    {_humanize_kb(latest.vm_hwm_kb):>10}", 0),
         ]
         for i, (label, kb, series, color) in enumerate(rows):
-            y = row + i
+            block_y = row + i * self._spark_h
             cells = [
                 (f"  {label:<6} ", theme.attr(theme.P_HEADER)),
                 (f"{_humanize_kb(kb):>10}  ", 0),
             ]
-            x = write_row(win, y, 0, cells)
+            x = write_row(win, block_y, 0, cells)
             if series is not None:
-                spark = sparkline(series, width=spark_w)
-                safe_addstr(win, y, x, spark, theme.attr(color))
+                self._draw_spark(win, block_y, x, series,
+                                 theme.attr(color), spark_w)
                 x += spark_w
+            # Side stats land on the FIRST row of each block, next to
+            # the labels — keeps them anchored to the metric they
+            # belong to even when sparklines span several rows.
             sx = max(x + 2, w - 30)
             if sx < w - 2 and i < len(side_stats):
                 text, attr = side_stats[i]
-                safe_addstr(win, y, sx, text, attr)
-        return row + 4
+                safe_addstr(win, block_y, sx, text, attr)
+        return row + 4 * self._spark_h
 
     def _draw_io(self, win, info: ProcInfo, row: int) -> int:
         h, w = win.getmaxyx()
-        if row + 2 >= h:
+        if row + 1 + self._spark_h >= h:
             return row
         self._section_divider(win, row, "I/O")
         row += 1
@@ -437,18 +485,16 @@ class ProcPanel(Panel):
         ]
         x = write_row(win, row, 0, cells)
         rs = _io_rate_series(samples, "io_read_bytes")
-        safe_addstr(win, row, x, sparkline(rs, width=spark_w),
-                    theme.attr(theme.P_SPARK))
+        self._draw_spark(win, row, x, rs, theme.attr(theme.P_SPARK), spark_w)
         x += spark_w + 2
         safe_addstr(win, row, x, f"W {human_bytes(wrate):>10}/s  ",
                     theme.attr(theme.P_HEADER))
         x += 18
         ws = _io_rate_series(samples, "io_write_bytes")
-        safe_addstr(win, row, x, sparkline(ws, width=spark_w),
-                    theme.attr(theme.P_SPARK))
+        self._draw_spark(win, row, x, ws, theme.attr(theme.P_SPARK), spark_w)
         x += spark_w + 2
         safe_addstr(win, row, x, f"FDs {human_count(latest.fds)}", 0)
-        return row + 2
+        return row + self._spark_h + 1
 
     def _draw_page_faults(self, win, info: ProcInfo, row: int) -> int:
         """Major page-fault rate for this PID, with sparkline.
@@ -461,7 +507,7 @@ class ProcPanel(Panel):
         latency spike that on-CPU profiling cannot see.
         """
         h, w = win.getmaxyx()
-        if row + 2 >= h:
+        if row + 1 + self._spark_h >= h:
             return row
         self._section_divider(win, row, "Page faults (major)")
         row += 1
@@ -481,10 +527,9 @@ class ProcPanel(Panel):
         ]
         x = write_row(win, row, 0, cells)
         series = _majflt_rate_series(samples)
-        if series:
-            safe_addstr(win, row, x, sparkline(series, width=spark_w),
-                        theme.attr(theme.P_SPARK))
-        return row + 2
+        self._draw_spark(win, row, x, series, theme.attr(theme.P_SPARK),
+                         spark_w)
+        return row + self._spark_h + 1
 
     def _draw_perfstat(self, win, store, row: int) -> int:
         """CPU efficiency from perf stat: IPC + cache + branch miss rates.
@@ -496,7 +541,7 @@ class ProcPanel(Panel):
         flow.
         """
         h, w = win.getmaxyx()
-        if row + 2 >= h:
+        if row + 1 + self._spark_h >= h:
             return row
         self._section_divider(win, row, "CPU efficiency (perf stat)")
         row += 1
@@ -526,10 +571,9 @@ class ProcPanel(Panel):
         ]
         x = write_row(win, row, 0, cells)
         series = store.perfstat_ipc_series()
-        if series:
-            safe_addstr(win, row, x, sparkline(series, width=spark_w),
-                        theme.attr(theme.P_SPARK))
-        return row + 2
+        self._draw_spark(win, row, x, series, theme.attr(theme.P_SPARK),
+                         spark_w)
+        return row + self._spark_h + 1
 
     def _draw_runqlat(self, win, store, row: int) -> int:
         """Run-queue latency: how long ready threads waited for CPU.
@@ -540,7 +584,7 @@ class ProcPanel(Panel):
         neighbours hold ready threads off the run queue.
         """
         h, w = win.getmaxyx()
-        if row + 2 >= h:
+        if row + 1 + self._spark_h >= h:
             return row
         self._section_divider(win, row, "Run-queue latency (host)")
         row += 1
@@ -562,10 +606,9 @@ class ProcPanel(Panel):
         ]
         x = write_row(win, row, 0, cells)
         series = store.runqlat_p95_series()
-        if series:
-            safe_addstr(win, row, x, sparkline(series, width=spark_w),
-                        theme.attr(theme.P_SPARK))
-        return row + 2
+        self._draw_spark(win, row, x, series, theme.attr(theme.P_SPARK),
+                         spark_w)
+        return row + self._spark_h + 1
 
     def _draw_netstats(self, win, store, row: int) -> int:
         """Network section: TCP retransmits / listen drops + per-NIC bandwidth.
@@ -598,10 +641,9 @@ class ProcPanel(Panel):
             (f"listen-drop/s {latest_d:>5.1f}  ", drop_attr),
         ]
         x = write_row(win, row, 0, cells)
-        if retrans:
-            safe_addstr(win, row, x, sparkline(retrans, width=spark_w),
-                        theme.attr(theme.P_SPARK))
-        row += 1
+        self._draw_spark(win, row, x, retrans, theme.attr(theme.P_SPARK),
+                         spark_w)
+        row += self._spark_h
         # Per-interface rx/tx. To keep the panel scannable on hosts
         # with many NICs (think bonded interfaces + VLANs + tap
         # devices on a shared backend), auto-select the busiest
@@ -615,10 +657,10 @@ class ProcPanel(Panel):
         if ifaces:
             picks = self._pick_busiest_ifaces(store, ifaces)
             for label, iface in picks:
-                if row >= h - 2:
+                if row + self._spark_h >= h - 1:
                     break
                 self._draw_iface_row(win, store, row, label, iface, spark_w)
-                row += 1
+                row += self._spark_h
         return row + 1
 
     @staticmethod
@@ -669,16 +711,14 @@ class ProcPanel(Panel):
             (f"rx {human_bytes(rx_now):>10}/s  ", 0),
         ]
         x = write_row(win, row, 0, cells)
-        if rx:
-            safe_addstr(win, row, x, sparkline(rx, width=spark_w),
-                        theme.attr(theme.P_SPARK))
+        self._draw_spark(win, row, x, rx, theme.attr(theme.P_SPARK), spark_w)
         x += spark_w + 2
         safe_addstr(win, row, x, f"tx {human_bytes(tx_now):>10}/s  ",
                     theme.attr(theme.P_HEADER))
         x += 18
-        if tx and x + spark_w < w:
-            safe_addstr(win, row, x, sparkline(tx, width=spark_w),
-                        theme.attr(theme.P_SPARK))
+        if x + spark_w < w:
+            self._draw_spark(win, row, x, tx, theme.attr(theme.P_SPARK),
+                             spark_w)
 
     def _draw_vmstats(self, win, store, row: int) -> int:
         """Page-cache size + reclaim rates + system-wide major faults.
@@ -689,7 +729,7 @@ class ProcPanel(Panel):
         the operator can see the kernel doing its job.
         """
         h, w = win.getmaxyx()
-        if row + 2 >= h:
+        if row + 1 + self._spark_h >= h:
             return row
         self._section_divider(win, row, "Page cache + reclaim (host)")
         row += 1
@@ -716,9 +756,9 @@ class ProcPanel(Panel):
         spark_w = max(15, min(40, w - x - 2))
         series = store.vmstats_direct_series()
         if series and any(s > 0 for s in series):
-            safe_addstr(win, row, x, sparkline(series, width=spark_w),
-                        theme.attr(theme.P_BAD))
-        return row + 2
+            self._draw_spark(win, row, x, series, theme.attr(theme.P_BAD),
+                             spark_w)
+        return row + self._spark_h + 1
 
     def _draw_biolat(self, win, store, row: int) -> int:
         """Host-wide block-I/O latency from biolatency-bpfcc.
@@ -728,7 +768,7 @@ class ProcPanel(Panel):
           2. (left blank — kept simple; future home for read/write split)
         """
         h, w = win.getmaxyx()
-        if row + 2 >= h:
+        if row + 1 + self._spark_h >= h:
             return row
         self._section_divider(win, row, "Block I/O latency (host)")
         row += 1
@@ -750,10 +790,9 @@ class ProcPanel(Panel):
         ]
         x = write_row(win, row, 0, cells)
         series = store.biolat_p95_series()
-        if series:
-            safe_addstr(win, row, x, sparkline(series, width=spark_w),
-                        theme.attr(theme.P_SPARK))
-        return row + 2
+        self._draw_spark(win, row, x, series, theme.attr(theme.P_SPARK),
+                         spark_w)
+        return row + self._spark_h + 1
 
     def _draw_perf(self, win, store, info: ProcInfo, row: int) -> int:
         h, w = win.getmaxyx()
@@ -903,6 +942,11 @@ class ProcPanel(Panel):
         if perf_enabled:
             x = write_label(win, h - 1, x, "f", 0, base, hot)
             x = write_label(win, h - 1, x, "lame   ", 0, base, base)
+        x = write_label(win, h - 1, x, "+", 0, base, hot)
+        x = write_label(win, h - 1, x, "/", 0, base, base)
+        x = write_label(win, h - 1, x, "-", 0, base, hot)
+        x = write_label(win, h - 1, x, f" spark h={self._spark_h}   ",
+                        0, base, base)
         x = write_label(win, h - 1, x, "e", 0, base, hot)
         x = write_label(win, h - 1, x, "/", 0, base, base)
         x = write_label(win, h - 1, x, "E", 0, base, hot)

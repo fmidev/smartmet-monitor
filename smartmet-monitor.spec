@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.27
-Release:        2%{?dist}.fmi
+Release:        3%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -112,6 +112,29 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-3.fmi
+- Proc panel sparklines are now multi-row Braille charts by
+  default (height = 2). The metric rates and percentile graphs
+  carry more actionable diagnostic information than the perf-top
+  symbol list at the bottom of the panel, so they get the
+  vertical real estate first. Each height = N row gives 4×N
+  levels of vertical resolution from the Braille encoding.
+- New keys `+` / `-` (and `=` accepted as the un-shifted variant
+  of `+`) grow / shrink the sparkline height live within the
+  Proc panel; the footer shows the current value. Range 1–6
+  rows. Default 2; press `-` once to land back on the previous
+  single-row layout, or `+` to use up to 6 rows on a tall
+  terminal where the extra resolution is useful.
+- Every section in the Proc panel (Memory, I/O, Page faults,
+  Page cache + reclaim, Block I/O latency, Run-queue latency,
+  CPU efficiency, Network including the per-NIC rows) routes
+  its sparkline through a single _draw_spark helper that picks
+  vchart() at height > 1 and the existing single-row sparkline
+  at height = 1. The Memory section's per-row layout shifts so
+  side stats (VmSize / VmPTE / Swap / HWM) anchor to the first
+  row of each block, not bumping around with the sparkline
+  height.
+
 * Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-2.fmi
 - Network section now auto-picks the busiest rx and tx NICs
   rather than rendering a row per interface. On a hosts with
