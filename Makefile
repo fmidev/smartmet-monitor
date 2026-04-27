@@ -168,8 +168,8 @@ check:
 	    picks2 = ProcPanel._pick_busiest_ifaces(_st2, ["eth0","lo"]); \
 	    assert picks2 == [("busiest","eth0")], picks2; \
 	    import smartmet_top.sources.pagefault; \
-	    from smartmet_top.panels.flame import _is_lock_stack, _MODE_CYCLE; \
-	    assert _MODE_CYCLE == ("on-cpu","off-cpu","off-cpu-locks","pagefault"); \
+	    from smartmet_top.panels.flame import _is_lock_stack, _MODES; \
+	    assert _MODES == ("on-cpu","off-cpu","off-cpu-locks","pagefault"); \
 	    assert _is_lock_stack(("smartmetd","main","pthread_mutex_lock")); \
 	    assert _is_lock_stack(("smartmetd","worker","__lll_lock_wait")); \
 	    assert _is_lock_stack(("smartmetd","poll","futex_wait_queue_me")); \

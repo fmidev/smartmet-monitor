@@ -43,11 +43,11 @@ from .proc import _build_flame_tree, _flame_color, draw_pid_selector
 PERF_SECONDS_PRESETS = (1, 3, 5, 10, 20, 30)
 
 
-# Flame view mode cycle. `o` walks this list. The order matches the
-# typical operator workflow: see what's running first, then where it
-# is blocked, then narrow to lock contention, then switch to memory
-# faults — each mode answers a more specific question than the last.
-_MODE_CYCLE = ("on-cpu", "off-cpu", "off-cpu-locks", "pagefault")
+# Valid Flame view modes. Selection is direct via the C/B/L/M keys
+# in the panel's handle_key — no cycling. Order here is purely the
+# logical workflow ordering (running → blocked → locks → memory)
+# used by the README's "What's it for?" diagrams.
+_MODES = ("on-cpu", "off-cpu", "off-cpu-locks", "pagefault")
 
 
 # Substring patterns that mark a stack leaf as lock-related. Used by
@@ -168,8 +168,8 @@ class FlamePanel(Panel):
     help_text = (
         "Live flamegraph for the focused smartmetd PID. "
         "↑↓←→ navigate, Enter zoom in, Esc/u zoom out, 0 reset zoom, "
-        "n/N next/prev PID, o cycles on-CPU → off-CPU → off-CPU "
-        "(locks) → page-faults. Requires --perf."
+        "n/N next/prev PID. Mode keys: C on-CPU, B off-CPU "
+        "(blocked), L locks, M memory faults. Requires --perf."
     )
 
     def __init__(self) -> None:
@@ -240,18 +240,27 @@ class FlamePanel(Panel):
             self._open_seconds_menu(store)
             return True
 
-        # `o` cycles through the four flame modes. Reset cursor and
-        # zoom on every change because each mode has a completely
-        # different stack set; carrying the path across modes lands
-        # the operator in a "no selection" state immediately.
-        if key == ord("o"):
-            self.mode = _MODE_CYCLE[
-                (_MODE_CYCLE.index(self.mode) + 1) % len(_MODE_CYCLE)
-            ]
-            self.zoom_path = ()
-            self.cursor_path = ()
-            self._last_root = {}
-            self._last_frames = []
+        # Direct-key mode selection. Uppercase mnemonics so the
+        # lowercase panel mnemonics (l=Logs, c=Caches, o=Overview, p=Proc)
+        # still reach the global panel switcher when pressed from this
+        # view — uppercase letters are not used by any panel mnemonic.
+        # Resetting cursor and zoom on each change because each mode
+        # has a completely different stack set; carrying the path
+        # across modes lands the operator in a "no selection" state.
+        mode_keys = {
+            ord("C"): "on-cpu",         # CPU
+            ord("B"): "off-cpu",        # Blocked
+            ord("L"): "off-cpu-locks",  # Locks
+            ord("M"): "pagefault",      # Memory faults
+        }
+        if key in mode_keys:
+            new_mode = mode_keys[key]
+            if new_mode != self.mode:
+                self.mode = new_mode
+                self.zoom_path = ()
+                self.cursor_path = ()
+                self._last_root = {}
+                self._last_frames = []
             return True
 
         # Flame navigation only meaningful when perf is on AND we have data.
@@ -884,8 +893,15 @@ class FlamePanel(Panel):
         x = write_label(win, h - 1, x, " reset  ", 0, base, base)
         x = write_label(win, h - 1, x, "s", 0, base, hot)
         x = write_label(win, h - 1, x, " seconds  ", 0, base, base)
-        x = write_label(win, h - 1, x, "o", 0, base, hot)
-        x = write_label(win, h - 1, x, f" mode={self.mode}", 0, base, base)
+        # Mode keys, with the active mode's letter shown in reverse
+        # video so the operator can see where they are at a glance.
+        for ch, mode in (("C", "on-cpu"), ("B", "off-cpu"),
+                         ("L", "off-cpu-locks"), ("M", "pagefault")):
+            attr = (curses.A_REVERSE | curses.A_BOLD if mode == self.mode
+                    else hot)
+            x = write_label(win, h - 1, x, ch, 0, base, attr)
+            x = write_label(win, h - 1, x, " ", 0, base, base)
+        x = write_label(win, h - 1, x, f"({self.mode}) ", 0, base, base)
         if n_procs > 1:
             x = write_label(win, h - 1, x, "  ", 0, base, base)
             x = write_label(win, h - 1, x, "n", 0, base, hot)

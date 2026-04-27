@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.27
-Release:        5%{?dist}.fmi
+Release:        6%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -112,6 +112,22 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-6.fmi
+- Flame view: replace the `o` mode-cycle with direct mnemonic
+  keys.
+    C → on-CPU
+    B → off-CPU (Blocked)
+    L → off-CPU (Locks)
+    M → page-faults (Memory)
+  Uppercase so the lowercase panel mnemonics (l=Logs, c=Caches,
+  o=Overview, p=Proc) still reach the global panel switcher when
+  pressed from the Flame view. Footer shows all four keys with
+  the active one in reverse video; `o` no longer cycles, freeing
+  it to switch to Overview as it would from any other view.
+- README admin smoke-test now lists the wget commands directly
+  rather than embedding the wget terminal screenshot. The
+  monitor_wget.png file is removed from doc/images.
+
 * Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-5.fmi
 - Default smartmetd PID now prefers a process tagged `backend`
   whenever one is detected. The Flame view, Proc panel and

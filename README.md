@@ -234,23 +234,28 @@ direction; the dedicated single-panel views below remain for sortable
    restarting smtop. The lower portion of the screen carries the
    perf-top symbol list so nothing is wasted on shallow stacks.
 
-   Press **`o`** to cycle through four flame modes:
+   Four flame modes selected by single keys:
 
-   - **on-CPU** (default) — sampled at 99 Hz via `perf record`.
-     Where the CPU is going.
-   - **off-CPU** — every thread descheduled, weighted by µs
-     blocked, via `bcc-tools`' `offcputime-bpfcc`. Where threads
-     are stuck (I/O, sleeps, lock waits, anything).
-   - **off-CPU (locks)** — same off-CPU data filtered to leaves
-     that look like lock waits (`futex_*`, `pthread_mutex_*`,
-     `pthread_cond_*`, `pthread_rwlock_*`, `pthread_spin_*`,
-     `__lll_*`). Ranks the worst contention points by total
-     wait time.
-   - **page-faults** — every major page fault on this PID gets
-     a stack via `perf record -e major-faults`. Shows *where*
-     in the codebase smartmetd hits cold pages — pairs with
-     the page-fault sparkline in the Proc panel: when that
-     spikes, this flame names the function that caused the spike.
+   - **`C`** — **on-CPU** (default), sampled at 99 Hz via `perf
+     record`. Where the CPU is going.
+   - **`B`** — **off-CPU** ("Blocked"), every thread descheduled,
+     weighted by µs blocked, via `bcc-tools`' `offcputime-bpfcc`.
+     Where threads are stuck (I/O, sleeps, lock waits, anything).
+   - **`L`** — **off-CPU (locks)**, same off-CPU data filtered to
+     leaves that look like lock waits (`futex_*`,
+     `pthread_mutex_*`, `pthread_cond_*`, `pthread_rwlock_*`,
+     `pthread_spin_*`, `__lll_*`). Ranks the worst contention
+     points by total wait time.
+   - **`M`** — **page-faults** ("Memory"), every major page fault
+     on this PID gets a stack via `perf record -e major-faults`.
+     Shows *where* in the codebase smartmetd hits cold pages —
+     pairs with the page-fault sparkline in the Proc panel: when
+     that spikes, this flame names the function that caused the
+     spike.
+
+   Mode keys are uppercase so the lowercase panel mnemonics
+   (`l`=Logs, `c`=Caches, `o`=Overview, `p`=Proc) still reach
+   the global panel switcher when pressed from the Flame view.
 
    The "Top X functions" list at the bottom of the panel shifts
    to match the active mode (top blocked-on functions, top
@@ -355,9 +360,21 @@ direction; the dedicated single-panel views below remain for sortable
 
   Smoke-test the admin URL with `wget` or `curl` before pointing
   `smtop` at it — the `?format=json` endpoints are what `smtop`
-  polls:
+  polls. On the host (replace `127.0.0.1:8081` with the actual
+  admin URL):
 
-  ![Verifying the admin endpoint with wget against a SmartMet backend](doc/images/monitor_wget.png)
+  ```sh
+  wget -qO- "http://127.0.0.1:8081/admin?what=list"             # role detection
+  wget -qO- "http://127.0.0.1:8081/admin?what=cachestats&format=json"
+  wget -qO- "http://127.0.0.1:8081/admin?what=servicestats&format=json"
+  wget -qO- "http://127.0.0.1:8081/admin?what=activerequests&format=json"
+  wget -qO- "http://127.0.0.1:8081/admin?what=lastrequests&format=json"
+  ```
+
+  Each should return JSON. If `what=list` succeeds but the others
+  return empty / 404, the host has a partial admin plugin
+  configuration — the panels that depend on the missing endpoints
+  will surface "(no data)" but smtop itself stays functional.
 
 ### Key reference (excerpt)
 
@@ -377,7 +394,7 @@ direction; the dedicated single-panel views below remain for sortable
 | `1` – `9`        | select smartmetd PID by index in the selector at the top of Proc / Flame |
 | `f`              | toggle inline flamegraph (Proc); also the Flame view mnemonic |
 | `↑↓←→` `Enter` `Esc/u` `0` | navigate / zoom in / zoom out / reset (Flame view) |
-| `o`              | on-CPU ↔ off-CPU flame toggle (Flame view)         |
+| `C` / `B` / `L` / `M` | Flame mode: on-CPU / off-CPU / locks / memory faults |
 | `+` / `-`        | grow / shrink sparkline height in the Proc panel (1–6 rows; default 2) |
 | `m` / `b` / `i`  | toggle time spark / size spark / idle handlers (Graphs panel) |
 | `!`              | open the alerts overlay (any panel)                |
