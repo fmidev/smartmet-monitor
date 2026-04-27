@@ -1,0 +1,220 @@
+.TH BPERF 1 "2026-04-27" "smartmet-monitor" "SmartMet Server"
+.SH NAME
+bperf \- offline perf profiler for smartmetd, filtered to SmartMet code
+.SH SYNOPSIS
+.B bperf
+.RI [ \-p\  PID ]
+.RI [ \-s\  SECONDS ]
+.RI [ \-F\  FREQ ]
+.RI [ \-o\  OUT-DIR ]
+.RI [ \-\-threads\  CLASS ]
+.RI [ \-\-no\-smartmet\-only ]
+.RI [ \-\-keep\-perf\-data ]
+.SH DESCRIPTION
+.B bperf
+is the offline companion to
+.BR smtop (1)'s
+live Flame view. It runs
+.B perf record \-F 99 \-g \-\-call\-graph=dwarf,32768 \-p PID \-\- sleep N
+against a smartmetd PID, post\-processes the captured stacks through
+the same SmartMet\-only and request\-vs\-background filters smtop uses,
+and writes three artifacts to
+.I OUT-DIR
+(default: current directory):
+.IP \(bu 2
+.B folded.txt
+\(em Brendan\-Gregg folded\-stack format (one line per unique stack:
+.IR "frame1;frame2;\&...\ count" ).
+Useful as input to any other flamegraph viewer.
+.IP \(bu 2
+.B graph.dot
+\(em GraphViz call graph; node weight is the cumulative sample count,
+edge weight is the number of samples that crossed the
+caller\(->callee boundary. Render with
+.RB \(lq dot\ \-Tsvg\ graph.dot\ >\ graph.svg \(rq.
+.IP \(bu 2
+.B flame.svg
+\(em self\-contained interactive flamegraph. Click any frame to zoom;
+the title or
+.B Esc
+resets. Opens in any browser, no external JavaScript or fonts.
+.PP
+The default capture is
+.B 30 seconds at 99 Hz with --smartmet-only on
+and
+.BR --threads\ all .
+SmartMet\-only collapses every captured stack to its
+.B SmartMet::*
+frames plus at most one non\-SmartMet leaf (the syscall / libc the
+SmartMet code is calling into); deeper kernel frames are dropped.
+This is the view operators almost always want, because the raw flame
+is dominated by libc and kernel scaffolding that crowds out the
+SmartMet code being investigated.
+.SH OPTIONS
+.TP
+.BI \-p \ PID
+PID to profile, or a process name resolved via
+.BR pgrep\ \-x .
+Default: auto\-detect a single
+.B smartmetd
+process. Errors out clearly when none or many are found.
+.TP
+.BI \-s \ SECONDS
+Recording duration. Default
+.BR 30 .
+Longer captures find slow paths; shorter captures keep overhead lower
+on production hosts.
+.TP
+.BI \-F \ FREQ
+Sample frequency in Hz. Default
+.BR 99 .
+Rarely worth changing.
+.TP
+.BI \-o \ OUT-DIR
+Output directory. Default: current directory. Created if missing.
+.TP
+.BI \-\-threads \ CLASS
+Filter stacks by thread role. One of
+.BR all ,\  request ,\  background .
+A stack is
+.I request
+when it contains
+.BR SmartMetPlugin::callRequestHandler
+\(em i.e. the thread was actively serving an HTTP request when sampled.
+.I background
+is everything else (cleanup, schedulers, cache eviction, etc.).
+Classification is by stack content rather than thread name because
+spine does not
+.BR pthread_setname_np ;
+every smartmetd thread reports
+.BR comm=smartmetd
+and a comm\-based filter would be useless. Default
+.BR all .
+.TP
+.B \-\-smartmet\-only
+(Default) Collapse stacks to SmartMet frames + \(<= 1 syscall / libc leaf.
+.TP
+.B \-\-no\-smartmet\-only
+Keep raw stacks (kernel + libc + everything). Use this when investigating
+a non\-SmartMet hot path (e.g. a glibc allocator pathology).
+.TP
+.B \-\-keep\-perf\-data
+Don't delete the intermediate
+.B perf.data
+file. Useful for re\-running
+.B perf script
+with different options or for sharing the raw capture.
+.SH PRE\-FLIGHT
+.B bperf
+checks the environment before burning capture time:
+.IP \(bu 2
+.B perf
+must be in
+.BR PATH .
+Install
+.B linux-tools
+(RHEL/Fedora:
+.BR "dnf install perf" ;
+Debian/Ubuntu:
+.BR "apt install linux-tools-generic" ).
+.IP \(bu 2
+.B kernel.perf_event_paranoid
+must be \(<= 2 (or run as root). Lower with
+.BR "sudo sysctl kernel.perf_event_paranoid=1" .
+.IP \(bu 2
+The PID must exist.
+.PP
+After the capture, if more than 50% of frames are
+.BR [unknown] ,
+.B bperf
+warns that
+.B smartmet-server-debuginfo
+is probably missing. Install with
+.BR "debuginfo-install smartmet-server" .
+.SH HOW TO READ THE OUTPUT
+A flamegraph stacks function calls vertically: the bottom row is the
+program's entry point, each row above is a function called by the row
+below, and frame
+.B width
+is sample count (\(ap CPU time spent in that path).
+.IP \(bu 2
+.B Healthy shape:
+wide base, narrow tower. CPU is spread across many request paths and
+no single function dominates.
+.IP \(bu 2
+.B Trouble pattern:
+a single tall, flat\-topped column in one subtree. The flat top is
+where time is actually being spent; walk down from there to its caller
+to find the responsible code.
+.IP \(bu 2
+.B Next step:
+re\-run with
+.B \-\-threads request
+or
+.B \-\-threads background
+to confirm whether the hotspot is request\-driven or background.
+The Flame panel in
+.BR smtop (1)
+exposes the same toggles
+.RB ( S
+and
+.BR T )
+for live exploration.
+.SH EXAMPLES
+.PP
+30\-second capture of the running smartmetd, default filters:
+.PP
+.RS 4
+bperf
+.RE
+.PP
+60\-second capture of a specific PID, output to
+.IR /tmp/bperf-out :
+.PP
+.RS 4
+bperf \-p 12345 \-s 60 \-o /tmp/bperf\-out
+.RE
+.PP
+Only request\-handling stacks (skip background work):
+.PP
+.RS 4
+bperf \-\-threads request
+.RE
+.PP
+Raw stacks for a glibc allocator investigation:
+.PP
+.RS 4
+bperf \-\-no\-smartmet\-only \-s 60
+.RE
+.SH ENVIRONMENT
+.TP
+.B SMARTMET_MONITOR_LIB_BPERF
+Override the path of the Python script the wrapper executes (default
+.BR /usr/share/smartmet/bperf.py ).
+The wrapper falls back to a sibling
+.BI ../share/smartmet/bperf.py
+when run from the source tree, so this variable is rarely needed.
+.TP
+.B PYTHON
+Override the Python interpreter (default
+.BR python3 ).
+On RHEL 8, the package's RPM build pins this to
+.BR python3.9 .
+.SH FILES
+.TP
+.B /usr/share/smartmet/bperf.py
+Library implementing the capture, filter, and rendering pipeline.
+.TP
+.IB OUT-DIR /folded.txt
+.TQ
+.IB OUT-DIR /graph.dot
+.TQ
+.IB OUT-DIR /flame.svg
+Outputs of one
+.B bperf
+run.
+.SH SEE ALSO
+.BR smtop (1),
+.BR bstat (1),
+.BR perf (1),
+.BR dot (1)

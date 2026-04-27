@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.27
-Release:        14%{?dist}.fmi
+Release:        15%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -103,6 +103,7 @@ make install \
 %{_mandir}/man1/burls.1*
 %{_mandir}/man1/bstatus.1*
 %{_mandir}/man1/bkeys.1*
+%{_mandir}/man1/bperf.1*
 %{_mandir}/man1/bstat1s.1*
 %{_mandir}/man1/bstat10s.1*
 %{_mandir}/man1/bstat1.1*
@@ -114,6 +115,13 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-15.fmi
+- bperf(1) man page. Matches the bstat-family convention so
+  `man bperf` works on installed hosts. Documents pre-flight
+  checks, the SmartMet-only / thread-class filters, the three
+  output artifacts, and a "How to read the output" section
+  per the project's metric-interpretation rule.
+
 * Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-14.fmi
 - New `bperf` offline profiler — the batch companion to smtop's
   live Flame view. Runs `perf record -F 99 -g --call-graph=dwarf`
