@@ -255,7 +255,7 @@ class ProcPanel(Panel):
         pids = [p.pid for p in procs]
         selected = store.proc_selected()
         if selected is None or selected not in pids:
-            selected = pids[0]
+            selected = store.proc_default_pid() or pids[0]
             store.proc_select(selected)
 
         if key == ord("n"):
@@ -361,7 +361,7 @@ class ProcPanel(Panel):
 
         selected = store.proc_selected()
         if selected is None or selected not in [p.pid for p in procs]:
-            selected = procs[0].pid
+            selected = store.proc_default_pid() or procs[0].pid
             store.proc_select(selected)
         info = next((p for p in procs if p.pid == selected), procs[0])
 

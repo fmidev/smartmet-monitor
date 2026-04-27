@@ -211,8 +211,13 @@ class FlamePanel(Panel):
         if pids:
             selected = store.proc_selected()
             if selected is None or selected not in pids:
-                store.proc_select(pids[0])
-                selected = pids[0]
+                # Use the role-aware default rather than the lowest
+                # PID — keeps the focused process on a backend
+                # whenever one exists, which is almost always what
+                # the operator wants to profile.
+                default = store.proc_default_pid() or pids[0]
+                store.proc_select(default)
+                selected = default
             if key == ord("n"):
                 store.proc_select(pids[(pids.index(selected) + 1) % len(pids)])
                 return True
@@ -395,7 +400,7 @@ class FlamePanel(Panel):
             return
         selected = store.proc_selected()
         if selected is None or selected not in [p.pid for p in procs]:
-            selected = procs[0].pid
+            selected = store.proc_default_pid() or procs[0].pid
             store.proc_select(selected)
         info = next((p for p in procs if p.pid == selected), procs[0])
 

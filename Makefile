@@ -174,7 +174,19 @@ check:
 	    assert _is_lock_stack(("smartmetd","worker","__lll_lock_wait")); \
 	    assert _is_lock_stack(("smartmetd","poll","futex_wait_queue_me")); \
 	    assert not _is_lock_stack(("smartmetd","main","io_schedule")); \
-	    assert not _is_lock_stack(())'
+	    assert not _is_lock_stack(()); \
+	    from smartmet_top.state.store import Store as _S2; \
+	    _stp = _S2(); \
+	    _stp.proc_register(1234, cmdline="smartmetd-frontend", role="frontend"); \
+	    _stp.proc_register(1100, cmdline="smartmetd-backend", role="backend"); \
+	    _stp.proc_register(2200, cmdline="smartmetd-backend2", role="backend"); \
+	    _stp.proc_register(900, cmdline="smartmetd-other", role="unknown"); \
+	    assert _stp.proc_default_pid() == 1100, _stp.proc_default_pid(); \
+	    _stp2 = _S2(); \
+	    _stp2.proc_register(900, cmdline="x", role="unknown"); \
+	    _stp2.proc_register(1234, cmdline="y", role="frontend"); \
+	    assert _stp2.proc_default_pid() == 900, _stp2.proc_default_pid(); \
+	    assert _S2().proc_default_pid() is None'
 	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
 	bash -n share/smartmet/bstat.sh
 	for t in $(BTOOLS) $(LEGACY); do bash -n bin/$$t; done

@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.27
-Release:        4%{?dist}.fmi
+Release:        5%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -112,6 +112,19 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-5.fmi
+- Default smartmetd PID now prefers a process tagged `backend`
+  whenever one is detected. The Flame view, Proc panel and
+  every perf sampler that targets the focused PID land on a
+  backend by default, since backends do the actual data work
+  and are what the operator almost always wants to profile.
+  Falls back to the lowest PID when no backend is detected.
+  The detection is the existing cmdline-based heuristic in
+  sources/proc.py — no changes there. New Store helper
+  proc_default_pid() centralises the logic so all three
+  fallback sites (proc_selected, FlamePanel.draw,
+  ProcPanel.draw / handle_key) stay in sync.
+
 * Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-4.fmi
 - Two new flame modes: page-fault and off-CPU (locks). The Flame
   view's `o` key now cycles through four modes:

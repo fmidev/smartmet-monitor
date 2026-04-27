@@ -807,12 +807,33 @@ class Store:
             pid = self.selected_proc_pid
             if pid is not None and pid in self.procs:
                 return pid
-            # Fall back to the lowest-PID smartmetd if the saved one is gone.
-            if self.procs:
-                pid = min(self.procs.keys())
+            # Saved selection is gone (or never existed) — fall back to
+            # the role-aware default.
+            pid = self._proc_default_pid_locked()
+            if pid is not None:
                 self.selected_proc_pid = pid
-                return pid
+            return pid
+
+    def proc_default_pid(self) -> Optional[int]:
+        """Best PID to focus on when the operator has not made an
+        explicit choice. Prefers a smartmetd in the `backend` role
+        over `frontend` / `mixed` / `unknown`, because the backend
+        does the actual data work — it is what the operator almost
+        always wants to profile. Falls back to the lowest PID when
+        no backend is detected."""
+        with self._lock:
+            return self._proc_default_pid_locked()
+
+    def _proc_default_pid_locked(self) -> Optional[int]:
+        if not self.procs:
             return None
+        # Backend wins if at least one is detected. Multiple backends
+        # → pick the lowest PID for stable behaviour across restarts.
+        backend = sorted(p.pid for p in self.procs.values()
+                         if p.role == "backend")
+        if backend:
+            return backend[0]
+        return min(self.procs.keys())
 
     # -- perf data ----------------------------------------------------------
 
