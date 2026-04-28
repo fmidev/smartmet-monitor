@@ -42,6 +42,13 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         help="Don't tail any log file (use admin /lastrequests instead).",
     )
     p.add_argument(
+        "--no-admin", action="store_true",
+        help="Skip the localhost admin-port auto-probe. Without -u and "
+             "without this flag, smtop probes http://localhost:8080/admin "
+             "(frontend) and http://localhost:8081/admin (backend) at "
+             "startup and registers whichever responds.",
+    )
+    p.add_argument(
         "--replay", action="store_true",
         help="On startup, read the tail of each log file so the panels "
              "come up populated instead of empty. Capped at "
@@ -150,6 +157,18 @@ def main(argv=None) -> int:
                     log_paths.append(ap)
 
     admin_urls = _parse_admin_urls(args.admin_url)
+    # Auto-probe localhost ports when the operator gave no -u flag.
+    # Saves typing on the (very common) "monitor the SmartMet running
+    # right here" workflow. Explicit -u still wins; --no-admin opts
+    # out entirely.
+    if not admin_urls and not args.no_admin:
+        from .sources.adminapi import probe_default_admin_urls
+        admin_urls = probe_default_admin_urls()
+        if admin_urls:
+            sys.stderr.write(
+                "smtop: auto-discovered admin URLs: "
+                + ", ".join(f"{l}={u}" for l, u in admin_urls) + "\n"
+            )
 
     if args.ascii:
         set_ascii(True)

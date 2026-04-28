@@ -414,11 +414,20 @@ direction; the dedicated single-panel views below remain for sortable
 
 * **Log tail** — pass one or more `-l PATH` (or glob). Multiple log
   files are tailed concurrently; rotation is detected via inode change.
-* **Admin plugin** — pass `-u http://host:8080/admin`. Multiple hosts
-  may be configured with repeated `-u` or comma-separated values, and
-  each URL can be given a label: `-u prod=http://a/admin,dev=http://b/admin`.
-  The panel chrome shows per-host status. Role (frontend/backend/mixed)
-  is auto-detected from `?what=list` on startup.
+* **Admin plugin** — when run on a SmartMet host, no flag is needed:
+  `smtop` and `smwebmon` auto-probe `http://localhost:8080/admin`
+  (frontend) and `http://localhost:8081/admin` (backend) at startup
+  and register whichever responds, under the labels `frontend` and
+  `backend`. Probe timeout is 1 s per port; non-responsive ports are
+  silently skipped. Pass `--no-admin` to disable.
+
+  For non-default deployments, pass `-u http://host:8080/admin`
+  explicitly. Multiple hosts may be configured with repeated `-u` or
+  comma-separated values, and each URL can be given a label:
+  `-u prod=http://a/admin,dev=http://b/admin`. Explicit `-u` flags
+  always win over the auto-probe. The panel chrome shows per-host
+  status. Role (frontend/backend/mixed) is auto-detected from
+  `?what=list` on startup.
 
   Smoke-test the admin URL with `wget` or `curl` before pointing
   `smtop` at it — the `?format=json` endpoints are what `smtop`
@@ -991,8 +1000,11 @@ version-locked across upgrades.
 
 ### How to run
 
-The systemd unit is shipped **disabled by default**. Operators start
-it on demand and tunnel into it with SSH:
+The systemd unit is shipped **disabled by default**. On a typical
+SmartMet host the unit needs no configuration: at startup `smwebmon`
+auto-probes the standard frontend port (8080) and backend port (8081)
+on localhost and registers whichever responds. Operators start it on
+demand and tunnel into it with SSH:
 
 ```sh
 sudo systemctl start smartmet-webmon            # on the SmartMet host
@@ -1015,7 +1027,8 @@ smartmet-webmon` to apply.
 |-------------------------------|------------------------|-----------------------------------------------------|
 | `--bind HOST:PORT`            | `127.0.0.1:8765`       | Loopback by default; the server is unauthenticated. |
 | `-l, --log PATH-OR-GLOB`      | `/var/log/smartmet/*-access-log` | Repeatable.                                |
-| `-u, --admin-url URL`         | *none*                 | `LABEL=URL` form supported; repeatable / comma-list.|
+| `-u, --admin-url URL`         | *auto-probe localhost 8080 + 8081* | `LABEL=URL` form supported; repeatable / comma-list. Explicit `-u` suppresses the auto-probe. |
+| `--no-admin`                  | off                    | Disable the localhost auto-probe (e.g. on a host that doesn't run SmartMet).|
 | `-n, --admin-interval SEC`    | `2.0`                  | Same cadence as `smtop`.                            |
 | `--replay`, `--include-rotated` | off                  | Populate the URLs panel from log history at start.  |
 | `--history-minutes N`         | `1440` (24 h)          | Memory-bounded; see `smtop` README for sizing.      |

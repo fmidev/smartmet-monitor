@@ -1,4 +1,4 @@
-.TH SMTOP 1 "2026-04-23" "smartmet-monitor" "SmartMet Server"
+.TH SMTOP 1 "2026-04-28" "smartmet-monitor-26.4.28-3" "SmartMet Server"
 .SH NAME
 smtop \- interactive terminal monitor for SmartMet Server
 .SH SYNOPSIS
@@ -63,6 +63,15 @@ Admin\-plugin base URL. Repeatable or comma\-separated; each URL
 may be prefixed with a label (\fILABEL=URL\fP). Duplicate labels
 are disambiguated with a trailing
 .BR #N .
+When omitted,
+.B smtop
+auto\-probes
+.B http://localhost:8080/admin
+(frontend) and
+.B http://localhost:8081/admin
+(backend) at startup and registers whichever responds. Pass
+.B \-\-no\-admin
+to disable the auto\-probe.
 .TP
 .BI \-n \ SECONDS
 Admin\-plugin poll interval. Default 2.0 seconds.
@@ -70,6 +79,13 @@ Admin\-plugin poll interval. Default 2.0 seconds.
 .B \-\-no\-logs
 Do not tail any log file (rely solely on admin\-plugin
 .IR lastrequests ).
+.TP
+.B \-\-no\-admin
+Skip the localhost auto\-probe. Useful when
+.B smtop
+is run on a host that doesn\(aqt run SmartMet locally (e.g.
+analysing copied access logs only) so the probe doesn\(aqt waste
+a second on unreachable ports.
 .TP
 .B \-\-replay
 On startup, read the tail of each log file (capped at

@@ -57,6 +57,14 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         help="Don't tail any log file (use admin /lastrequests instead).",
     )
     p.add_argument(
+        "--no-admin", action="store_true",
+        help="Skip the localhost admin-port auto-probe. Without -u and "
+             "without this flag, smwebmon probes "
+             "http://localhost:8080/admin (frontend) and "
+             "http://localhost:8081/admin (backend) at startup and "
+             "registers whichever responds.",
+    )
+    p.add_argument(
         "--replay", action="store_true",
         help="On startup, read the tail of each log file so the URLs "
              "panel comes up populated instead of empty.",
@@ -130,6 +138,14 @@ async def _run(args: argparse.Namespace) -> int:
     store = Store()
     log_paths = _expand_logs(args)
     admin_urls = _parse_admin_urls(args.admin_url)
+    if not admin_urls and not args.no_admin:
+        from smartmet_top.sources.adminapi import probe_default_admin_urls
+        admin_urls = probe_default_admin_urls()
+        if admin_urls:
+            sys.stderr.write(
+                "smwebmon: auto-discovered admin URLs: "
+                + ", ".join(f"{l}={u}" for l, u in admin_urls) + "\n"
+            )
 
     bind = _split_bind(args.bind)
     server = WebServer(store, bind=bind, asset_root=asset_root)

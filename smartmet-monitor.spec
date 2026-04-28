@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.28
-Release:        2%{?dist}.fmi
+Release:        3%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -119,6 +119,19 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Tue Apr 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.28-3.fmi
+- smtop and smwebmon auto-probe the standard SmartMet admin ports
+  on localhost when no -u is given: http://localhost:8080/admin
+  (frontend) and http://localhost:8081/admin (backend). Whichever
+  respond are registered under the labels "frontend" and "backend";
+  non-responsive ports are silently skipped (1 s timeout per port).
+  On a typical SmartMet host the operator no longer has to type
+  -u flags. Explicit -u still wins; --no-admin disables the
+  probe entirely. The probe validates the response by checking
+  for admin-handler tokens (cachestats / servicestats /
+  activerequests / lastrequests) so a stray 200-OK from an
+  unrelated service on the same port is not falsely registered.
+
 * Tue Apr 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.28-2.fmi
 - Snapshots gain detail / chart / trends / top_symbols methods so
   every smtop panel has a richer JSON surface for the web UI.

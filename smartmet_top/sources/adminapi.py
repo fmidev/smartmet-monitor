@@ -31,6 +31,71 @@ def _new_active_history():
     return deque(maxlen=ADMIN_HISTORY_SAMPLES)
 
 
+# Default localhost admin URLs probed when the operator passes no
+# explicit -u flag. SmartMet's FMI deployments always run the
+# frontend on 8080 and the backend on 8081 (this is the convention
+# baked into smartmet-server's default config), so probing those is
+# almost always what the operator wants.
+DEFAULT_PROBE_URLS = (
+    ("frontend", "http://localhost:8080/admin"),
+    ("backend",  "http://localhost:8081/admin"),
+)
+
+
+def _looks_like_admin(body: str) -> bool:
+    """Heuristic: does ``body`` look like the SmartMet admin
+    plugin's ``?what=list`` output?
+
+    The plugin returns either a JSON list of supported handler names
+    (``["cachestats", "servicestats", ...]``) or — on some older
+    builds — a whitespace-separated list. Either way, the strings
+    we actually care about are present. We accept the response if
+    any one of those tokens appears.
+    """
+    return any(tok in body for tok in
+               ("cachestats", "servicestats",
+                "activerequests", "lastrequests"))
+
+
+def probe_one_admin_url(url: str, timeout: float = 1.0) -> bool:
+    """Synchronous probe used at startup.
+
+    Hits ``<url>?what=list`` with a short timeout. Returns True if
+    the response is HTTP 200 and looks like an admin endpoint, False
+    on any error / timeout / unexpected body. Safe to call from
+    main(); doesn't depend on the asyncio loop.
+    """
+    try:
+        req = urllib.request.Request(
+            url + "?what=list",
+            headers={"User-Agent": "smartmet-monitor-probe"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if resp.status != 200:
+                return False
+            body = resp.read(8192).decode("utf-8", errors="replace")
+        return _looks_like_admin(body)
+    except Exception:
+        return False
+
+
+def probe_default_admin_urls(timeout: float = 1.0):
+    """Probe the SmartMet default ports on localhost. Returns a list of
+    ``(label, url)`` tuples for the URLs that responded — same shape
+    ``_parse_admin_urls`` produces, so callers can pass it directly to
+    ``runtime.start_sources(admin_urls=...)``.
+
+    Silently skips anything that fails or times out: if neither port
+    is listening the result is an empty list and the caller proceeds
+    as if no admin URL had been configured.
+    """
+    out = []
+    for label, url in DEFAULT_PROBE_URLS:
+        if probe_one_admin_url(url, timeout=timeout):
+            out.append((label, url))
+    return out
+
+
 def _fetch(url: str, timeout: float = 5.0) -> list:
     req = urllib.request.Request(url, headers={"User-Agent": "smartmet-top/0.1"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:

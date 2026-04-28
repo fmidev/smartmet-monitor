@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.4.28
-Release:        2%{?dist}.fmi
+Release:        3%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -106,6 +106,16 @@ getent passwd smartmet >/dev/null || \
 %{_python3_sitelib}/smartmet_webmon/
 
 %changelog
+* Tue Apr 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.28-3.fmi
+- smwebmon auto-probes localhost:8080 (frontend) and localhost:8081
+  (backend) at startup when no -u is given, removing the need to
+  configure /etc/sysconfig/smartmet-webmon at all on a typical
+  SmartMet host. The unit can now be started directly after
+  install with no edits. Pass --no-admin to disable.
+- Sysconfig template rewritten to reflect the auto-probe default;
+  shows when overriding -u is actually needed (remote hosts or
+  non-standard ports) rather than presenting it as required.
+
 * Tue Apr 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.28-2.fmi
 - Full panel parity with smtop. Tab navigation across every
   smtop panel (Overview, Plugins, URLs, Caches, Services, Active,

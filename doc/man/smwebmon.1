@@ -1,4 +1,4 @@
-.TH SMWEBMON 1 "2026-04-28" "smartmet-webmon" "SmartMet Server"
+.TH SMWEBMON 1 "2026-04-28" "smartmet-webmon-26.4.28-3" "SmartMet Server"
 .SH NAME
 smwebmon \- browser dashboard for SmartMet Server
 .SH SYNOPSIS
@@ -45,6 +45,22 @@ when omitted:
 Admin-plugin base URL (may be repeated, or comma-separated). Each URL
 may be prefixed
 .IR LABEL=URL .
+When omitted,
+.B smwebmon
+auto-probes
+.B http://localhost:8080/admin
+(frontend) and
+.B http://localhost:8081/admin
+(backend) at startup and registers whichever responds. Pass
+.B \-\-no\-admin
+to disable the auto-probe.
+.TP
+.B \-\-no\-admin
+Skip the localhost auto-probe. Useful when
+.B smwebmon
+is run on a host that doesn\(aqt run SmartMet locally (e.g. analysing
+copied access logs only) so the probe doesn\(aqt waste a second on
+unreachable ports.
 .TP
 .BR \-n ", " \-\-admin\-interval " " \fISEC\fR
 Admin-plugin poll interval in seconds. Default
