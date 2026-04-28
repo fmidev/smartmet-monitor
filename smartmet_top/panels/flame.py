@@ -568,7 +568,9 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
     # ---- export ------------------------------------------------------------
 
     def export_snapshot(self, store):
-        # Hierarchical — flat CSV would lose the structure.
+        # Hierarchical — flat CSV would lose the structure. The
+        # FlameSnapshot exists for the web view (which can serve folded
+        # stacks as JSON), but the curses CSV path declines to export.
         return None, None
 
     # ---- drawing -----------------------------------------------------------

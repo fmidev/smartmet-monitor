@@ -6,6 +6,7 @@ import curses
 import time
 
 from .. import theme
+from ..snapshots.services import ServicesSnapshot
 from ..widgets.bars import hbar, human_count, human_ms, sparkline, vchart
 from .base import Panel, safe_addstr, write_row
 
@@ -91,24 +92,7 @@ Keys:
         return True
 
     def export_snapshot(self, store):
-        headers = ["host", "handler", "req_per_min", "req_per_hour",
-                   "req_per_day", "avg_ms", "avg_cpu_ms"]
-        rows = []
-        for host in store.admin_hosts:
-            snap = store.servicestats.get(host)
-            if snap is None or not snap.ok:
-                continue
-            for r in snap.rows or []:
-                rows.append([
-                    host,
-                    str(r.get("Handler") or r.get("handler") or "?"),
-                    _f(r.get("LastMinute")),
-                    _f(r.get("LastHour")),
-                    _f(r.get("Last24Hours")),
-                    _f(r.get("AverageDuration")),
-                    _f(r.get("AverageCPUMs")),
-                ])
-        return headers, rows
+        return ServicesSnapshot.table(store)
 
     def draw(self, win, store):
         h, w = win.getmaxyx()

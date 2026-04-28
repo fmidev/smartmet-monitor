@@ -34,6 +34,7 @@ import curses
 from typing import List
 
 from .. import theme
+from ..snapshots.network import NetworkSnapshot
 from ..widgets.bars import human_bytes, sparkline
 from .base import Panel, safe_addstr, write_label, write_row
 
@@ -109,13 +110,12 @@ Keys:
 
     def export_snapshot(self, store):
         # Connection-state distribution is the most useful single
-        # thing to dump.
-        counts, _ = store.netstats_states_latest()
-        if not counts:
+        # thing to dump. The snapshot returns ([], []) when there's
+        # nothing yet; preserve the existing "nothing to export"
+        # toast by returning (None, None) in that case.
+        headers, rows = NetworkSnapshot.table(store)
+        if not headers:
             return None, None
-        headers = ["state", "count"]
-        rows = sorted(counts.items(), key=lambda kv: -kv[1])
-        rows = [[k, v] for k, v in rows if v > 0]
         return headers, rows
 
     def draw(self, win, store):

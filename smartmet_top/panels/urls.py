@@ -8,6 +8,8 @@ import time
 from typing import List, Optional, Tuple
 
 from .. import theme
+from ..snapshots import urls as urls_snap
+from ..snapshots.urls import URLsSnapshot
 from ..state.store import MinuteBucket
 from ..widgets.bars import (
     hbar,
@@ -207,28 +209,13 @@ Keys:
     # ---- export ------------------------------------------------------------
 
     def export_snapshot(self, store):
-        rows = self._sorted_urls(store)
-        win_min = WINDOWS[self.window_idx]
-        headers = ["url", "window_min", "count", "mean_ms", "p50_ms", "p95_ms",
-                   "p99_ms", "max_ms", "avg_bytes", "total_bytes",
-                   "errors", "err_pct"]
-        out = []
-        for url, b in rows:
-            out.append([
-                url,
-                win_min,
-                b.count,
-                round(b.hist.mean(), 3),
-                round(b.hist.p50(), 3),
-                round(b.hist.p95(), 3),
-                round(b.hist.p99(), 3),
-                round(b.hist.max_ms, 3),
-                int(b.bytes / b.count) if b.count else 0,
-                b.bytes,
-                b.errors,
-                round(b.errors / b.count * 100, 3) if b.count else 0,
-            ])
-        return headers, out
+        return URLsSnapshot.table(
+            store,
+            window_min=WINDOWS[self.window_idx],
+            sort=SORT_COLS[self.sort_idx][1],
+            reverse=self.reverse,
+            filter_str=self.filter,
+        )
 
     # External hook for cross-panel drill-in (Plugins → URLs filtered).
     def set_filter(self, value: str) -> None:
@@ -245,52 +232,19 @@ Keys:
         # (common right after --replay since recent log activity may all
         # be older than e.g. 5 minutes), fall through to the next wider
         # window with data. Mirrors the Plugins panel behaviour.
-        rows = self._collect_urls(store, self.window_idx)
-        self._effective_window_idx = self.window_idx
-        if not rows:
-            for try_idx in range(self.window_idx + 1, len(WINDOWS)):
-                widened = self._collect_urls(store, try_idx)
-                if widened:
-                    rows = widened
-                    self._effective_window_idx = try_idx
-                    break
+        win_min = WINDOWS[self.window_idx]
+        rows, eff_min = urls_snap.collect_with_autowiden(
+            store,
+            window_min=win_min,
+            sort=SORT_COLS[self.sort_idx][1],
+            reverse=self.reverse,
+            filter_str=self.filter,
+        )
+        try:
+            self._effective_window_idx = WINDOWS.index(eff_min)
+        except ValueError:
+            self._effective_window_idx = self.window_idx
         return rows
-
-    def _collect_urls(self, store, window_idx: int) -> List[Tuple[str, MinuteBucket]]:
-        win_min = WINDOWS[window_idx]
-        urls = store.snapshot_urls(win_min)
-        if self.filter:
-            f = self.filter.lower()
-            urls = [(u, b) for (u, b) in urls if f in u.lower()]
-        key_name = SORT_COLS[self.sort_idx][1]
-
-        def keyfn(item):
-            url, b = item
-            if key_name == "count":
-                return b.count
-            if key_name == "p95":
-                return b.hist.p95()
-            if key_name == "p50":
-                return b.hist.p50()
-            if key_name == "mean_ms":
-                return b.hist.mean()
-            if key_name == "max_ms":
-                return b.hist.max_ms
-            if key_name == "avg_kb":
-                return (b.bytes / b.count / 1024) if b.count else 0
-            if key_name == "mb_tot":
-                return b.bytes
-            if key_name == "err_pct":
-                return (b.errors / b.count * 100) if b.count else 0
-            if key_name == "url_asc":
-                return url
-            return 0
-
-        rev = self.reverse
-        if key_name == "url_asc":
-            rev = False
-        urls.sort(key=keyfn, reverse=rev)
-        return urls
 
     # ---- drawing -----------------------------------------------------------
 

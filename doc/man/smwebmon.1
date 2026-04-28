@@ -1,0 +1,127 @@
+.TH SMWEBMON 1 "2026-04-28" "smartmet-webmon" "SmartMet Server"
+.SH NAME
+smwebmon \- browser dashboard for SmartMet Server
+.SH SYNOPSIS
+.B smwebmon
+.RI [ options ]
+.SH DESCRIPTION
+.B smwebmon
+is a small HTTP+JSON dashboard server, the browser-side companion to
+.BR smtop (1).
+It imports the same data-collection layer used by smtop \- access-log
+tail, admin-plugin polling, /proc, /proc/net, /proc/vmstat, optional
+journal tail \- and exposes the resulting state over HTTP for a
+loopback-only browser UI.
+.PP
+The first release ships only the URLs panel as a web view, with
+click-to-drill-down: per-window stats, latency histogram (HTML Canvas),
+status-code mix, top API keys, and a 60-minute mean-latency line chart.
+Remaining panels port over one at a time.
+.PP
+.B smwebmon
+binds to 127.0.0.1 by default and has no authentication. Operators are
+expected to tunnel from their workstation:
+.PP
+.RS
+ssh \-L 8765:localhost:8765 host
+.RE
+.PP
+then open
+.B http://localhost:8765/
+in any modern browser.
+.SH OPTIONS
+.TP
+.BR \-\-bind " " \fIHOST:PORT\fR
+Listen address. Default
+.BR 127.0.0.1:8765 .
+Stick to localhost; the server is unauthenticated.
+.TP
+.BR \-l ", " \-\-log " " \fIPATH-OR-GLOB\fR
+Access-log file to tail (may be repeated; globs allowed). Default
+when omitted:
+.BR /var/log/smartmet/*-access-log .
+.TP
+.BR \-u ", " \-\-admin\-url " " \fIURL\fR
+Admin-plugin base URL (may be repeated, or comma-separated). Each URL
+may be prefixed
+.IR LABEL=URL .
+.TP
+.BR \-n ", " \-\-admin\-interval " " \fISEC\fR
+Admin-plugin poll interval in seconds. Default
+.BR 2.0 .
+.TP
+.B \-\-no\-logs
+Don\(aqt tail any log file (use admin
+.B /lastrequests
+instead).
+.TP
+.B \-\-replay
+On startup, read the tail of each log file so the URLs panel comes up
+populated instead of empty.
+.TP
+.BR \-\-replay\-bytes " " \fIN\fR
+Maximum bytes to read per log file when
+.B \-\-replay
+is set. Default 1 GB.
+.TP
+.B \-\-include\-rotated
+With
+.BR \-\-replay ,
+also read each log\(aqs rotated siblings (e.g.
+.IR wms-access-log-20260424.gz ).
+.TP
+.BR \-\-history\-minutes " " \fIN\fR
+Per-minute history retention. Default 1440 (24 h).
+.TP
+.BR \-\-journal\-unit " " \fIUNIT\fR
+systemd unit to follow as a [journal] source. Default
+.BR smartmet-server .
+Pass an empty string to disable.
+.TP
+.BR \-\-asset\-root " " \fIPATH\fR
+Override the static-asset directory. Default search order:
+.BR $SMARTMET_WEBMON_ASSETS ,
+sibling
+.IR share/smartmet/webmon/ ,
+.IR /usr/share/smartmet/webmon/ .
+.SH COSTS AND POLICY
+.B smwebmon
+is shipped as a systemd unit but
+.B disabled by default.
+The cost analysis (~100 MB RSS, ~5 % of one core, ~43 200 admin-plugin
+requests/day per host at the default 2 s poll interval) was judged
+small but not free, and the operator-on-demand model fits the way the
+companion
+.B smtop
+is already used. To launch:
+.PP
+.RS
+sudo systemctl start smartmet-webmon
+.RE
+.PP
+The unit runs as user
+.B smartmet
+so it reads the same access logs the SmartMet daemon writes.
+.B smwebmon
+deliberately does not enable
+.B \-\-perf
+\- operators who want flame graphs run
+.B smtop \-\-perf
+interactively, where the privilege requirement and overhead are obvious.
+.SH FILES
+.TP
+.I /usr/share/smartmet/webmon/
+Static HTML, CSS and JS served by the dashboard.
+.TP
+.I /etc/sysconfig/smartmet-webmon
+Options passed to
+.B smwebmon
+by the systemd unit.
+.TP
+.I /usr/lib/systemd/system/smartmet-webmon.service
+The systemd unit file.
+.SH SEE ALSO
+.BR smtop (1),
+.BR bstat (1),
+.BR bperf (1),
+.BR systemctl (1).

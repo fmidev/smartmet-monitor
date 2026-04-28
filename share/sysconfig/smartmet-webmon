@@ -1,0 +1,24 @@
+# /etc/sysconfig/smartmet-webmon
+#
+# Options passed to /usr/bin/smwebmon by the smartmet-webmon.service
+# unit. Edit and `sudo systemctl restart smartmet-webmon` to apply.
+#
+# All settings commented out by default — the unit will start the
+# server with built-in defaults (loopback bind on :8765, default log
+# glob, no admin URLs, 24h history retention).
+
+# Bind address. Stick to localhost; the dashboard has no
+# authentication. Tunnel from your laptop via:
+#   ssh -L 8765:localhost:8765 host
+# and open http://localhost:8765/ in a browser.
+#SMWEBMON_OPTS="--bind 127.0.0.1:8765"
+
+# Add log files and admin URLs as needed. Multiple log files / admin
+# URLs can be passed by repeating the option, or with comma-separated
+# admin URLs. The webmon does NOT enable --perf — operators who want
+# flame graphs run `smtop --perf` interactively.
+#SMWEBMON_OPTS="--bind 127.0.0.1:8765 \
+#  -u backend1=http://localhost:8080/admin \
+#  -l /var/log/smartmet/wms-access-log \
+#  -l /var/log/smartmet/timeseries-access-log \
+#  --replay --include-rotated --history-minutes 1440"

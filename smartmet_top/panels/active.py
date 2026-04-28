@@ -6,6 +6,7 @@ import curses
 import time
 
 from .. import theme
+from ..snapshots.active import ActiveSnapshot
 from ..widgets.bars import sparkline, vchart
 from .base import Panel, safe_addstr, write_row
 
@@ -76,26 +77,7 @@ Keys:
         return True
 
     def export_snapshot(self, store):
-        headers = ["host", "id", "duration_s", "client_ip", "apikey", "request"]
-        rows = []
-        for host in store.admin_hosts:
-            snap = store.activerequests.get(host)
-            if snap is None or not snap.ok:
-                continue
-            for r in snap.rows or []:
-                try:
-                    d = float(r.get("Duration") or r.get("duration") or 0)
-                except (ValueError, TypeError):
-                    d = 0.0
-                rows.append([
-                    host,
-                    str(r.get("Id") or r.get("id") or ""),
-                    round(d, 3),
-                    str(r.get("ClientIP") or r.get("clientip") or ""),
-                    str(r.get("Apikey") or r.get("apikey") or "-"),
-                    str(r.get("RequestString") or r.get("requeststring") or ""),
-                ])
-        return headers, rows
+        return ActiveSnapshot.table(store)
 
     def draw(self, win, store):
         h, w = win.getmaxyx()

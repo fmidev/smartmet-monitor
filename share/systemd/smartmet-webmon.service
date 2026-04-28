@@ -1,0 +1,33 @@
+[Unit]
+Description=SmartMet Server browser dashboard (smwebmon)
+Documentation=man:smwebmon(1) https://github.com/fmidev/smartmet-monitor
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/sysconfig/smartmet-webmon
+ExecStart=/usr/bin/smwebmon $SMWEBMON_OPTS
+User=smartmet
+Group=smartmet
+Restart=on-failure
+RestartSec=5
+
+# Defensive cgroup limits — the cost analysis estimated ~100 MB and
+# ~5 % of one core for typical configs, so these are well above
+# expected and well below "ate the host". Raise them in a drop-in
+# (/etc/systemd/system/smartmet-webmon.service.d/) if you need to.
+MemoryMax=512M
+CPUQuota=50%
+
+# Basic hardening; smwebmon doesn't need any of this.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+# This unit is shipped DISABLED by default. The cost of running it
+# 24x7 was discussed and found unjustified versus on-demand use.
+# Operators run `sudo systemctl start smartmet-webmon` when they
+# want it, then SSH-tunnel: `ssh -L 8765:localhost:8765 host`.
+[Install]
+WantedBy=multi-user.target

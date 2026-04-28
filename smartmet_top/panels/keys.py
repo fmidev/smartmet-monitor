@@ -6,6 +6,8 @@ import curses
 from typing import List, Optional, Tuple
 
 from .. import theme
+from ..snapshots import keys as keys_snap
+from ..snapshots.keys import KeysSnapshot
 from ..state.store import MinuteBucket
 from ..widgets.bars import hbar, sparkline, human_count, human_ms
 from .base import Panel, safe_addstr, write_row
@@ -158,47 +160,22 @@ Keys:
         self.cursor = new
 
     def export_snapshot(self, store):
-        rows = self._sorted(store)
-        win_min = WINDOWS[self.window_idx]
-        headers = ["apikey", "window_min", "count", "mean_ms", "p50_ms",
-                   "p95_ms", "max_ms", "total_bytes", "errors", "err_pct"]
-        out = []
-        for k, b in rows:
-            out.append([
-                k, win_min, b.count,
-                round(b.hist.mean(), 3),
-                round(b.hist.p50(), 3),
-                round(b.hist.p95(), 3),
-                round(b.hist.max_ms, 3),
-                b.bytes, b.errors,
-                round(b.errors / b.count * 100, 3) if b.count else 0,
-            ])
-        return headers, out
+        return KeysSnapshot.table(
+            store,
+            window_min=WINDOWS[self.window_idx],
+            sort=SORT_COLS[self.sort_idx][1],
+            reverse=self.reverse,
+            filter_str=self.filter,
+        )
 
     def _sorted(self, store) -> List[Tuple[str, MinuteBucket]]:
-        win_min = WINDOWS[self.window_idx]
-        rows = store.snapshot_keys(win_min)
-        if self.filter:
-            f = self.filter.lower()
-            rows = [(k, b) for (k, b) in rows if f in k.lower()]
-        key_name = SORT_COLS[self.sort_idx][1]
-
-        def keyfn(item):
-            k, b = item
-            if key_name == "count": return b.count
-            if key_name == "p95": return b.hist.p95()
-            if key_name == "mean_ms": return b.hist.mean()
-            if key_name == "mb_tot": return b.bytes
-            if key_name == "err_pct":
-                return (b.errors / b.count * 100) if b.count else 0
-            if key_name == "key_asc": return k
-            return 0
-
-        rev = self.reverse
-        if key_name == "key_asc":
-            rev = False
-        rows.sort(key=keyfn, reverse=rev)
-        return rows
+        return keys_snap.collect(
+            store,
+            window_min=WINDOWS[self.window_idx],
+            sort=SORT_COLS[self.sort_idx][1],
+            reverse=self.reverse,
+            filter_str=self.filter,
+        )
 
     def draw(self, win, store):
         if self.detail_key is not None:

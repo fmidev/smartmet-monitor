@@ -1,26 +1,34 @@
 # smartmet-monitor
 
 Log analysis and live monitoring tools for SmartMet Server. Ships two
-complementary command-line programs:
+complementary command-line programs, with an optional browser
+dashboard as a separate companion package:
 
 | Command                          | What it does                                                         |
 |----------------------------------|----------------------------------------------------------------------|
 | `bstat`, `bchart`, `burls`, `bstatus`, `bkeys` | Offline analysis of access-log files (Bash + gawk). |
 | `smtop`                          | Interactive curses dashboard that tails logs and polls `/admin`.     |
+| `smwebmon` *(separate RPM `smartmet-webmon`)* | Browser dashboard serving the same data over HTTP+JSON.   |
 
-Both parts are implemented against the Python 3 and GNU Awk 5 standard
+All parts are implemented against the Python 3 and GNU Awk 5 standard
 libraries. No third-party runtime dependencies are required.
 
 ## Installation
 
 ```sh
-make install                  # installs under /usr/{bin,share,lib/pythonX}/
-make rpm                      # builds an RPM under ./rpmbuild/RPMS/noarch/
+make install                  # installs smartmet-monitor under /usr/{bin,share,lib/pythonX}/
+make install-webmon           # installs the optional smartmet-webmon files (binary, package, unit, assets)
+make rpm                      # builds smartmet-monitor RPM under ./rpmbuild/RPMS/noarch/
+make webmon-rpm               # builds smartmet-webmon RPM (depends on smartmet-monitor at the exact version)
+make rpms                     # builds both
 ```
 
-The RPM package name is `smartmet-monitor`. It requires Python 3.9
-(the `python3` package on RHEL 10 / Fedora, or the `python39`
-AppStream module on RHEL 8) plus `gawk`.
+The base RPM is `smartmet-monitor`. It requires Python 3.9 (the
+`python3` package on RHEL 10 / Fedora, or the `python39` AppStream
+module on RHEL 8) plus `gawk`. The optional companion RPM
+`smartmet-webmon` adds the `smwebmon` daemon and depends on
+`smartmet-monitor` at the same exact version, so a coordinated
+upgrade keeps the two in lockstep.
 
 On a fresh builder, install the build dependencies straight from the
 spec before running `make rpm`:
@@ -962,16 +970,126 @@ order — combined with `--history-minutes 10080` this gives a full
 week of context. Compressed `.gz` files are read transparently via
 the stdlib `gzip` module; no pip dependency.
 
+## `smartmet-webmon` — browser dashboard
+
+The optional companion `smwebmon` exposes the same data over HTTP for
+a browser-based UI. It imports the same `Store`, source loops and
+snapshot classes as `smtop`; nothing is duplicated. The first release
+ships only the URLs panel as a web view; the remaining panels port
+over one at a time.
+
+### Why a separate package
+
+The data-collection layer (`smartmet_top.runtime`,
+`smartmet_top.snapshots`, `smartmet_top.state.store`) lives in
+`smartmet-monitor` and is reused by both binaries. The web-only
+parts — the HTTP server, the static assets, the systemd unit — are
+packaged separately as `smartmet-webmon` so sites that only want the
+CLI tools don't pay for them. `smartmet-webmon` requires
+`smartmet-monitor = %{version}-%{release}`, so the two stay
+version-locked across upgrades.
+
+### How to run
+
+The systemd unit is shipped **disabled by default**. Operators start
+it on demand and tunnel into it with SSH:
+
+```sh
+sudo systemctl start smartmet-webmon            # on the SmartMet host
+ssh -L 8765:localhost:8765 host                 # from your laptop
+open http://localhost:8765/                     # any modern browser
+sudo systemctl stop smartmet-webmon             # when done
+```
+
+The unit runs as user `smartmet` so it has read access to
+`/var/log/smartmet/*-access-log` (the same files the daemon writes).
+
+### Configuration
+
+Options live in `/etc/sysconfig/smartmet-webmon` and are passed to
+`smwebmon` via `EnvironmentFile=`. All settings are commented out by
+default; uncomment and edit, then `sudo systemctl restart
+smartmet-webmon` to apply.
+
+| Flag                          | Default                | Notes                                               |
+|-------------------------------|------------------------|-----------------------------------------------------|
+| `--bind HOST:PORT`            | `127.0.0.1:8765`       | Loopback by default; the server is unauthenticated. |
+| `-l, --log PATH-OR-GLOB`      | `/var/log/smartmet/*-access-log` | Repeatable.                                |
+| `-u, --admin-url URL`         | *none*                 | `LABEL=URL` form supported; repeatable / comma-list.|
+| `-n, --admin-interval SEC`    | `2.0`                  | Same cadence as `smtop`.                            |
+| `--replay`, `--include-rotated` | off                  | Populate the URLs panel from log history at start.  |
+| `--history-minutes N`         | `1440` (24 h)          | Memory-bounded; see `smtop` README for sizing.      |
+| `--journal-unit UNIT`         | `smartmet-server`      | Empty string disables.                              |
+
+The port `8765` is **only the default** — change it via `--bind` or
+the sysconfig file. `smwebmon` deliberately does not enable `--perf`;
+flame graphs are an interactive workflow that belongs to
+`smtop --perf`, where the privilege requirement and CPU overhead
+are immediately visible to the operator running it.
+
+### What the web URLs panel shows
+
+Same numbers as `smtop`'s URLs panel — request count, mean / p50 /
+p95 / p99 / max latency, mean and total bytes, error %, and a
+per-URL drill-down — rendered as an HTML table with click-to-open
+detail modal. The drill-down has four sections:
+
+  * **Windowed stats** for 1 / 5 / 15 / 60 min (whichever have data).
+  * **Mean latency over the last 60 minutes** as a Canvas line chart
+    with the per-minute series.
+  * **Latency distribution** as a Canvas bar chart over the same
+    exponential-bucket histogram (base 1.5) the curses view uses.
+  * **Status codes** ranked by count, coloured by class.
+  * **Top API keys** for this URL across all retained history.
+
+Reading guide is identical to the curses URLs panel — see the
+`smtop` section above for healthy-shape / trouble-pattern /
+typical-root-cause / where-to-look-next guidance, all of which
+applies unchanged.
+
+### Costs and policy
+
+The cost analysis (~80–150 MB RSS, ~5 % of one core, ~43 200 admin
+requests/day at 2 s polling) was judged small but not free, which
+is why the unit ships disabled. The unit also installs defensive
+cgroup rails (`MemoryMax=512M`, `CPUQuota=50%`) so a future bug
+cannot eat the host. Override these via a drop-in if your host
+warrants it:
+
+```sh
+sudo systemctl edit smartmet-webmon
+```
+
+### What's NOT in v1 (deferred to follow-ups)
+
+  * Server-Sent Events for live updates — current page polls every 2 s
+    with `fetch()`. SSE is the next planned step.
+  * Other panels (Services, Caches, Active, Plugins, etc.) — the
+    snapshot classes are already toolkit-agnostic; each panel ports
+    over one at a time as a separate change.
+  * Authentication — localhost-only with SSH tunnelling is the
+    deliberate v1 model. Token auth lands when there is a concrete
+    multi-user use case.
+
 ## Building the RPM
 
 ```sh
-make rpm
+make rpm                # smartmet-monitor only
+make webmon-rpm         # smartmet-webmon (requires smartmet-monitor.spec to build first time)
+make rpms               # both, in one go
 ```
 
 `make rpm` builds a source tarball from `HEAD` and runs `rpmbuild -tb`,
 which uses `%_topdir` from `~/.rpmmacros` — the same convention as the
-other `smartmet-*` packages in this workspace.
+other `smartmet-*` packages in this workspace. `make webmon-rpm`
+re-uses the same tarball (the two RPMs share `Source0:`) and runs
+`rpmbuild -bb smartmet-webmon.spec` against it.
 
 The resulting `smartmet-monitor-<version>-<release>.noarch.rpm` installs
 everything under `/usr/bin`, `/usr/share/smartmet`, and the distribution
 site-packages directory (e.g. `/usr/lib/python3.9/site-packages/smartmet_top`).
+The companion `smartmet-webmon-<version>-<release>.noarch.rpm` adds
+`/usr/bin/smwebmon`, `/usr/share/smartmet/webmon/`,
+`/usr/lib/systemd/system/smartmet-webmon.service`,
+`/etc/sysconfig/smartmet-webmon`, and the `smartmet_webmon` Python
+package next to `smartmet_top`.

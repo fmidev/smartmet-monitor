@@ -18,6 +18,8 @@ import time
 from typing import List, Optional, Tuple
 
 from .. import theme
+from ..snapshots import plugins as plugins_snap
+from ..snapshots.plugins import PluginsSnapshot
 # Import the module rather than the constants so live changes from
 # `set_history_minutes()` are picked up. `from .store import X` would
 # bind the panel's local name at import time and never update.
@@ -207,25 +209,14 @@ Keys:
     # ---- export ------------------------------------------------------------
 
     def export_snapshot(self, store):
-        headers = [
-            "plugin", "rps_60s", "mean_ms_60s", "p50_ms_60s", "p95_ms_60s",
-            "max_ms_60s", "bytes_per_sec_60s", "err_pct_60s",
-            "requests_60s", "errors_60s",
-        ]
-        rows = []
-        for src, snap in self._sorted_rows(store):
-            rows.append([
-                src.label,
-                round(snap.count / 60.0, 3),
-                round(snap.hist.mean(), 3),
-                round(snap.hist.p50(), 3),
-                round(snap.hist.p95(), 3),
-                round(snap.hist.max_ms, 3),
-                round(snap.bytes / 60.0, 1),
-                round(snap.errors / snap.count * 100.0, 3) if snap.count else 0.0,
-                snap.count, snap.errors,
-            ])
-        return headers, rows
+        return PluginsSnapshot.table(
+            store,
+            window_label=WINDOWS[self.window_idx][0],
+            sort=SORT_COLS[self.sort_idx][1],
+            reverse=self.reverse,
+            filter_str=self.filter,
+            hide_idle=self.hide_idle,
+        )
 
     # ---- selection / sort --------------------------------------------------
 
@@ -236,53 +227,20 @@ Keys:
         because the 60s per-second window can only be filled from live
         tail. The header reflects which window we actually rendered.
         """
-        rows = self._collect_rows(store, self.window_idx)
+        label = WINDOWS[self.window_idx][0]
+        rows, eff_label = plugins_snap.collect_with_autowiden(
+            store,
+            window_label=label,
+            sort=SORT_COLS[self.sort_idx][1],
+            reverse=self.reverse,
+            filter_str=self.filter,
+            hide_idle=self.hide_idle,
+        )
         self._effective_window_idx = self.window_idx
-        if not rows and self.hide_idle and store.snapshot_sources():
-            for try_idx in range(self.window_idx + 1, len(WINDOWS)):
-                widened = self._collect_rows(store, try_idx)
-                if widened:
-                    rows = widened
-                    self._effective_window_idx = try_idx
-                    break
-        return rows
-
-    def _collect_rows(self, store, window_idx: int) -> List[Tuple[SourceStats, "object"]]:
-        _, span, resolution = WINDOWS[window_idx]
-        rows: List[Tuple[SourceStats, object]] = []
-        for src in store.snapshot_sources():
-            if resolution == "second":
-                snap = src.second_window(span)
-            else:
-                snap = src.minute_window(span)
-            if self.hide_idle and snap.count == 0:
-                continue
-            if self.filter and self.filter.lower() not in src.label.lower():
-                continue
-            rows.append((src, snap))
-
-        key_name = SORT_COLS[self.sort_idx][1]
-
-        def keyfn(item):
-            src, snap = item
-            if key_name == "name":
-                return src.label
-            if key_name == "rps":
-                return snap.count
-            if key_name == "mean_ms":
-                return snap.hist.mean()
-            if key_name == "p95_ms":
-                return snap.hist.p95()
-            if key_name == "err_pct":
-                return (snap.errors / snap.count * 100) if snap.count else 0.0
-            if key_name == "bytes":
-                return snap.bytes
-            return 0
-
-        rev = self.reverse
-        if key_name == "name":
-            rev = False
-        rows.sort(key=keyfn, reverse=rev)
+        for i, (lbl, _, _) in enumerate(WINDOWS):
+            if lbl == eff_label:
+                self._effective_window_idx = i
+                break
         return rows
 
     # ---- drawing -----------------------------------------------------------

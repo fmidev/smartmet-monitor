@@ -1,0 +1,119 @@
+# smartmet-webmon — browser-dashboard companion to smartmet-monitor.
+#
+# Ships a single daemon (`smwebmon`) plus the static HTML/CSS/JS it
+# serves over HTTP. The shared data-collection layer (sources,
+# state.Store, snapshots) lives in smartmet-monitor and is depended
+# on at the exact-version level.
+#
+# The unit is shipped DISABLED by default. See the cost-analysis
+# discussion in the project's planning notes; operators run
+# `sudo systemctl start smartmet-webmon` only when they want the
+# dashboard, then SSH-tunnel to localhost.
+
+%if 0%{?rhel} == 8
+%global python3_pkgversion 39
+%global python3_bin python3.9
+%else
+%global python3_pkgversion 3
+%global python3_bin python3
+%endif
+
+%global _python3_sitelib %{python3_sitelib}
+
+Name:           smartmet-webmon
+Version:        26.4.28
+Release:        1%{?dist}.fmi
+Summary:        Browser dashboard for SmartMet Server (smwebmon)
+License:        MIT
+URL:            https://github.com/fmidev/smartmet-monitor
+Source0:        smartmet-monitor-%{version}.tar.gz
+BuildArch:      noarch
+
+BuildRequires:  python%{python3_pkgversion}
+BuildRequires:  python%{python3_pkgversion}-rpm-macros
+BuildRequires:  make
+BuildRequires:  systemd-rpm-macros
+
+# Exact-version dep — webmon imports smartmet_top.snapshots,
+# smartmet_top.runtime, smartmet_top.state.store at runtime, all of
+# which live in smartmet-monitor.
+Requires:       smartmet-monitor = %{version}-%{release}
+Requires:       python%{python3_pkgversion}
+%{?systemd_requires}
+
+# The unit runs as user `smartmet`, mirroring the SmartMet daemon's
+# user so the dashboard reads the same access logs the daemon writes.
+# The smartmet user is normally created by smartmet-server's RPM; we
+# create it here too so smartmet-webmon can be installed standalone
+# (idempotent — does nothing if the user already exists).
+Requires(pre):  shadow-utils
+
+%description
+Browser-based companion to smartmet-monitor. Adds the `smwebmon`
+daemon that serves a small dashboard (URLs panel in v1, more to
+follow) over HTTP+JSON on loopback. Reuses the data-collection layer
+from smartmet-monitor; does not pull X11 or any third-party Python
+packages.
+
+The unit is shipped disabled. Start when needed:
+
+    sudo systemctl start smartmet-webmon
+
+then tunnel from your laptop:
+
+    ssh -L 8765:localhost:8765 host
+
+and open http://localhost:8765/ in any modern browser.
+
+%prep
+%setup -q -n smartmet-monitor-%{version}
+
+%build
+# Nothing to compile — the make check target in smartmet-monitor
+# already validated the shared library; this spec just installs the
+# webmon-specific files. We re-run check here too to catch the
+# webmon imports.
+make check PYTHON=%{python3_bin} PYSITELIB=%{_python3_sitelib}
+
+%install
+rm -rf %{buildroot}
+make install-webmon \
+    DESTDIR=%{buildroot} \
+    PREFIX=%{_prefix} \
+    PYSITELIB=%{_python3_sitelib} \
+    UNITDIR=%{_unitdir} \
+    SYSCONFDIR=%{_sysconfdir}
+
+%pre
+getent passwd smartmet >/dev/null || \
+    useradd -r -s /sbin/nologin -d /var/lib/smartmet \
+            -c "SmartMet Server" smartmet
+
+%post
+%systemd_post smartmet-webmon.service
+
+%preun
+%systemd_preun smartmet-webmon.service
+
+%postun
+%systemd_postun_with_restart smartmet-webmon.service
+
+%files
+%{_bindir}/smwebmon
+%{_datadir}/smartmet/webmon/
+%{_unitdir}/smartmet-webmon.service
+%config(noreplace) %{_sysconfdir}/sysconfig/smartmet-webmon
+%{_python3_sitelib}/smartmet_webmon/
+
+%changelog
+* Tue Apr 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.28-1.fmi
+- Initial release. Browser dashboard companion to smartmet-monitor.
+  Ships `smwebmon` (HTTP+JSON server) plus static assets; reuses the
+  data-collection layer (Store, sources, snapshots) from
+  smartmet-monitor at the exact-version level. URLs panel only in
+  v1, with click-to-drill-down: per-window stats, latency histogram
+  (HTML Canvas), status-code mix, top API keys, last-60-min mean
+  latency line chart. systemd unit shipped disabled — start with
+  `sudo systemctl start smartmet-webmon` when needed and SSH-tunnel
+  to 127.0.0.1:8765. Runs as user `smartmet` so it reads the same
+  access logs the daemon writes. No X11, no third-party Python deps.

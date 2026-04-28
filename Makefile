@@ -18,7 +18,15 @@ MANDIR = $(DESTDIR)$(PREFIX)/share/man/man1
 DOCDIR = $(DESTDIR)$(PREFIX)/share/doc/smartmet-monitor
 SITEDIR = $(DESTDIR)$(PYSITELIB)/smartmet_top
 
-.PHONY: all install uninstall clean check rpm
+# smartmet-webmon — browser-dashboard companion. Ships as a separate
+# RPM via the install-webmon target so smartmet-monitor stays free of
+# the systemd / asset / extra-package weight.
+SITEDIR_WEBMON = $(DESTDIR)$(PYSITELIB)/smartmet_webmon
+WEBMON_ASSET_DIR = $(SHAREDIR)/webmon
+UNITDIR ?= /usr/lib/systemd/system
+SYSCONFDIR ?= /etc
+
+.PHONY: all install uninstall clean check rpm install-webmon webmon-rpm rpms
 
 all:
 	@echo "smartmet-monitor is a no-build package. Use 'make install' or 'make rpm'."
@@ -27,6 +35,7 @@ BTOOLS = bstat bchart burls bstatus bkeys bperf
 LEGACY = bstat1s bstat10s bstat1 bstat10 bstat60 bstat24
 MANPAGES = smtop.1 bstat.1 bchart.1 burls.1 bstatus.1 bkeys.1 bperf.1 \
            bstat1s.1 bstat10s.1 bstat1.1 bstat10.1 bstat60.1 bstat24.1
+WEBMON_ASSETS = index.html app.js chart.js style.css
 
 install:
 	install -d $(BINDIR) $(SHAREDIR) $(MANDIR) $(DOCDIR)
@@ -66,6 +75,26 @@ uninstall:
 	$(foreach m,$(MANPAGES),rm -f $(MANDIR)/$(m); )
 	rm -rf $(DOCDIR)
 	rm -rf $(SITEDIR)
+
+install-webmon:
+	install -d $(BINDIR) $(SITEDIR_WEBMON) $(WEBMON_ASSET_DIR) $(MANDIR)
+	install -d $(DESTDIR)$(UNITDIR) $(DESTDIR)$(SYSCONFDIR)/sysconfig
+	install -m 0755 smwebmon $(BINDIR)/smwebmon
+	install -m 0644 smartmet_webmon/*.py $(SITEDIR_WEBMON)/
+	$(foreach a,$(WEBMON_ASSETS), \
+	    install -m 0644 share/smartmet/webmon/$(a) $(WEBMON_ASSET_DIR)/$(a); )
+	install -m 0644 share/systemd/smartmet-webmon.service \
+	    $(DESTDIR)$(UNITDIR)/smartmet-webmon.service
+	install -m 0644 share/sysconfig/smartmet-webmon \
+	    $(DESTDIR)$(SYSCONFDIR)/sysconfig/smartmet-webmon
+	install -m 0644 doc/man/smwebmon.1 $(MANDIR)/smwebmon.1
+
+uninstall-webmon:
+	rm -f $(BINDIR)/smwebmon
+	rm -rf $(SITEDIR_WEBMON) $(WEBMON_ASSET_DIR)
+	rm -f $(DESTDIR)$(UNITDIR)/smartmet-webmon.service
+	rm -f $(DESTDIR)$(SYSCONFDIR)/sysconfig/smartmet-webmon
+	rm -f $(MANDIR)/smwebmon.1
 
 check:
 	$(PYTHON) -c 'import sys; sys.path.insert(0, "."); \
@@ -231,8 +260,35 @@ check:
 	    _stp2.proc_register(900, cmdline="x", role="unknown"); \
 	    _stp2.proc_register(1234, cmdline="y", role="frontend"); \
 	    assert _stp2.proc_default_pid() == 900, _stp2.proc_default_pid(); \
-	    assert _S2().proc_default_pid() is None'
+	    assert _S2().proc_default_pid() is None; \
+	    import smartmet_top.runtime; \
+	    from smartmet_top.snapshots.urls import URLsSnapshot; \
+	    from smartmet_top.snapshots.services import ServicesSnapshot; \
+	    from smartmet_top.snapshots.caches import CachesSnapshot; \
+	    from smartmet_top.snapshots.active import ActiveSnapshot; \
+	    from smartmet_top.snapshots.proc import ProcSnapshot; \
+	    from smartmet_top.snapshots.overview import OverviewSnapshot; \
+	    from smartmet_top.snapshots.network import NetworkSnapshot; \
+	    from smartmet_top.snapshots.flame import FlameSnapshot; \
+	    from smartmet_top.snapshots.keys import KeysSnapshot; \
+	    from smartmet_top.snapshots.plugins import PluginsSnapshot; \
+	    _wst = Store(); \
+	    [(lambda h, r: (isinstance(h, list) and isinstance(r, list)) or (_ for _ in ()).throw(SystemExit(f"snapshot {_snap.name} returned non-list")))(*_snap.table(_wst)) for _snap in (URLsSnapshot, ServicesSnapshot, CachesSnapshot, ActiveSnapshot, ProcSnapshot, OverviewSnapshot, NetworkSnapshot, FlameSnapshot, KeysSnapshot, PluginsSnapshot)]; \
+	    import smartmet_webmon, smartmet_webmon.assets, smartmet_webmon.handlers, smartmet_webmon.server; \
+	    _hs, _hp = smartmet_webmon.handlers.health(_wst, {}); \
+	    assert _hs == 200 and _hp.get("ok"), (_hs, _hp); \
+	    _us, _up = smartmet_webmon.handlers.urls_table(_wst, {"window": "5"}); \
+	    assert _us == 200 and "rows" in _up, (_us, _up); \
+	    _ds, _dp = smartmet_webmon.handlers.urls_detail(_wst, {}); \
+	    assert _ds == 400, (_ds, _dp); \
+	    _wserv = smartmet_webmon.server.WebServer(_wst, bind=("127.0.0.1", 0), asset_root="."); \
+	    _wserv.start(); \
+	    import urllib.request as _ur, json as _json; \
+	    _resp = _ur.urlopen(f"http://127.0.0.1:{_wserv.port}/api/health", timeout=2).read(); \
+	    assert _json.loads(_resp).get("ok"); \
+	    _wserv.stop()'
 	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
+	$(PYTHON) -m py_compile smartmet_webmon/*.py
 	$(PYTHON) -m py_compile share/smartmet/bperf.py
 	bash -n share/smartmet/bstat.sh
 	for t in $(BTOOLS) $(LEGACY); do bash -n bin/$$t; done
@@ -244,6 +300,8 @@ check:
 	done
 	# smtop -h must work (catches argparse / import-time wiring bugs).
 	$(PYTHON) -m smartmet_top --help >/dev/null
+	# smwebmon -h must work too.
+	$(PYTHON) -m smartmet_webmon --help >/dev/null
 
 clean:
 	find . -name __pycache__ -prune -exec rm -rf {} +
@@ -259,3 +317,19 @@ rpm: clean $(NAME).spec
 	    -o $(NAME)-$(VERSION).tar.gz
 	rpmbuild -tb $(NAME)-$(VERSION).tar.gz
 	rm -f $(NAME)-$(VERSION).tar.gz
+
+# smartmet-webmon RPM is built from the same source tarball as
+# smartmet-monitor (same Source0:), so we generate the tarball, copy
+# it into rpm's _sourcedir, and build smartmet-webmon.spec by name.
+WEBMON_NAME = smartmet-webmon
+webmon-rpm: clean smartmet-webmon.spec
+	rm -f $(NAME)-$(VERSION).tar.gz
+	git archive --format=tar.gz --prefix=$(NAME)-$(VERSION)/ HEAD \
+	    -o $(NAME)-$(VERSION).tar.gz
+	SOURCEDIR=`rpm --eval '%_sourcedir'`; \
+	    install -d "$$SOURCEDIR"; \
+	    cp $(NAME)-$(VERSION).tar.gz "$$SOURCEDIR/" ; \
+	    rpmbuild -bb smartmet-webmon.spec
+	rm -f $(NAME)-$(VERSION).tar.gz
+
+rpms: rpm webmon-rpm

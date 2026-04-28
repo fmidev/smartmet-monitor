@@ -14,8 +14,8 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        26.4.27
-Release:        15%{?dist}.fmi
+Version:        26.4.28
+Release:        1%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -57,6 +57,10 @@ Two companion tools for operating a SmartMet Server:
     service statistics, active requests and more. Supports multiple
     hosts and auto-detects whether each admin URL belongs to a
     frontend or backend node.
+
+The browser-based companion `smwebmon` is shipped as a separate
+optional package (`smartmet-webmon`) so this RPM stays free of
+extra dependencies for sites that only want the CLI tools.
 
 Both parts are implemented with the Python 3 standard library; no pip
 packages are required at runtime.
@@ -115,6 +119,23 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Tue Apr 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.28-1.fmi
+- New optional companion package `smartmet-webmon` providing a
+  browser dashboard (`smwebmon`). To support it, the data-extraction
+  side of every smtop panel was lifted out of the curses panel
+  classes into a new `smartmet_top.snapshots` package (one module
+  per panel). The snapshot is the canonical "what does this panel's
+  data look like" — used by smtop's CSV/JSON export today and by
+  smwebmon's /api/* JSON endpoints tomorrow. No operator-visible
+  change in smtop itself; the refactor is internal.
+- New `smartmet_top.runtime` module owning the source-task lifecycle
+  (log tail, admin poll, /proc, /proc/net, /proc/vmstat, journal,
+  optional perf samplers). App.run() is now a thin wrapper around
+  it; smwebmon imports the same function so the two binaries cannot
+  drift on which sources are scheduled or how. Behaviour preserved:
+  same flags, same defaults, same opt-in gates for --perf and
+  --malloc-flame.
+
 * Mon Apr 27 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.27-15.fmi
 - bperf(1) man page. Matches the bstat-family convention so
   `man bperf` works on installed hosts. Documents pre-flight

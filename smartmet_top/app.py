@@ -8,7 +8,7 @@ import signal
 import time
 from typing import List, Optional
 
-from . import export, theme
+from . import export, runtime, theme
 from .panels.active import ActivePanel
 from .panels.base import Panel, safe_addstr, write_label
 from .panels.caches import CachesPanel
@@ -25,21 +25,6 @@ from .panels.network import NetworkPanel
 from .panels.alerts_overlay import draw_alerts_overlay, handle_alerts_key
 from .views.admin import AdminView
 from .views.live import LiveView
-from .sources.adminapi import poll_all
-from .sources.logtail import bulk_load, tail_many
-from .sources.perftop import perf_loop
-from .sources.offcpu import offcpu_loop
-from .sources.pagefault import pagefault_loop
-from .sources.wakeup import wakeup_loop
-from .sources.blockflame import blockflame_loop
-from .sources.mallocflame import mallocflame_loop
-from .sources.biolat import biolat_loop
-from .sources.netstats import netstats_loop
-from .sources.runqlat import runqlat_loop
-from .sources.perfstat import perfstat_loop
-from .sources.proc import proc_loop
-from .sources.vmstats import vmstats_loop
-from .sources.journal import journal_loop
 from .state.store import Store
 
 
@@ -365,100 +350,26 @@ class App:
         except Exception:
             pass
 
-        # background tasks
-        tasks = []
-        if self.replay and self.log_paths:
-            # synchronous bulk load first so opening on a live server feels fast
-            await bulk_load(self.log_paths, self.store,
-                            max_bytes_per_file=self.replay_bytes,
-                            include_rotated=self.include_rotated)
-        if self.log_paths:
-            tasks.append(asyncio.create_task(tail_many(self.log_paths, self.store)))
-        if self.admin_urls:
-            tasks.append(
-                asyncio.create_task(
-                    poll_all(self.admin_urls, self.store, self.admin_interval)
-                )
+        # background tasks. Replay first (synchronous) so the panels
+        # come up populated; then schedule the rest via the shared
+        # runtime so smwebmon stays in lock-step on which sources run.
+        if self.replay:
+            await runtime.replay_logs(
+                self.store, self.log_paths,
+                replay_bytes=self.replay_bytes,
+                include_rotated=self.include_rotated,
             )
-        # Always poll /proc — even without log files or admin URLs, the
-        # ProcPanel works as long as smartmetd is running on this host.
-        tasks.append(asyncio.create_task(proc_loop(self.store)))
-        # Network counters from /proc/net/* — no external tools, no
-        # eBPF, runs on every Linux. The Proc panel renders the
-        # results in its own Network section.
-        tasks.append(asyncio.create_task(netstats_loop(self.store)))
-        # Page-cache + reclaim stats from /proc/vmstat + /proc/meminfo.
-        # Same always-on policy as netstats; surfaces direct-reclaim
-        # storms that no other panel catches.
-        tasks.append(asyncio.create_task(vmstats_loop(self.store)))
-        # systemd-journal tail. Renders as a [journal] source in the
-        # Logs panel — kernel and systemd messages alongside the
-        # access-log streams. Empty journal_unit disables.
-        if self.journal_unit:
-            tasks.append(asyncio.create_task(
-                journal_loop(self.store, self.journal_unit)
-            ))
-        if self.enable_perf:
-            tasks.append(asyncio.create_task(
-                perf_loop(self.store, self.perf_interval,
-                          self.perf_record_seconds)
-            ))
-            # Off-CPU sampler runs alongside the on-CPU perf sampler so
-            # the Flame view's `o` toggle has data to switch into. The
-            # loop probes its backend internally and exits cleanly with
-            # an install hint in offcpu_status if neither bcc-tools nor
-            # the perf fallback is available — no overhead in that case.
-            tasks.append(asyncio.create_task(
-                offcpu_loop(self.store, self.perf_interval,
-                            self.perf_record_seconds)
-            ))
-            # Page-fault flamegraph sampler. Pure perf, low frequency
-            # (events fire only when smartmetd actually faults), so
-            # the duty-cycle cost is negligible compared to the
-            # on-CPU sampler.
-            tasks.append(asyncio.create_task(
-                pagefault_loop(self.store, self.perf_interval,
-                               self.perf_record_seconds)
-            ))
-            # Wakeup flamegraph — pure perf, no bcc. Stable on every
-            # supported kernel via sched:sched_wakeup tracepoint.
-            tasks.append(asyncio.create_task(
-                wakeup_loop(self.store, self.perf_interval,
-                            self.perf_record_seconds)
-            ))
-            # Block-I/O issue flamegraph — pure perf via
-            # block:block_rq_issue tracepoint. Catches direct reads,
-            # writes, fsyncs (i.e. all device I/O, not just the
-            # subset routed through page-cache misses).
-            tasks.append(asyncio.create_task(
-                blockflame_loop(self.store, self.perf_interval,
-                                self.perf_record_seconds)
-            ))
-            # Allocation flamegraph — gated on the explicit
-            # --malloc-flame CLI flag because uprobe-on-malloc has
-            # measurable overhead on a busy server.
-            if self.malloc_flame_min_bytes is not None:
-                tasks.append(asyncio.create_task(
-                    mallocflame_loop(self.store,
-                                     min_bytes=self.malloc_flame_min_bytes)
-                ))
-            # Block-I/O latency. Host-wide; biolatency-bpfcc blocks for
-            # its measurement window so the loop self-paces — no extra
-            # sleep needed. Probes for bcc-tools at startup and exits
-            # cleanly with an install hint if missing.
-            tasks.append(asyncio.create_task(biolat_loop(self.store)))
-            # Run-queue latency. Same scaffolding as biolat — bcc tool,
-            # power-of-2 histogram, host-wide. Critical on virtualised
-            # hosts where CFS throttling can hide threads from the CPU
-            # without showing as utilisation.
-            tasks.append(asyncio.create_task(runqlat_loop(self.store)))
-            # perf stat — IPC + cache miss rate + branch miss rate per
-            # smartmetd PID, sampled in a short window each cycle. Pure
-            # perf, no bcc; auto-skips when perf isn't available.
-            tasks.append(asyncio.create_task(
-                perfstat_loop(self.store, self.perf_interval,
-                              self.perf_record_seconds)
-            ))
+        tasks = runtime.start_sources(
+            self.store,
+            log_paths=self.log_paths,
+            admin_urls=self.admin_urls,
+            admin_interval=self.admin_interval,
+            enable_perf=self.enable_perf,
+            perf_interval=self.perf_interval,
+            perf_record_seconds=self.perf_record_seconds,
+            malloc_flame_min_bytes=self.malloc_flame_min_bytes,
+            journal_unit=self.journal_unit,
+        )
 
         last_draw = 0.0
         try:
