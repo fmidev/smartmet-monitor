@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.28
-Release:        1%{?dist}.fmi
+Release:        2%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -119,6 +119,23 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Tue Apr 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.28-2.fmi
+- Snapshots gain detail / chart / trends / top_symbols methods so
+  every smtop panel has a richer JSON surface for the web UI.
+  Added: OverviewSnapshot.chart (global per-minute series for
+  count / mean_ms / p95_ms / bytes / err_pct), ActiveSnapshot.chart
+  (aggregated in-flight count history), CachesSnapshot.trends and
+  ServicesSnapshot.trends (per-row sparkline series),
+  PluginsSnapshot.trends (per-source latency + size series),
+  NetworkSnapshot.detail (TCP summary, per-state history, listen
+  sockets with recv-Q, per-NIC rx/tx series), ProcSnapshot.detail
+  + list_pids (per-PID memory / IO / page-fault / threads time
+  series), KeysSnapshot.detail (windowed stats + top URLs by key),
+  FlameSnapshot.status / tree / top_symbols (folded stacks across
+  modes with smartmet-only / thread-class filters), and a new
+  LogsSnapshot for tailing recent_lines. No operator-visible
+  change in smtop itself.
+
 * Tue Apr 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.28-1.fmi
 - New optional companion package `smartmet-webmon` providing a
   browser dashboard (`smwebmon`). To support it, the data-extraction

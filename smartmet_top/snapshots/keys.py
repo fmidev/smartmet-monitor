@@ -62,3 +62,44 @@ class KeysSnapshot:
                 round(b.errors / b.count * 100, 3) if b.count else 0,
             ])
         return headers, out
+
+    @staticmethod
+    def detail(store, apikey: str, *, window_min: int = 60,
+               top_urls: int = 50) -> dict:
+        """Per-key drill-down: per-window stats + the top URLs this key
+        has hit. Mirrors the curses Keys-panel detail view.
+        """
+        ks = store.key_detail(apikey)
+        if ks is None:
+            return {"apikey": apikey, "found": False}
+
+        windows = []
+        for m in WINDOWS:
+            b = ks.window(m)
+            if b.count == 0:
+                continue
+            windows.append({
+                "window_min": m,
+                "count": b.count,
+                "mean_ms": round(b.hist.mean(), 3),
+                "p50_ms": round(b.hist.p50(), 3),
+                "p95_ms": round(b.hist.p95(), 3),
+                "max_ms": round(b.hist.max_ms, 3),
+                "total_bytes": b.bytes,
+                "errors": b.errors,
+                "err_pct": round(b.errors / b.count * 100, 3)
+                            if b.count else 0,
+            })
+
+        urls = sorted(ks.apikey_counts.items(), key=lambda x: -x[1])[:top_urls]
+        return {
+            "apikey": apikey,
+            "found": True,
+            "windows": windows,
+            "minute_series": {
+                "metric": "mean_ms",
+                "minutes": 60,
+                "values": list(ks.minute_series(60, "mean_ms")),
+            },
+            "urls": [{"url": u, "count": int(c)} for u, c in urls],
+        }

@@ -31,3 +31,30 @@ class ActiveSnapshot:
                     str(r.get("RequestString") or r.get("requeststring") or ""),
                 ])
         return headers, rows
+
+    @staticmethod
+    def chart(store) -> dict:
+        """Aggregated in-flight count history across hosts.
+
+        Mirrors the Active panel's top-of-screen sparkline: pad shorter
+        per-host buffers with leading zeros, then sum.
+        """
+        agg: list = []
+        for host in store.admin_hosts:
+            buf = store.active_count_history.get(host)
+            if not buf:
+                continue
+            samples = list(buf)
+            if not agg:
+                agg = samples[:]
+                continue
+            if len(samples) < len(agg):
+                samples = [0] * (len(agg) - len(samples)) + samples
+            elif len(samples) > len(agg):
+                agg = [0] * (len(samples) - len(agg)) + agg
+            agg = [a + b for a, b in zip(agg, samples)]
+        return {
+            "values": [int(v) for v in agg],
+            "current": int(agg[-1]) if agg else 0,
+            "peak": int(max(agg)) if agg else 0,
+        }

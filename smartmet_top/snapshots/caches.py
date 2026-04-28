@@ -40,3 +40,26 @@ class CachesSnapshot:
                     _as_float(str(r.get("hitrate") or "0").rstrip("%")),
                 ])
         return headers, rows
+
+    @staticmethod
+    def trends(store, *, metric: str = "hits_per_min", samples: int = 30):
+        """Per-cache trend lines for one metric. Returns
+        ``[{host, cache_name, values}]`` so the web view can render a
+        sparkline alongside each table row.
+        """
+        out = []
+        for host in store.admin_hosts:
+            snap = store.cachestats.get(host)
+            if snap is None or not snap.ok:
+                continue
+            hist = store.cache_history.get(host)
+            for r in snap.rows or []:
+                name = str(r.get("cache_name") or r.get("name") or "?")
+                vs = (list(hist.series(name, metric, samples=samples))
+                      if hist else [])
+                out.append({
+                    "host": host,
+                    "cache_name": name,
+                    "values": [round(float(v), 3) for v in vs],
+                })
+        return {"metric": metric, "samples": samples, "rows": out}

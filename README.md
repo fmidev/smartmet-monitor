@@ -1027,25 +1027,30 @@ flame graphs are an interactive workflow that belongs to
 `smtop --perf`, where the privilege requirement and CPU overhead
 are immediately visible to the operator running it.
 
-### What the web URLs panel shows
+### Panels
 
-Same numbers as `smtop`'s URLs panel — request count, mean / p50 /
-p95 / p99 / max latency, mean and total bytes, error %, and a
-per-URL drill-down — rendered as an HTML table with click-to-open
-detail modal. The drill-down has four sections:
+The dashboard mirrors `smtop` panel-for-panel. Tab strip at the top;
+the per-panel URL hash (`/#/<panel>`) is bookmarkable. Every chart is
+rendered to HTML Canvas (no PNG round-trip, no external chart library)
+and reuses the same color thresholds the curses view uses.
 
-  * **Windowed stats** for 1 / 5 / 15 / 60 min (whichever have data).
-  * **Mean latency over the last 60 minutes** as a Canvas line chart
-    with the per-minute series.
-  * **Latency distribution** as a Canvas bar chart over the same
-    exponential-bucket histogram (base 1.5) the curses view uses.
-  * **Status codes** ranked by count, coloured by class.
-  * **Top API keys** for this URL across all retained history.
+| Tab        | What it shows                                                                                                                   |
+|------------|---------------------------------------------------------------------------------------------------------------------------------|
+| Overview   | Totals table (1 / 5 / 15 / 60 min) plus 5 full-width line charts over the retained history (req/min, mean ms, p95 ms, bytes/min, err %). |
+| Plugins    | One row per access-log source with two per-row sparklines (latency + size). Sortable, filterable, window 60s → 60m.             |
+| URLs       | Per-URL latency / count / err table. Click a row → drill-down modal with windowed stats, 60-min latency line chart, latency-distribution histogram, status codes, top API keys. |
+| Caches     | Per-cache row with hit-rate fill bar (color-coded) and hits/min trend sparkline. Size cell coloured by fill ratio.              |
+| Services   | Per-handler row with req/min trend sparkline and the same `cpu%` color logic as the curses panel (green ≥ 50 % CPU-bound, blue ≤ 10 % wait-bound). |
+| Active     | Top-of-panel in-flight count line chart + table of currently-active requests, sorted by duration.                              |
+| API Keys   | Per-key row, sortable / filterable / windowed. Click a row → drill-down modal with windowed stats and the top URLs that key has hit. |
+| Proc       | PID picker plus a section-card grid: memory (with VM RSS / anon / file / shmem and a Canvas RSS chart), I/O totals + read-rate chart, threads + fds + chart, major-page-fault rate chart. |
+| Network    | TCP host-wide summary (retrans/s, listen overflow/drop with line chart), per-state count + trend sparkline, listen-socket table with recv-Q (highlighted when non-zero), per-NIC rx/tx Canvas charts. |
+| Flame      | Interactive Canvas flame graph: click a rectangle to zoom in, click any breadcrumb segment to zoom out, hover for full function name + weight + %, search box highlights matching frames. Mode bar (on-cpu / off-cpu / off-cpu-locks / pagefault / wakeup / blockflame / malloc), thread-class filter (all / request / background), smartmet-only toggle. SmartMet:: frames are deterministically coloured in the orange/yellow band so they pop against glibc / kernel frames. Top-symbols table below the flame mirrors the curses list. |
+| Logs       | Live tail of the multi-source log ring with substring filter and autoscroll toggle.                                            |
 
-Reading guide is identical to the curses URLs panel — see the
-`smtop` section above for healthy-shape / trouble-pattern /
-typical-root-cause / where-to-look-next guidance, all of which
-applies unchanged.
+The reading guide is unchanged from `smtop` — see the smtop section
+above for healthy-shape / trouble-pattern / typical-root-cause /
+where-to-look-next guidance, which applies as-written.
 
 ### Costs and policy
 
@@ -1062,11 +1067,9 @@ sudo systemctl edit smartmet-webmon
 
 ### What's NOT in v1 (deferred to follow-ups)
 
-  * Server-Sent Events for live updates — current page polls every 2 s
-    with `fetch()`. SSE is the next planned step.
-  * Other panels (Services, Caches, Active, Plugins, etc.) — the
-    snapshot classes are already toolkit-agnostic; each panel ports
-    over one at a time as a separate change.
+  * Server-Sent Events for live updates — current page polls the
+    active panel every 2 s with `fetch()`. SSE replacing the polling
+    loop is the next planned step.
   * Authentication — localhost-only with SSH tunnelling is the
     deliberate v1 model. Token auth lands when there is a concrete
     multi-user use case.

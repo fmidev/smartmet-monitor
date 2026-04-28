@@ -10,99 +10,30 @@
 
 <header class="topbar">
   <span class="brand">smartmet-webmon</span>
-  <span id="status" class="status"></span>
+  <nav id="tabs" class="tabs"></nav>
   <span class="spacer"></span>
+  <span id="status" class="status"></span>
   <span id="refresh-indicator" class="indicator"></span>
 </header>
 
-<section class="panel" id="urls-panel">
-  <div class="panel-controls">
-    <span class="panel-title">URLs</span>
-    <label>window
-      <select id="urls-window">
-        <option value="1">1m</option>
-        <option value="5" selected>5m</option>
-        <option value="15">15m</option>
-        <option value="60">60m</option>
-      </select>
-    </label>
-    <label>sort
-      <select id="urls-sort">
-        <option value="count">reqs</option>
-        <option value="p95" selected>p95</option>
-        <option value="p50">p50</option>
-        <option value="mean_ms">mean</option>
-        <option value="max_ms">max</option>
-        <option value="mb_tot">total bytes</option>
-        <option value="err_pct">err%</option>
-      </select>
-    </label>
-    <label>filter
-      <input type="text" id="urls-filter" placeholder="substring">
-    </label>
-    <span id="urls-count" class="muted"></span>
-  </div>
+<main id="panel-host"></main>
 
-  <table class="data-table" id="urls-table">
-    <thead>
-      <tr>
-        <th class="url">URL</th>
-        <th class="num">reqs</th>
-        <th class="num">mean</th>
-        <th class="num">p50</th>
-        <th class="num">p95</th>
-        <th class="num">p99</th>
-        <th class="num">max</th>
-        <th class="num">avg sz</th>
-        <th class="num">total</th>
-        <th class="num">err%</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
-</section>
-
-<!-- Drill-in modal — opens when a URL row is clicked. -->
+<!-- URLs / Keys drill-down modal -->
 <div id="modal-overlay" class="modal-overlay hidden">
   <div class="modal">
     <div class="modal-head">
       <span id="modal-title" class="modal-title"></span>
       <button id="modal-close" class="modal-close" title="close (Esc)">×</button>
     </div>
-    <div class="modal-body">
-      <h3>Windowed stats</h3>
-      <table class="data-table" id="detail-windows">
-        <thead><tr>
-          <th>window</th><th class="num">reqs</th><th class="num">mean</th>
-          <th class="num">p50</th><th class="num">p95</th><th class="num">p99</th>
-          <th class="num">max</th><th class="num">avg sz</th>
-          <th class="num">total</th><th class="num">err%</th>
-        </tr></thead>
-        <tbody></tbody>
-      </table>
-
-      <h3>Mean latency, last 60 min</h3>
-      <canvas id="detail-chart" width="800" height="160"></canvas>
-
-      <h3>Latency distribution (selected window)</h3>
-      <canvas id="detail-hist" width="800" height="200"></canvas>
-
-      <h3>Status codes</h3>
-      <table class="data-table" id="detail-status">
-        <thead><tr><th>code</th><th class="num">count</th><th class="num">%</th></tr></thead>
-        <tbody></tbody>
-      </table>
-
-      <h3>Top API keys</h3>
-      <table class="data-table" id="detail-keys">
-        <thead><tr><th>apikey</th><th class="num">requests</th></tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
+    <div id="modal-body" class="modal-body"></div>
   </div>
 </div>
 
+<!-- Flame tooltip — follows the cursor over the rectangle view -->
+<div id="flame-tooltip" class="flame-tooltip hidden"></div>
+
 <script src="/static/chart.js"></script>
+<script src="/static/flame.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

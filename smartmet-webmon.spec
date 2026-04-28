@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.4.28
-Release:        1%{?dist}.fmi
+Release:        2%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -106,6 +106,51 @@ getent passwd smartmet >/dev/null || \
 %{_python3_sitelib}/smartmet_webmon/
 
 %changelog
+* Tue Apr 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.28-2.fmi
+- Full panel parity with smtop. Tab navigation across every
+  smtop panel (Overview, Plugins, URLs, Caches, Services, Active,
+  Keys, Proc, Network, Flame, Logs); each panel renders the same
+  data smtop shows but with HTML Canvas charts replacing Braille
+  sparklines, click-to-drill replacing keystroke navigation,
+  and bookmarkable per-panel URLs (`/#/<panel>`). Highlights:
+    * Overview: 5 full-width Canvas line charts over the retained
+      history (req/min, mean ms, p95 ms, bytes/min, err %).
+    * Plugins: per-row latency + size sparklines, sortable
+      by req/s / mean / p95 / err / bytes; window 60s..60m.
+    * Caches: per-row hit-rate fill bar (color thresholds) plus
+      hits/min trend sparkline; size cell coloured by fill ratio.
+    * Services: per-row req/min sparkline; cpu% column coloured
+      green / blue / neutral by ratio (parity with the curses
+      column added in -13 / -14).
+    * Active: top in-flight count Canvas line chart + sortable
+      table of currently-active requests.
+    * Keys: window/sort/filter controls plus drill-down modal
+      showing per-window stats and the top URLs hit by that key.
+    * Proc: PID picker plus a memory / IO / threads+fds /
+      page-fault grid, each section with a per-PID Canvas line
+      chart.
+    * Network: TCP summary (retrans/s + listen overflow/drop/s
+      with line chart), connection states with per-state trend
+      sparklines, listen sockets with recv-Q (highlighted when
+      non-zero), per-NIC rx + tx Canvas charts.
+    * Flame: interactive Canvas flame graph with mouse zoom
+      (click rectangle → that frame becomes the new root),
+      click-the-breadcrumb to zoom out, hover tooltip with full
+      function name + weight + percentage, search box that
+      highlights matching frames and greys non-matches,
+      deterministic per-name coloring (yellows/oranges for
+      SmartMet:: frames so they pop against blue/violet glibc
+      and kernel frames). Mode bar (on-cpu, off-cpu,
+      off-cpu-locks, pagefault, wakeup, blockflame, malloc),
+      thread-class bar (all / request / background) and a
+      smartmet-only toggle compose with the existing curses
+      filter logic.
+    * Logs: live tail of the multi-source log ring with
+      substring filter and autoscroll toggle.
+- 24 JSON endpoints under /api/* (one per panel + chart/detail
+  variants) plus /api/panels for client-side tab discovery.
+  Every endpoint smoke-tested in `make check`.
+
 * Tue Apr 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.28-1.fmi
 - Initial release. Browser dashboard companion to smartmet-monitor.
   Ships `smwebmon` (HTTP+JSON server) plus static assets; reuses the

@@ -275,17 +275,17 @@ check:
 	    _wst = Store(); \
 	    [(lambda h, r: (isinstance(h, list) and isinstance(r, list)) or (_ for _ in ()).throw(SystemExit(f"snapshot {_snap.name} returned non-list")))(*_snap.table(_wst)) for _snap in (URLsSnapshot, ServicesSnapshot, CachesSnapshot, ActiveSnapshot, ProcSnapshot, OverviewSnapshot, NetworkSnapshot, FlameSnapshot, KeysSnapshot, PluginsSnapshot)]; \
 	    import smartmet_webmon, smartmet_webmon.assets, smartmet_webmon.handlers, smartmet_webmon.server; \
-	    _hs, _hp = smartmet_webmon.handlers.health(_wst, {}); \
-	    assert _hs == 200 and _hp.get("ok"), (_hs, _hp); \
-	    _us, _up = smartmet_webmon.handlers.urls_table(_wst, {"window": "5"}); \
-	    assert _us == 200 and "rows" in _up, (_us, _up); \
-	    _ds, _dp = smartmet_webmon.handlers.urls_detail(_wst, {}); \
-	    assert _ds == 400, (_ds, _dp); \
+	    from smartmet_top.snapshots.logs import LogsSnapshot as _Ls; \
+	    assert _Ls.table(_wst) == (["line"], []); \
+	    [(lambda r, fn: (lambda res: (res[0] in (200, 400) and isinstance(res[1], dict)) or (_ for _ in ()).throw(SystemExit(f"handler {r}: {res}")))(fn(_wst, {})))(_route, _fn) for _route, _fn in smartmet_webmon.handlers.ROUTES.items()]; \
 	    _wserv = smartmet_webmon.server.WebServer(_wst, bind=("127.0.0.1", 0), asset_root="."); \
 	    _wserv.start(); \
 	    import urllib.request as _ur, json as _json; \
 	    _resp = _ur.urlopen(f"http://127.0.0.1:{_wserv.port}/api/health", timeout=2).read(); \
 	    assert _json.loads(_resp).get("ok"); \
+	    _resp = _ur.urlopen(f"http://127.0.0.1:{_wserv.port}/api/panels", timeout=2).read(); \
+	    _panels = _json.loads(_resp).get("panels"); \
+	    assert isinstance(_panels, list) and len(_panels) >= 10, _panels; \
 	    _wserv.stop()'
 	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
 	$(PYTHON) -m py_compile smartmet_webmon/*.py

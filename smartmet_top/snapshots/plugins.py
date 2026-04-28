@@ -93,6 +93,13 @@ def collect_with_autowiden(store, *, window_label: str = "60s",
     return [], window_label
 
 
+def _series_for(src, span: int, resolution: str, metric: str):
+    """Time-series accessor parameterised on resolution."""
+    if resolution == "second":
+        return list(src.second_series(metric, seconds=span))
+    return list(src.minute_series(metric, span))
+
+
 class PluginsSnapshot:
     name = "plugins"
 
@@ -126,3 +133,38 @@ class PluginsSnapshot:
                 snap.count, snap.errors,
             ])
         return headers, out
+
+    @staticmethod
+    def trends(store, *, window_label: str = "60s",
+               filter_str: str = "", hide_idle: bool = True,
+               metrics: Tuple[str, ...] = ("mean_ms", "bytes_mean")):
+        """Per-source time-series for the given metrics.
+
+        Returns ``[{label, metrics: {metric: [...values]}}]`` so the web
+        view can render two Canvas sparklines per row (the curses
+        equivalent shows latency + size sparks per row).
+        """
+        span, resolution = 60, "second"
+        for lbl, sp, res in WINDOWS:
+            if lbl == window_label:
+                span, resolution = sp, res
+                break
+        out = []
+        for src in store.snapshot_sources():
+            if filter_str and filter_str.lower() not in src.label.lower():
+                continue
+            metric_data = {}
+            for metric in metrics:
+                metric_data[metric] = [
+                    round(float(v), 3)
+                    for v in _series_for(src, span, resolution, metric)
+                ]
+            if hide_idle and not any(any(v for v in vs)
+                                     for vs in metric_data.values()):
+                continue
+            out.append({"label": src.label, "metrics": metric_data})
+        return {
+            "window_label": window_label,
+            "metrics": list(metrics),
+            "rows": out,
+        }

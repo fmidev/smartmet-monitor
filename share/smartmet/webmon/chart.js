@@ -1,7 +1,6 @@
-// chart.js — tiny Canvas helpers (line + histogram). No external libs.
-//
-// All functions take an HTMLCanvasElement and devicePixelRatio-aware
-// data; they paint the canvas and return. They do not retain state.
+// chart.js — Canvas helpers (line, sparkline, histogram, hbar). No
+// external libs. All functions take an HTMLCanvasElement and paint
+// it; they don't retain state.
 
 (function (global) {
   "use strict";
@@ -14,10 +13,14 @@
     fill:  "rgba(88, 166, 255, 0.18)",
     bar:   "#58a6ff",
     label: "#b9c4d0",
+    good:  "#7ee787",
+    warn:  "#d29922",
+    bad:   "#f85149",
+    accent2: "#d2a8ff",
   };
 
   // Resize for HiDPI: bump backing-store resolution while CSS keeps
-  // the laid-out width. Without this, charts look blurry on retina.
+  // the laid-out width.
   function setupHiDPI(canvas) {
     const dpr = global.devicePixelRatio || 1;
     const cssW = canvas.clientWidth || canvas.width;
@@ -30,19 +33,17 @@
     return { ctx, w: cssW, h: cssH };
   }
 
-  // Filled line chart with a single y-axis label (max). Pads `values`
-  // with NaNs accepted as gaps.
+  // Filled line chart with axis labels (full chrome).
   function drawLine(canvas, values, opts = {}) {
     const { ctx, w, h } = setupHiDPI(canvas);
     const padL = 36, padR = 8, padT = 6, padB = 16;
     const innerW = w - padL - padR;
     const innerH = h - padT - padB;
 
-    // Background grid.
     ctx.fillStyle = PALETTE.bg;
     ctx.fillRect(0, 0, w, h);
 
-    if (!values.length) {
+    if (!values || !values.length) {
       ctx.fillStyle = PALETTE.axis;
       ctx.font = "12px ui-monospace, monospace";
       ctx.fillText("(no data)", padL, padT + 14);
@@ -53,7 +54,6 @@
     const vmax = valid.length ? Math.max(...valid) : 1;
     const yScale = vmax > 0 ? innerH / vmax : 0;
 
-    // Axis line.
     ctx.strokeStyle = PALETTE.grid;
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -61,15 +61,14 @@
     ctx.lineTo(padL + innerW, padT + innerH);
     ctx.stroke();
 
-    // Y-axis labels: max at top, 0 at bottom.
     ctx.fillStyle = PALETTE.axis;
     ctx.font = "11px ui-monospace, monospace";
     ctx.textBaseline = "middle";
     ctx.textAlign = "right";
-    ctx.fillText(formatMs(vmax), padL - 4, padT + 6);
-    ctx.fillText("0",            padL - 4, padT + innerH);
+    ctx.fillText(opts.fmtY ? opts.fmtY(vmax) : formatMs(vmax),
+                  padL - 4, padT + 6);
+    ctx.fillText("0", padL - 4, padT + innerH);
 
-    // Line + fill.
     const stepX = values.length > 1 ? innerW / (values.length - 1) : 0;
     ctx.strokeStyle = opts.lineColor || PALETTE.line;
     ctx.fillStyle   = opts.fillColor || PALETTE.fill;
@@ -80,57 +79,71 @@
     for (let i = 0; i < values.length; i++) {
       const v = values[i];
       const x = padL + i * stepX;
-      if (!Number.isFinite(v)) {
-        started = false;
-        continue;
-      }
+      if (!Number.isFinite(v)) { started = false; continue; }
       const y = padT + innerH - v * yScale;
-      if (!started) {
-        ctx.moveTo(x, y);
-        started = true;
-      } else {
-        ctx.lineTo(x, y);
-      }
+      if (!started) { ctx.moveTo(x, y); started = true; }
+      else { ctx.lineTo(x, y); }
     }
     ctx.stroke();
 
-    // Fill under the line.
     ctx.beginPath();
     ctx.moveTo(padL, padT + innerH);
     started = false;
     for (let i = 0; i < values.length; i++) {
       const v = values[i];
       const x = padL + i * stepX;
-      if (!Number.isFinite(v)) {
-        ctx.lineTo(x, padT + innerH);
-        started = false;
-        continue;
-      }
+      if (!Number.isFinite(v)) { ctx.lineTo(x, padT + innerH); started = false; continue; }
       const y = padT + innerH - v * yScale;
-      if (!started) {
-        ctx.lineTo(x, padT + innerH);
-        ctx.lineTo(x, y);
-        started = true;
-      } else {
-        ctx.lineTo(x, y);
-      }
+      if (!started) { ctx.lineTo(x, padT + innerH); ctx.lineTo(x, y); started = true; }
+      else { ctx.lineTo(x, y); }
     }
     ctx.lineTo(padL + innerW, padT + innerH);
     ctx.closePath();
     ctx.fill();
 
-    // X-axis labels (just two — leftmost and rightmost minute counts).
     if (opts.xLabels && opts.xLabels.length === 2) {
+      ctx.fillStyle = PALETTE.axis;
       ctx.textAlign = "left";
       ctx.fillText(opts.xLabels[0], padL, h - 2);
       ctx.textAlign = "right";
       ctx.fillText(opts.xLabels[1], padL + innerW, h - 2);
     }
+    if (opts.title) {
+      ctx.fillStyle = PALETTE.label;
+      ctx.textAlign = "left";
+      ctx.fillText(opts.title, padL, padT - 2);
+    }
   }
 
-  // Bar chart for an exponential-bucket histogram. `buckets` is
-  // [{lo_ms, hi_ms, count}]. We draw each bar with width proportional
-  // to log(hi/lo), so adjacent buckets are visibly different.
+  // Sparkline — chromeless line, fills its container. Auto-scales
+  // per call so each row can show its own shape regardless of others.
+  function drawSparkline(canvas, values, opts = {}) {
+    const { ctx, w, h } = setupHiDPI(canvas);
+    ctx.fillStyle = "transparent";
+    ctx.clearRect(0, 0, w, h);
+
+    if (!values || !values.length) return;
+    const valid = values.filter(v => Number.isFinite(v));
+    const vmax = valid.length ? Math.max(...valid) : 0;
+    if (vmax <= 0) return;
+
+    const stepX = values.length > 1 ? w / (values.length - 1) : 0;
+    ctx.strokeStyle = opts.color || PALETTE.line;
+    ctx.lineWidth = 1.25;
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < values.length; i++) {
+      const v = values[i];
+      if (!Number.isFinite(v)) { started = false; continue; }
+      const x = i * stepX;
+      const y = h - (v / vmax) * (h - 2) - 1;
+      if (!started) { ctx.moveTo(x, y); started = true; }
+      else { ctx.lineTo(x, y); }
+    }
+    ctx.stroke();
+  }
+
+  // Histogram for exponential-bucket data: [{lo_ms, hi_ms, count}].
   function drawHistogram(canvas, buckets, opts = {}) {
     const { ctx, w, h } = setupHiDPI(canvas);
     const padL = 56, padR = 8, padT = 6, padB = 26;
@@ -140,7 +153,7 @@
     ctx.fillStyle = PALETTE.bg;
     ctx.fillRect(0, 0, w, h);
 
-    if (!buckets.length) {
+    if (!buckets || !buckets.length) {
       ctx.fillStyle = PALETTE.axis;
       ctx.font = "12px ui-monospace, monospace";
       ctx.fillText("(no requests in window)", padL, padT + 14);
@@ -149,13 +162,8 @@
 
     const counts = buckets.map(b => b.count);
     const cmax = Math.max(...counts, 1);
-
-    // Each bar has equal width — the bucket boundaries are
-    // exponential anyway, so equal-pixel bars give a readable
-    // logarithmic x-axis.
     const barW = innerW / buckets.length;
 
-    // Axes.
     ctx.strokeStyle = PALETTE.grid;
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -171,7 +179,6 @@
     ctx.fillText(String(cmax), padL - 4, padT + 6);
     ctx.fillText("0",          padL - 4, padT + innerH);
 
-    // Bars.
     ctx.fillStyle = opts.barColor || PALETTE.bar;
     for (let i = 0; i < buckets.length; i++) {
       const c = buckets[i].count;
@@ -181,7 +188,6 @@
       ctx.fillRect(x + 0.5, y, Math.max(1, barW - 1), barH);
     }
 
-    // X-axis labels: leftmost and rightmost bucket bounds.
     ctx.fillStyle = PALETTE.axis;
     ctx.textBaseline = "alphabetic";
     ctx.textAlign = "left";
@@ -191,7 +197,18 @@
                   padL + innerW, h - 8);
   }
 
+  // Horizontal bar — paint a div with fill width = pct%, choosing a
+  // color class by latency-color-style threshold. Used inside table
+  // cells where a Canvas would be overkill.
+  function applyHbar(elem, value, max, opts = {}) {
+    const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
+    const cls = opts.classFor ? opts.classFor(value) : "";
+    elem.innerHTML =
+      `<div class="hbar"><div class="hbar-fill ${cls}" style="width:${pct}%"></div></div>`;
+  }
+
   function formatMs(v) {
+    if (v == null || !Number.isFinite(v)) return "";
     if (v <= 0) return "0";
     if (v < 1)  return v.toFixed(2) + "ms";
     if (v < 10) return v.toFixed(1) + "ms";
@@ -199,5 +216,25 @@
     return (v / 1000).toFixed(1) + "s";
   }
 
-  global.smChart = { drawLine, drawHistogram, formatMs };
+  function formatBytes(b) {
+    if (b == null) return "";
+    const u = ["B", "K", "M", "G", "T"];
+    let v = b, i = 0;
+    while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+    return v >= 100 ? `${v.toFixed(0)}${u[i]}` : `${v.toFixed(1)}${u[i]}`;
+  }
+
+  function formatCount(n) {
+    if (n == null) return "";
+    if (n < 10000) return String(n);
+    if (n < 1e6) return (n / 1e3).toFixed(1) + "k";
+    if (n < 1e9) return (n / 1e6).toFixed(1) + "M";
+    return (n / 1e9).toFixed(1) + "G";
+  }
+
+  global.smChart = {
+    drawLine, drawSparkline, drawHistogram, applyHbar,
+    formatMs, formatBytes, formatCount,
+    PALETTE,
+  };
 })(window);
