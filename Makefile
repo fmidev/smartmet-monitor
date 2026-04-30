@@ -26,7 +26,8 @@ WEBMON_ASSET_DIR = $(SHAREDIR)/webmon
 UNITDIR ?= /usr/lib/systemd/system
 SYSCONFDIR ?= /etc
 
-.PHONY: all install uninstall clean check rpm install-webmon webmon-rpm rpms
+.PHONY: all install uninstall clean check rpm install-webmon \
+        uninstall-webmon webmon-rpm rpms _stage-tarball
 
 all:
 	@echo "smartmet-monitor is a no-build package. Use 'make install' or 'make rpm'."
@@ -306,30 +307,41 @@ check:
 clean:
 	find . -name __pycache__ -prune -exec rm -rf {} +
 
-# Build RPM from HEAD. Uses ~/.rpmmacros for %_topdir, matching other
-# smartmet-* repos in this hub (e.g. macgyver, spine).
+# Build RPM(s) from HEAD. Uses ~/.rpmmacros for %_topdir, matching
+# other smartmet-* repos in this hub (e.g. macgyver, spine).
+#
+# Both spec files share the same Source0: tarball, so `rpmbuild -tb`
+# refuses (it requires exactly one spec inside the tarball). Instead
+# we stage the tarball in rpm's %_sourcedir once per `make` invocation
+# and then call `rpmbuild -bb <spec>` per spec — the same flow common
+# in multi-subpackage builds elsewhere in the SmartMet ecosystem.
 NAME = smartmet-monitor
 VERSION = $(shell sed -n 's/^__version__ = "\(.*\)"/\1/p' smartmet_top/__init__.py)
+TARBALL = $(NAME)-$(VERSION).tar.gz
 
-rpm: clean $(NAME).spec
-	rm -f $(NAME)-$(VERSION).tar.gz
+# Internal: build the source tarball and copy it into %_sourcedir.
+# Phony so it always runs, but make still deduplicates the call when
+# multiple downstream targets list it (so `make rpms` archives HEAD
+# exactly once, not three times).
+_stage-tarball:
+	rm -f $(TARBALL)
 	git archive --format=tar.gz --prefix=$(NAME)-$(VERSION)/ HEAD \
-	    -o $(NAME)-$(VERSION).tar.gz
-	rpmbuild -tb $(NAME)-$(VERSION).tar.gz
-	rm -f $(NAME)-$(VERSION).tar.gz
-
-# smartmet-webmon RPM is built from the same source tarball as
-# smartmet-monitor (same Source0:), so we generate the tarball, copy
-# it into rpm's _sourcedir, and build smartmet-webmon.spec by name.
-WEBMON_NAME = smartmet-webmon
-webmon-rpm: clean smartmet-webmon.spec
-	rm -f $(NAME)-$(VERSION).tar.gz
-	git archive --format=tar.gz --prefix=$(NAME)-$(VERSION)/ HEAD \
-	    -o $(NAME)-$(VERSION).tar.gz
+	    -o $(TARBALL)
 	SOURCEDIR=`rpm --eval '%_sourcedir'`; \
 	    install -d "$$SOURCEDIR"; \
-	    cp $(NAME)-$(VERSION).tar.gz "$$SOURCEDIR/" ; \
-	    rpmbuild -bb smartmet-webmon.spec
-	rm -f $(NAME)-$(VERSION).tar.gz
+	    cp $(TARBALL) "$$SOURCEDIR/"
 
+rpm: clean $(NAME).spec _stage-tarball
+	rpmbuild -bb $(NAME).spec
+	rm -f $(TARBALL)
+
+webmon-rpm: clean smartmet-webmon.spec _stage-tarball
+	rpmbuild -bb smartmet-webmon.spec
+	rm -f $(TARBALL)
+
+# Build both RPMs in a single make invocation. Shared dependencies
+# (clean, _stage-tarball) run once thanks to make's DAG; the local
+# TARBALL may be removed by the first sub-target before the second
+# runs, but the %_sourcedir copy (placed by _stage-tarball) persists,
+# so rpmbuild -bb still finds it.
 rpms: rpm webmon-rpm

@@ -14,8 +14,8 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        26.4.28
-Release:        3%{?dist}.fmi
+Version:        26.4.30
+Release:        1%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -119,6 +119,17 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-1.fmi
+- Build-system fix. `rpmbuild -tb` refuses to build a tarball that
+  contains more than one .spec, so `make rpm` and `make rpms`
+  failed once smartmet-webmon.spec was added next to
+  smartmet-monitor.spec. Reworked the rpm / webmon-rpm / rpms
+  targets to stage the source tarball in rpm's %_sourcedir once
+  per make invocation, then call `rpmbuild -bb <spec>` per spec
+  (the same pattern webmon-rpm was already using). `make rpms`
+  now archives HEAD exactly once, runs both rpmbuild calls
+  against the staged tarball, and produces both noarch RPMs.
+
 * Tue Apr 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.28-3.fmi
 - smtop and smwebmon auto-probe the standard SmartMet admin ports
   on localhost when no -u is given: http://localhost:8080/admin

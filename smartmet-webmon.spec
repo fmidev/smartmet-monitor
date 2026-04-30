@@ -21,8 +21,8 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-webmon
-Version:        26.4.28
-Release:        3%{?dist}.fmi
+Version:        26.4.30
+Release:        1%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -104,8 +104,18 @@ getent passwd smartmet >/dev/null || \
 %{_unitdir}/smartmet-webmon.service
 %config(noreplace) %{_sysconfdir}/sysconfig/smartmet-webmon
 %{_python3_sitelib}/smartmet_webmon/
+%{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-1.fmi
+- Spec file lists the smwebmon(1) man page in %files. The
+  install-webmon Makefile target was already shipping it, but the
+  spec missed it, so `make rpms` failed at the unpackaged-files
+  check.
+- Co-bumped with smartmet-monitor for the build-system fix that
+  allows multi-spec tarballs to build via `rpmbuild -bb` instead
+  of `rpmbuild -tb`. See smartmet-monitor changelog for details.
+
 * Tue Apr 28 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.28-3.fmi
 - smwebmon auto-probes localhost:8080 (frontend) and localhost:8081
   (backend) at startup when no -u is given, removing the need to
