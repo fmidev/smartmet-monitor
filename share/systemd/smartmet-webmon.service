@@ -12,12 +12,16 @@ Group=smartmet
 Restart=on-failure
 RestartSec=5
 
-# Defensive cgroup limits — the cost analysis estimated ~100 MB and
-# ~5 % of one core for typical configs, so these are well above
-# expected and well below "ate the host". Raise them in a drop-in
-# (/etc/systemd/system/smartmet-webmon.service.d/) if you need to.
+# Defensive cgroup limits. Headroom over the cost-analysis figures
+# (~100 MB RSS, ~5 % of one core sustained) plus the perf samplers'
+# burst load: with --perf default-on, perf record / offcputime-bpfcc
+# / friends spawn periodically as descendants of smwebmon and share
+# its quota. 200% of one core gives the recording windows breathing
+# room without letting a runaway eat the host. Raise (or remove) in
+# a drop-in if you have a hot box and want full elasticity:
+#   sudo systemctl edit smartmet-webmon
 MemoryMax=512M
-CPUQuota=50%
+CPUQuota=200%
 
 # Basic hardening; smwebmon doesn't need any of this.
 ProtectSystem=strict

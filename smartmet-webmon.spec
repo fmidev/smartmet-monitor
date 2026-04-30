@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.4.30
-Release:        3%{?dist}.fmi
+Release:        4%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -107,6 +107,35 @@ getent passwd smartmet >/dev/null || \
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-4.fmi
+- flame.js was not being shipped in the RPM payload. Same install
+  bug class as the snapshots/ fix in -3: WEBMON_ASSETS was a
+  hand-maintained list and flame.js (added 26.4.28-2) had not been
+  added to it. The browser fetched /static/flame.js, got 404,
+  FlameView never loaded, and the Flame tab failed with
+  "flame is undefined". The install-webmon target now auto-discovers
+  files in share/smartmet/webmon/ instead — same shape as the
+  smartmet_top subpackage discovery so the same bug class can't
+  recur.
+- The Flame-tab failure now surfaces the cause instead of the
+  symptom: activatePanel() catches init errors, marks the panel
+  inactive (so the polling loop stops re-throwing every 2 s), and
+  shows a panel-empty card with the actual error and a hint to
+  hard-refresh the cached static assets.
+- `--replay` now defaults ON for smwebmon (URLs panel comes up
+  populated from log history at startup). Pass --no-replay to opt
+  out — the sysconfig template documents both directions.
+- `--perf` now defaults ON for smwebmon, so the Flame tab works
+  out of the box. Same scope as smtop --perf: on-CPU, off-CPU,
+  page-fault, wakeup, block-I/O, plus biolat / runqlat / perfstat.
+  --no-perf opts out. New flags --perf-interval, --perf-record-seconds
+  and --malloc-flame mirror smtop. Requires perf installed and
+  kernel.perf_event_paranoid <= 2 (the RHEL default).
+- Unit's CPUQuota raised from 50% to 200% so perf record /
+  offcputime-bpfcc burst windows fit comfortably under the cgroup
+  ceiling. MemoryMax stays at 512M. Both can be raised in a drop-in
+  if a hot box wants more.
+
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-3.fmi
 - Co-bumped with smartmet-monitor for the install-rule fix that
   was causing smwebmon to fail-fast at startup with

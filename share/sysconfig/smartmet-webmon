@@ -4,12 +4,24 @@
 # unit. Edit and `sudo systemctl restart smartmet-webmon` to apply.
 #
 # All settings commented out by default — the unit will start the
-# server with built-in defaults: loopback bind on :8765, default log
-# glob (/var/log/smartmet/*-access-log), 24h history retention, AND
-# an auto-probe of the standard SmartMet admin ports on localhost
-# (frontend 8080, backend 8081). Whichever respond are registered
-# under the labels "frontend" and "backend". On a typical SmartMet
-# host the unit needs no configuration at all.
+# server with these built-in defaults:
+#
+#   * loopback bind on :8765
+#   * default log glob /var/log/smartmet/*-access-log
+#   * 24 h history retention
+#   * auto-probe of the standard SmartMet admin ports on localhost
+#     (frontend 8080, backend 8081), registering whichever responds
+#     under the labels "frontend" and "backend"
+#   * --replay  ON  (panels come up populated from log history)
+#   * --perf    ON  (Flame panel works out of the box: on-CPU,
+#                    off-CPU, page-fault, wakeup, block-I/O, plus
+#                    biolat / runqlat / perfstat. Requires perf
+#                    installed and kernel.perf_event_paranoid <= 2,
+#                    which is the RHEL default. ~3 % sustained CPU
+#                    overhead per smartmetd target during recording
+#                    windows.)
+#
+# On a typical SmartMet host the unit needs no configuration at all.
 
 # Bind address. Stick to localhost; the dashboard has no
 # authentication. Tunnel from your laptop via:
@@ -30,3 +42,18 @@
 # hosts that don't run SmartMet locally).
 #SMWEBMON_OPTS="--bind 127.0.0.1:8765 --no-admin \
 #  -l /var/log/smartmet-archive/*.log"
+
+# Disable perf samplers if the CPU overhead is unwelcome (e.g. on
+# a small / shared host). The Flame panel will then show "no flame
+# data" and the dashboard runs leaner.
+#SMWEBMON_OPTS="--bind 127.0.0.1:8765 --no-perf"
+
+# Disable startup replay (faster restart at the cost of empty panels
+# until enough live traffic accumulates). Useful on a host with very
+# busy logs where the replay scan adds noticeable startup delay.
+#SMWEBMON_OPTS="--bind 127.0.0.1:8765 --no-replay"
+
+# Enable the per-allocation malloc flame graph (NOT for production:
+# uprobe-on-malloc has measurable allocator overhead). MIN_BYTES
+# caps which allocs are traced.
+#SMWEBMON_OPTS="--bind 127.0.0.1:8765 --malloc-flame 4096"

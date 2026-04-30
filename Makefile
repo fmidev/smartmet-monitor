@@ -36,7 +36,6 @@ BTOOLS = bstat bchart burls bstatus bkeys bperf
 LEGACY = bstat1s bstat10s bstat1 bstat10 bstat60 bstat24
 MANPAGES = smtop.1 bstat.1 bchart.1 burls.1 bstatus.1 bkeys.1 bperf.1 \
            bstat1s.1 bstat10s.1 bstat1.1 bstat10.1 bstat60.1 bstat24.1
-WEBMON_ASSETS = index.html app.js chart.js style.css
 
 install:
 	install -d $(BINDIR) $(SHAREDIR) $(MANDIR) $(DOCDIR) $(SITEDIR)
@@ -86,8 +85,15 @@ install-webmon:
 	install -d $(DESTDIR)$(UNITDIR) $(DESTDIR)$(SYSCONFDIR)/sysconfig
 	install -m 0755 smwebmon $(BINDIR)/smwebmon
 	install -m 0644 smartmet_webmon/*.py $(SITEDIR_WEBMON)/
-	$(foreach a,$(WEBMON_ASSETS), \
-	    install -m 0644 share/smartmet/webmon/$(a) $(WEBMON_ASSET_DIR)/$(a); )
+	# Browser assets — auto-discovered so adding a new file (e.g.
+	# flame.js was missed in 26.4.30-3 because it wasn't in a
+	# hand-maintained WEBMON_ASSETS list) doesn't silently produce
+	# a broken RPM. Skips dirs so a future vendor/ subtree can be
+	# handled separately.
+	for f in share/smartmet/webmon/*; do \
+	    [ -f "$$f" ] || continue; \
+	    install -m 0644 "$$f" $(WEBMON_ASSET_DIR)/; \
+	done
 	install -m 0644 share/systemd/smartmet-webmon.service \
 	    $(DESTDIR)$(UNITDIR)/smartmet-webmon.service
 	install -m 0644 share/sysconfig/smartmet-webmon \

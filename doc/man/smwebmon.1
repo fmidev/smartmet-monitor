@@ -1,4 +1,4 @@
-.TH SMWEBMON 1 "2026-04-30" "smartmet-webmon-26.4.30-1" "SmartMet Server"
+.TH SMWEBMON 1 "2026-04-30" "smartmet-webmon-26.4.30-4" "SmartMet Server"
 .SH NAME
 smwebmon \- browser dashboard for SmartMet Server
 .SH SYNOPSIS
@@ -71,9 +71,10 @@ Don\(aqt tail any log file (use admin
 .B /lastrequests
 instead).
 .TP
-.B \-\-replay
+.BR \-\-replay " / " \-\-no\-replay
 On startup, read the tail of each log file so the URLs panel comes up
-populated instead of empty.
+populated instead of empty. \fBDefault ON\fR; pass \-\-no\-replay to
+opt out.
 .TP
 .BR \-\-replay\-bytes " " \fIN\fR
 Maximum bytes to read per log file when
@@ -100,6 +101,45 @@ Override the static-asset directory. Default search order:
 sibling
 .IR share/smartmet/webmon/ ,
 .IR /usr/share/smartmet/webmon/ .
+.TP
+.BR \-\-perf " / " \-\-no\-perf
+Enable the perf samplers behind the Flame panel: on-CPU
+.RB ( "perf record" ),
+off-CPU
+.RB ( offcputime-bpfcc ),
+page-fault, wakeup, block-I/O, plus the
+.BR biolat ,
+.BR runqlat ,
+and
+.B perfstat
+host-wide samplers. Same scope as
+.BR smtop \ \-\-perf .
+\fBDefault ON\fR; pass \-\-no\-perf to opt out. Requires
+.B perf
+installed and
+.BR kernel.perf_event_paranoid \ \(<=\ 2
+(the RHEL default).
+.B bcc-tools
+is recommended for off-CPU; the panel falls back gracefully when it
+is missing.
+.TP
+.BI \-\-perf\-interval \ SEC
+Full perf cycle in seconds (record + idle remainder). Default 10.0.
+.TP
+.BI \-\-perf\-record\-seconds \ N
+Seconds to record per perf cycle. Default 3. Combined with the
+default
+.B \-\-perf\-interval=10
+the duty cycle on the target
+.B smartmetd
+process is ~30%.
+.TP
+.BR \-\-malloc\-flame " " [ \fIMIN_BYTES\fR ]
+Enable the per-allocation flame graph. \fBNot for production\fR —
+uprobe\-on\-malloc has measurable allocator overhead on a busy
+server. Default OFF; turn on explicitly. \fIMIN_BYTES\fR caps which
+allocations are traced (default 4096 when the flag is given without
+a value).
 .SH COSTS AND POLICY
 .B smwebmon
 is shipped as a systemd unit but

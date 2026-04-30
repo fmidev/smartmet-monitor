@@ -1180,7 +1180,22 @@
     document.querySelectorAll("#tabs .tab").forEach(t =>
       t.classList.toggle("active", t.dataset.id === id));
     const host = document.getElementById("panel-host");
-    PANELS[id].init(host);
+    // Guard init: if a referenced static asset 404s (the symptom is a
+    // missing constructor on `window`, e.g. FlameView), the polling
+    // loop must NOT keep ticking and re-throwing the same error every
+    // 2 s. Drop the panel as inactive and surface the cause.
+    try {
+      PANELS[id].init(host);
+    } catch (e) {
+      state.active = null;
+      host.innerHTML =
+        `<div class="panel panel-empty">panel <strong>${escHtml(id)}</strong> ` +
+        `failed to load: ${escHtml(e.message || String(e))}<br>` +
+        `<span class="muted">Try a hard refresh (Ctrl-Shift-R) — ` +
+        `a new install may have replaced cached static assets.</span></div>`;
+      showError(e);
+      return;
+    }
     PANELS[id].refresh().catch(showError);
   }
 

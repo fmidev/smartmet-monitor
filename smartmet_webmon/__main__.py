@@ -65,9 +65,10 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
              "registers whichever responds.",
     )
     p.add_argument(
-        "--replay", action="store_true",
+        "--replay", action=argparse.BooleanOptionalAction, default=True,
         help="On startup, read the tail of each log file so the URLs "
-             "panel comes up populated instead of empty.",
+             "panel comes up populated instead of empty. Default ON; "
+             "pass --no-replay to opt out.",
     )
     p.add_argument(
         "--replay-bytes", type=int, default=1024 * 1024 * 1024,
@@ -77,6 +78,37 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     p.add_argument(
         "--include-rotated", action="store_true",
         help="With --replay, also read rotated log siblings.",
+    )
+    p.add_argument(
+        "--perf", action=argparse.BooleanOptionalAction, default=True,
+        help="Enable the perf samplers behind the Flame panel: on-CPU "
+             "(perf record), off-CPU (offcputime-bpfcc), page-fault, "
+             "wakeup, block-I/O, plus the biolat / runqlat / perfstat "
+             "host-wide samplers. Same scope as smtop --perf. Default "
+             "ON; pass --no-perf to opt out. Requires perf installed "
+             "and kernel.perf_event_paranoid <= 2 (the RHEL default). "
+             "bcc-tools is recommended for off-CPU; the panel falls "
+             "back gracefully when it's missing.",
+    )
+    p.add_argument(
+        "--perf-interval", type=float, default=10.0, metavar="SEC",
+        help="Full perf cycle in seconds (record + idle remainder). "
+             "Default 10.0.",
+    )
+    p.add_argument(
+        "--perf-record-seconds", type=int, default=3, metavar="N",
+        help="Seconds to record per perf cycle. Default 3. Combined "
+             "with --perf-interval=10 the duty cycle on the target "
+             "smartmetd process is ~30%%.",
+    )
+    p.add_argument(
+        "--malloc-flame", nargs="?", type=int, const=4096, default=None,
+        metavar="MIN_BYTES",
+        help="Enable per-allocation flame graph (uprobe-on-malloc). "
+             "Default OFF — uprobe-on-malloc on a busy server has "
+             "measurable overhead; opt in explicitly. MIN_BYTES caps "
+             "which allocs are traced (default 4096 when the flag is "
+             "given without a value).",
     )
     p.add_argument(
         "--history-minutes", type=int, default=1440, metavar="N",
@@ -167,10 +199,10 @@ async def _run(args: argparse.Namespace) -> int:
         log_paths=log_paths,
         admin_urls=admin_urls,
         admin_interval=args.admin_interval,
-        # smwebmon deliberately does not enable --perf — see the
-        # cost-analysis discussion. Operators who want flame graphs
-        # run smtop --perf interactively.
-        enable_perf=False,
+        enable_perf=args.perf,
+        perf_interval=args.perf_interval,
+        perf_record_seconds=args.perf_record_seconds,
+        malloc_flame_min_bytes=args.malloc_flame,
         journal_unit=args.journal_unit,
     )
 
