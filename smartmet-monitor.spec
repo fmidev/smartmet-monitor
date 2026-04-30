@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.30
-Release:        1%{?dist}.fmi
+Release:        2%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -119,6 +119,17 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-2.fmi
+- `make check` (and therefore the RPM %build phase) failed on the
+  RHEL 8 build host with `urllib.error.HTTPError: HTTP Error 403:
+  Forbidden` against the local 127.0.0.1 ephemeral-port test
+  server. The cause is the build host's HTTP proxy intercepting
+  loopback requests because `no_proxy` doesn't include 127.0.0.1.
+  The check's two urllib calls now use a ProxyHandler({}) opener
+  to bypass the proxy regardless of the surrounding env. Verified
+  by running with a poison `http_proxy` set — the test still
+  passes.
+
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-1.fmi
 - Build-system fix. `rpmbuild -tb` refuses to build a tarball that
   contains more than one .spec, so `make rpm` and `make rpms`

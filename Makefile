@@ -282,9 +282,10 @@ check:
 	    _wserv = smartmet_webmon.server.WebServer(_wst, bind=("127.0.0.1", 0), asset_root="."); \
 	    _wserv.start(); \
 	    import urllib.request as _ur, json as _json; \
-	    _resp = _ur.urlopen(f"http://127.0.0.1:{_wserv.port}/api/health", timeout=2).read(); \
+	    _np = _ur.build_opener(_ur.ProxyHandler({})); \
+	    _resp = _np.open(f"http://127.0.0.1:{_wserv.port}/api/health", timeout=2).read(); \
 	    assert _json.loads(_resp).get("ok"); \
-	    _resp = _ur.urlopen(f"http://127.0.0.1:{_wserv.port}/api/panels", timeout=2).read(); \
+	    _resp = _np.open(f"http://127.0.0.1:{_wserv.port}/api/panels", timeout=2).read(); \
 	    _panels = _json.loads(_resp).get("panels"); \
 	    assert isinstance(_panels, list) and len(_panels) >= 10, _panels; \
 	    _wserv.stop()'

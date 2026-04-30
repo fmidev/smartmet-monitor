@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.4.30
-Release:        1%{?dist}.fmi
+Release:        2%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -107,6 +107,12 @@ getent passwd smartmet >/dev/null || \
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-2.fmi
+- Co-bumped with smartmet-monitor for the make-check fix that
+  restores the RPM build on the RHEL 8 build host (HTTP proxy
+  was intercepting the loopback test requests). See
+  smartmet-monitor changelog for details.
+
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-1.fmi
 - Spec file lists the smwebmon(1) man page in %files. The
   install-webmon Makefile target was already shipping it, but the
