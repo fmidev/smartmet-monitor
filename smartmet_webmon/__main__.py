@@ -187,13 +187,17 @@ async def _run(args: argparse.Namespace) -> int:
         f"(assets: {asset_root})\n"
     )
 
-    if args.replay:
-        await replay_logs(
-            store, log_paths,
-            replay_bytes=args.replay_bytes,
-            include_rotated=args.include_rotated,
-        )
-
+    # Schedule sampler tasks BEFORE awaiting replay. Replay's await
+    # blocks this coroutine but the asyncio event loop runs the
+    # sampler tasks in parallel — bulk_load uses its own file handles
+    # independent of tail_many's tail position. The reason this order
+    # matters: while replay is in progress the HTTP server is already
+    # answering requests. If samplers haven't been scheduled yet,
+    # /api/flame/status reports perf_enabled=false and "(disabled)"
+    # statuses, which looks identical to the dashboard being broken.
+    # Scheduling first means the dashboard reflects the real state
+    # from second one — flame samples start arriving while replay
+    # populates URL/Plugin stats over the next minute or two.
     tasks = start_sources(
         store,
         log_paths=log_paths,
@@ -205,6 +209,28 @@ async def _run(args: argparse.Namespace) -> int:
         malloc_flame_min_bytes=args.malloc_flame,
         journal_unit=args.journal_unit,
     )
+    sys.stderr.write(
+        f"smwebmon: scheduled {len(tasks)} source task(s) "
+        f"(perf={'on' if args.perf else 'off'})\n"
+    )
+
+    if args.replay:
+        sys.stderr.write(
+            f"smwebmon: replay starting "
+            f"({len(log_paths)} log file(s), max "
+            f"{args.replay_bytes // (1024 * 1024)} MiB each)...\n"
+        )
+        import time as _time
+        _replay_t0 = _time.monotonic()
+        await replay_logs(
+            store, log_paths,
+            replay_bytes=args.replay_bytes,
+            include_rotated=args.include_rotated,
+        )
+        sys.stderr.write(
+            f"smwebmon: replay done in "
+            f"{_time.monotonic() - _replay_t0:.1f}s\n"
+        )
 
     stop = asyncio.Event()
 

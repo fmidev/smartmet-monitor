@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 
 def _dur(r) -> float:
     try:
@@ -53,8 +55,14 @@ class ActiveSnapshot:
             elif len(samples) > len(agg):
                 agg = [0] * (len(samples) - len(agg)) + agg
             agg = [a + b for a, b in zip(agg, samples)]
+        # Each agg[] entry is one admin poll cycle; the operator's
+        # --admin-interval (default 2s) is the nominal step. last_ts
+        # is the wall-clock at the moment of API call; the most
+        # recent sample was taken within ~step_seconds of that.
         return {
             "values": [int(v) for v in agg],
             "current": int(agg[-1]) if agg else 0,
             "peak": int(max(agg)) if agg else 0,
+            "last_ts": time.time(),
+            "step_seconds": 2.0,
         }

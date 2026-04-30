@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import List, Tuple
 
 from ..state.store import MinuteBucket
@@ -131,10 +132,13 @@ class URLsSnapshot:
                             if b.count else 0,
             })
 
+        now_min = int(time.time() // 60)
         out["minute_series"] = {
             "metric": "mean_ms",
             "minutes": 60,
             "values": list(u.minute_series(60, "mean_ms")),
+            "last_ts": float(now_min * 60),
+            "step_seconds": 60.0,
         }
 
         bw = u.window(window_min)
@@ -173,10 +177,13 @@ class URLsSnapshot:
         u = store.url_detail(url)
         if u is None:
             return {"url": url, "found": False, "values": []}
+        now_min = int(time.time() // 60)
         return {
             "url": url,
             "found": True,
             "metric": metric,
             "minutes": window_min,
             "values": list(u.minute_series(window_min, metric)),
+            "last_ts": float(now_min * 60),
+            "step_seconds": 60.0,
         }

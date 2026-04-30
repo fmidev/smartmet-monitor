@@ -299,7 +299,9 @@
         renderTable(tb, winCols, (d.windows || []));
         const cs = body.querySelectorAll("canvas");
         smChart.drawLine(cs[0], (c.values || []).map(Number),
-                          { xLabels: ["-60m", "now"] });
+                          { xLabels: ["-60m", "now"],
+                            last_ts: c.last_ts,
+                            step_seconds: c.step_seconds });
         smChart.drawHistogram(cs[1], d.histogram ? d.histogram.buckets : []);
         renderTable(body.querySelector("#d-status tbody"), [
           { key: "status",
@@ -472,7 +474,9 @@
                       : (m === "count" || m === "err_pct")
                         ? v => Math.round(v) : fmtMs;
           smChart.drawLine(charts[m], (c.values || []).map(Number),
-                            { fmtY });
+                            { fmtY,
+                              last_ts: c.last_ts,
+                              step_seconds: c.step_seconds });
         }
       },
     };
@@ -494,7 +498,8 @@
               ...["host","cache","size","max","hits/m","ins/m","hit%",
                   "fill","hits trend"]
                 .map((h,i) => el("th",
-                  { class: i === 0 || i === 1 ? "" :
+                  { class: i === 0 ? "" :
+                            i === 1 ? "name-col" :
                             (i === 7 || i === 8) ? "spark" : "num" }, h)))),
             el("tbody")));
         tbody = panel.querySelector("tbody");
@@ -509,7 +514,7 @@
           .map(r => [`${r.host}::${r.cache_name}`, r.values]));
         renderTable(tbody, [
           { key: "host" },
-          { key: "cache_name", class: "handler",
+          { key: "cache_name", class: "name-col",
             html: v => `<span title="${escHtml(v)}">${escHtml(v)}</span>` },
           { key: "size",            class: "num", fmt: fmtCount,
             color: (_, r) => fillClass(r.size, r.maxsize) },
@@ -551,7 +556,8 @@
             el("thead", null, el("tr", null,
               ...["host","handler","req/min","req/h","req/d","avg","cpu%","trend"]
                 .map((h,i) => el("th",
-                  { class: i === 0 || i === 1 ? "" :
+                  { class: i === 0 ? "" :
+                            i === 1 ? "name-col" :
                             (i === 7) ? "spark" : "num" }, h)))),
             el("tbody")));
         tbody = panel.querySelector("tbody");
@@ -566,7 +572,7 @@
           .map(r => [`${r.host}::${r.handler}`, r.values]));
         renderTable(tbody, [
           { key: "host" },
-          { key: "handler", class: "handler",
+          { key: "handler", class: "name-col",
             html: v => `<span title="${escHtml(v)}">${escHtml(v)}</span>` },
           { key: "req_per_min",  class: "num", fmt: v => v.toFixed(0) },
           { key: "req_per_hour", class: "num", fmt: v => v.toFixed(0) },
@@ -630,7 +636,9 @@
         document.getElementById("active-summary").textContent =
           `current ${ch.current}, peak ${ch.peak}`;
         smChart.drawLine(chartCanvas, ch.values || [],
-                          { fmtY: v => Math.round(v) });
+                          { fmtY: v => Math.round(v),
+                            last_ts: ch.last_ts,
+                            step_seconds: ch.step_seconds });
         renderTable(tbody, [
           { key: "host" },
           { key: "id",          class: "num" },
@@ -837,17 +845,17 @@
           </div>
         `;
         const c = sel => body.querySelector(`canvas[data-role="${sel}"]`);
+        // Proc samples have explicit timestamps in S.ts (one entry
+        // per value); drawLine prefers opts.ts over last_ts/step.
         smChart.drawLine(c("rss"),
           (S.vm_rss_kb || []).map(v => v * 1024),
-          { fmtY: fmtBytes });
-        // Compute combined IO bytes/s by stacking read/write — show as
-        // two lines on one chart by drawing twice with different colors.
+          { fmtY: fmtBytes, ts: S.ts });
         smChart.drawLine(c("io"), S.io_read_bps || [],
-          { fmtY: fmtBytes, lineColor: smChart.PALETTE.line });
+          { fmtY: fmtBytes, lineColor: smChart.PALETTE.line, ts: S.ts });
         smChart.drawLine(c("threads"), S.threads || [],
-          { fmtY: v => Math.round(v) });
+          { fmtY: v => Math.round(v), ts: S.ts });
         smChart.drawLine(c("majflt"), S.majflt_per_s || [],
-          { fmtY: v => v.toFixed(2) });
+          { fmtY: v => v.toFixed(2), ts: S.ts });
       },
     };
   })();

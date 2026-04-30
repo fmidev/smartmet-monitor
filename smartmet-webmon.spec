@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.4.30
-Release:        7%{?dist}.fmi
+Release:        8%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -40,6 +40,16 @@ BuildRequires:  systemd-rpm-macros
 Requires:       smartmet-monitor = %{version}-%{release}
 Requires:       python%{python3_pkgversion}
 %{?systemd_requires}
+
+# Pulled in for the bcc-tools flame modes (off-CPU / biolat /
+# runqlat). Those tools chdir into /lib/modules/$(uname -r)/build/
+# at startup; that symlink only exists when kernel-devel for the
+# running kernel is installed. The kheaders module (which the
+# package's modules-load.d entry pre-loads) is a separate header
+# source that bcc on RHEL 8 doesn't yet consume. kernel-devel-
+# uname-r is a meta-package that auto-resolves to the correct
+# kernel-devel-X.Y.Z for the running kernel.
+Recommends:     kernel-devel-uname-r
 
 # The unit runs as `smartmet-server` so it can profile smartmetd
 # (cross-uid perf record is denied at the default
@@ -139,6 +149,55 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-8.fmi
+- The unit now ships with AmbientCapabilities=CAP_SYS_PTRACE +
+  CAP_SYS_ADMIN and NoNewPrivileges=no. Investigation on
+  c3.back.smartmet.fmi.fi showed perf_event_open(2) was failing
+  with EACCES even at kernel.perf_event_paranoid=-1 + SELinux
+  Permissive + lockdown=none + same-uid as smartmetd (i.e. every
+  obvious wall removed). Root cause: smartmetd is launched by the
+  smartmet-server unit with NoNewPrivileges=1, which sets the
+  process's dumpable flag to 0; the kernel's ptrace_may_access()
+  check then requires the caller to hold CAP_SYS_PTRACE — same-
+  uid does NOT bypass this and no perf_event_paranoid level
+  bypasses it. CAP_SYS_PTRACE in our unit's AmbientCapabilities
+  satisfies the check. CAP_SYS_ADMIN unlocks the wakeup /
+  blockflame raw-tracepoint events at paranoid=0; CAP_PERFMON
+  would be the narrower fit on kernel >= 5.8 but RHEL 8's 4.18
+  doesn't expose it. NoNewPrivileges had to come off because
+  AmbientCapabilities doesn't take effect with it set; the
+  remaining hardening (ProtectSystem=strict, ProtectHome,
+  PrivateTmp) stays.
+- Recommends: kernel-devel-uname-r so the bcc-tools modes
+  (off-CPU / biolat / runqlat) work without a separate operator
+  step. Their failure mode was a chdir into
+  /lib/modules/$(uname -r)/build/ which only exists when
+  kernel-devel is installed. The kheaders module loaded at boot
+  is a separate header source that bcc on RHEL 8 doesn't yet
+  consume, so kheaders alone wasn't enough.
+- smwebmon now schedules sampler tasks BEFORE awaiting --replay.
+  asyncio runs them in parallel with the replay's blocking await,
+  so /api/flame/status reports real sampler state from second
+  one instead of "(disabled)" for the duration of the replay
+  scan (which can take minutes on a busy backend with default
+  --history-minutes=1440 and 1 GiB --replay-bytes). Stderr also
+  now logs "replay starting / done in Ns / scheduled N source
+  tasks" so the journal shows what stage startup is in.
+- Web UI: per-chart mouse-over with vertical guide line, dot at
+  the cursor's data point, and a floating tooltip showing
+  HH:MM:SS plus the formatted value. The X-axis grew from two
+  static labels to 3-5 evenly-spaced HH:MM ticks. Hover overlay
+  survives 2-second poll repaints. Wired up for the Overview
+  charts, the Active in-flight chart, the URLs detail-modal
+  60-min chart, and the Proc panel's RSS / IO / threads /
+  majflt charts. (Network panel charts still need timestamp
+  metadata in the snapshot — deferred to a follow-up.)
+- Web UI: Caches and Services panels' name column widened so
+  long cache names / handler names display fully instead of
+  collapsing to a few characters. The trailing trend sparkline
+  now compresses to its 80 px minimum when the name needs the
+  width, instead of greedily claiming 100 % of the row.
+
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-7.fmi
 - The package now ships the kernel-side prereqs the dashboard needs
   to be useful: kernel.perf_event_paranoid = 0 via

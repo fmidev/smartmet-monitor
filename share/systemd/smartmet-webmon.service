@@ -36,11 +36,32 @@ RestartSec=5
 MemoryMax=512M
 CPUQuota=200%
 
-# Basic hardening; smwebmon doesn't need any of this.
+# smwebmon must call perf_event_open(2) and use bcc-tools to
+# profile smartmetd. Two kernel checks block this for unprivileged
+# users:
+#
+#   * smartmetd has NoNewPrivileges=1 (its own systemd unit's
+#     hardening), which makes it non-traceable except by callers
+#     holding CAP_SYS_PTRACE — same-uid does NOT bypass this and
+#     no value of kernel.perf_event_paranoid bypasses it. So
+#     CAP_SYS_PTRACE is needed for "perf record -p smartmetd-pid".
+#
+#   * Raw tracepoints (sched:sched_wakeup, block:block_rq_issue)
+#     and ftrace function tracepoints are denied to unprivileged
+#     users at paranoid >= 0 — so wakeup, blockflame, and the
+#     bcc-tools modes need CAP_SYS_ADMIN. (CAP_PERFMON would be
+#     the narrower fit on kernel >= 5.8, but RHEL 8's 4.18 doesn't
+#     expose it; CAP_SYS_ADMIN is the next step up.)
+#
+# AmbientCapabilities only takes effect when NoNewPrivileges is
+# unset, so we drop it from this unit deliberately. The remaining
+# hardening (ProtectSystem, ProtectHome, PrivateTmp) still applies.
+AmbientCapabilities=CAP_SYS_PTRACE CAP_SYS_ADMIN
+CapabilityBoundingSet=CAP_SYS_PTRACE CAP_SYS_ADMIN
+NoNewPrivileges=no
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-NoNewPrivileges=yes
 
 # This unit is shipped DISABLED by default. The cost of running it
 # 24x7 was discussed and found unjustified versus on-demand use.

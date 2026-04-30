@@ -172,9 +172,28 @@ select, input[type="text"], input[type="search"] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Name-style column for cache_name / handler — claim a healthy
+ * natural width before the trend canvas grabs the leftover. No
+ * max-width clamp: long names extend the column; the trailing
+ * spark cell (width: auto, no width:100% greed) compresses to
+ * its canvas min-width when the name gets long. */
+.data-table td.name-col, .data-table th.name-col {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 280px;
+  padding-right: 12px;
+}
 .data-table tbody tr.clickable { cursor: pointer; }
 .data-table tbody tr.clickable:hover { background: var(--bg-row-hover); }
 .data-table tbody tr.selected { background: var(--bg-row-selected); }
+.data-table td.spark {
+  /* trailing trend cell — happily compresses when the name column
+   * claims its natural width. width:auto means the cell takes only
+   * what's left after the other columns have their say. */
+  width: auto;
+  min-width: 80px;
+}
 .data-table .spark canvas {
   height: 22px;
   width: 100%;
@@ -326,6 +345,23 @@ canvas.chart {
   max-width: 50vw;
 }
 .flame-tooltip.hidden { display: none; }
+
+.chart-tooltip {
+  position: fixed;
+  pointer-events: none;
+  background: var(--bg-panel);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.85em;
+  z-index: 200;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.chart-tooltip.hidden { display: none; }
+.chart-tooltip .ct-time { color: var(--fg-muted); margin-right: 0.4rem; }
+.chart-tooltip .ct-value { color: var(--accent); font-weight: bold; }
 
 #flame-error {
   text-align: left;

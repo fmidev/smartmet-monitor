@@ -33,10 +33,14 @@
     return { ctx, w: cssW, h: cssH };
   }
 
-  // Filled line chart with axis labels (full chrome).
+  // Filled line chart with axis labels and interactive hover. Pass
+  // either opts.ts (one timestamp per value) or opts.last_ts +
+  // opts.step_seconds; the chart computes per-point timestamps and
+  // surfaces them via mousemove. opts.fmtY formats the y-axis label
+  // and the tooltip value (default formatMs).
   function drawLine(canvas, values, opts = {}) {
     const { ctx, w, h } = setupHiDPI(canvas);
-    const padL = 36, padR = 8, padT = 6, padB = 16;
+    const padL = 40, padR = 8, padT = 6, padB = 16;
     const innerW = w - padL - padR;
     const innerH = h - padT - padB;
 
@@ -47,6 +51,7 @@
       ctx.fillStyle = PALETTE.axis;
       ctx.font = "12px ui-monospace, monospace";
       ctx.fillText("(no data)", padL, padT + 14);
+      canvas._chartState = null;
       return;
     }
 
@@ -101,8 +106,33 @@
     ctx.closePath();
     ctx.fill();
 
-    if (opts.xLabels && opts.xLabels.length === 2) {
-      ctx.fillStyle = PALETTE.axis;
+    // Build a per-point timestamp array if we can. Either the caller
+    // supplies opts.ts (one entry per value, e.g. ProcSample.ts), or
+    // last_ts + step_seconds for evenly-spaced series. Without either
+    // we fall back to the legacy "two static labels" chrome.
+    let ts = null;
+    if (opts.ts && opts.ts.length === values.length) {
+      ts = opts.ts;
+    } else if (opts.last_ts != null && opts.step_seconds) {
+      const lt = +opts.last_ts;
+      const st = +opts.step_seconds;
+      ts = values.map((_, i) => lt - (values.length - 1 - i) * st);
+    }
+
+    ctx.fillStyle = PALETTE.axis;
+    ctx.textBaseline = "alphabetic";
+    if (ts && ts.length >= 2) {
+      // 5 ticks if we have room, 3 on narrow charts.
+      const tickCount = innerW >= 360 ? 5 : 3;
+      for (let t = 0; t < tickCount; t++) {
+        const idx = Math.round(t * (values.length - 1) / (tickCount - 1));
+        const x = padL + idx * stepX;
+        ctx.textAlign = t === 0 ? "left"
+                      : t === tickCount - 1 ? "right"
+                      : "center";
+        ctx.fillText(formatTimeShort(ts[idx]), x, h - 2);
+      }
+    } else if (opts.xLabels && opts.xLabels.length === 2) {
       ctx.textAlign = "left";
       ctx.fillText(opts.xLabels[0], padL, h - 2);
       ctx.textAlign = "right";
@@ -113,6 +143,134 @@
       ctx.textAlign = "left";
       ctx.fillText(opts.title, padL, padT - 2);
     }
+
+    // Stash everything the hover handler needs so it can find which
+    // data point the cursor is over without rerunning the layout
+    // arithmetic.
+    canvas._chartState = {
+      values, ts, vmax, opts,
+      padL, padT, innerW, innerH, stepX,
+    };
+
+    // If the cursor is still over the chart (refresh ticks redraw
+    // every 2 s while the operator hovers), restore the overlay so
+    // the tooltip + crosshair don't blink off.
+    if (canvas._hoverIdx != null) {
+      const idx = Math.max(0, Math.min(values.length - 1,
+                                        canvas._hoverIdx));
+      _drawHoverOverlay(canvas, idx);
+    }
+
+    if (!canvas._chartWired) {
+      canvas.addEventListener("mousemove", _chartHover);
+      canvas.addEventListener("mouseleave", _chartLeave);
+      canvas._chartWired = true;
+    }
+  }
+
+  function _drawHoverOverlay(canvas, idx) {
+    const s = canvas._chartState;
+    if (!s) return;
+    const ctx = canvas.getContext("2d");
+    const x = s.padL + idx * s.stepX;
+
+    // Vertical guide line at the cursor's data point.
+    ctx.save();
+    ctx.strokeStyle = "rgba(217, 225, 234, 0.45)";
+    ctx.setLineDash([3, 3]);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, s.padT);
+    ctx.lineTo(x, s.padT + s.innerH);
+    ctx.stroke();
+    ctx.restore();
+
+    // Crosshair dot at the value point.
+    const v = s.values[idx];
+    if (Number.isFinite(v) && s.vmax > 0) {
+      const y = s.padT + s.innerH - (v / s.vmax) * s.innerH;
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function _chartHover(e) {
+    const canvas = this;
+    const s = canvas._chartState;
+    if (!s) return;
+    const rect = canvas.getBoundingClientRect();
+    const cssX = e.clientX - rect.left;
+    if (cssX < s.padL - 6 || cssX > s.padL + s.innerW + 6) {
+      _chartLeave.call(canvas);
+      return;
+    }
+    const idx = s.stepX > 0
+        ? Math.max(0, Math.min(s.values.length - 1,
+                                Math.round((cssX - s.padL) / s.stepX)))
+        : 0;
+    canvas._hoverIdx = idx;
+
+    // Redraw the chart cleanly (this also re-applies the overlay
+    // because drawLine sees _hoverIdx is set).
+    drawLine(canvas, s.values, s.opts);
+
+    const v = s.values[idx];
+    const fmtY = s.opts.fmtY || formatMs;
+    const valueStr = Number.isFinite(v) ? fmtY(v) : "—";
+    const timeStr = s.ts ? formatTimeFull(s.ts[idx]) : "";
+    const tooltip = _chartTooltipEl();
+    tooltip.innerHTML =
+      (timeStr ? `<span class="ct-time">${_esc(timeStr)}</span> ` : "") +
+      `<span class="ct-value">${_esc(valueStr)}</span>`;
+    tooltip.classList.remove("hidden");
+    tooltip.style.left = (e.clientX + 14) + "px";
+    tooltip.style.top  = (e.clientY + 14) + "px";
+  }
+
+  function _chartLeave() {
+    const canvas = this;
+    if (canvas._hoverIdx == null) return;
+    canvas._hoverIdx = null;
+    const s = canvas._chartState;
+    if (s) drawLine(canvas, s.values, s.opts);
+    _chartTooltipEl().classList.add("hidden");
+  }
+
+  function _chartTooltipEl() {
+    let el = document.getElementById("chart-tooltip");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "chart-tooltip";
+      el.className = "chart-tooltip hidden";
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+
+  function _esc(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  function formatTimeShort(epochSeconds) {
+    const d = new Date(epochSeconds * 1000);
+    const pad = n => String(n).padStart(2, "0");
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function formatTimeFull(epochSeconds) {
+    const d = new Date(epochSeconds * 1000);
+    const pad = n => String(n).padStart(2, "0");
+    const today = new Date();
+    const sameDay = d.getFullYear() === today.getFullYear()
+                  && d.getMonth() === today.getMonth()
+                  && d.getDate() === today.getDate();
+    const hms = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    if (sameDay) return hms;
+    const ymd = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    return `${ymd} ${hms}`;
   }
 
   // Sparkline — chromeless line, fills its container. Auto-scales

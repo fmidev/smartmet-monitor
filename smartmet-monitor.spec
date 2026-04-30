@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.30
-Release:        7%{?dist}.fmi
+Release:        8%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -120,6 +120,17 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-8.fmi
+- snapshots/{overview,active,urls,proc}: chart payloads now include
+  last_ts + step_seconds (or per-sample ts where available) so the
+  web client can map cursor position back to wall-clock time. Pure
+  additions to the JSON shape; old clients ignore the extra fields.
+- Co-bumped with smartmet-webmon for the unit's CAP_SYS_PTRACE +
+  CAP_SYS_ADMIN grant, the kernel-devel Recommends, the
+  schedule-samplers-before-replay reorder, and the chart hover +
+  Caches/Services column-width UI fixes. See smartmet-webmon
+  changelog for details.
+
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-7.fmi
 - New reference doc: /usr/share/doc/smartmet-monitor/perf-event-paranoid.md
   covering the kernel.perf_event_paranoid sysctl, what each level
