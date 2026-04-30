@@ -1013,8 +1013,20 @@ open http://localhost:8765/                     # any modern browser
 sudo systemctl stop smartmet-webmon             # when done
 ```
 
-The unit runs as user `smartmet` so it has read access to
-`/var/log/smartmet/*-access-log` (the same files the daemon writes).
+The unit runs as user `smartmet-server` (the same user that owns
+the `smartmetd` processes), which means two things work without any
+extra configuration:
+
+  * `perf record` — at the RHEL default `kernel.perf_event_paranoid=2`,
+    profiling is only allowed for processes the calling user owns.
+    Running smwebmon as the smartmetd-owner user makes the Flame
+    panel work without dropping the kernel sysctl or granting
+    capabilities.
+  * `/var/log/smartmet/*-access-log` reads — these files are owned
+    by the daemon writer, so same-user reads succeed without ACLs.
+
+Override the user via a drop-in (`sudo systemctl edit smartmet-webmon`)
+if your deployment uses a different operator account.
 
 ### Configuration
 

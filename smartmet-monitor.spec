@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.30
-Release:        4%{?dist}.fmi
+Release:        5%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -119,6 +119,10 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-5.fmi
+- Co-bumped with smartmet-webmon for the User=smartmet-server
+  default-user fix. See smartmet-webmon changelog for details.
+
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-4.fmi
 - Co-bumped with smartmet-webmon for the asset-install fix
   (flame.js wasn't being shipped) and the `--perf` / `--replay`

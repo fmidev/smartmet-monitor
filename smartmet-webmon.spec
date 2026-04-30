@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.4.30
-Release:        4%{?dist}.fmi
+Release:        5%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -41,12 +41,14 @@ Requires:       smartmet-monitor = %{version}-%{release}
 Requires:       python%{python3_pkgversion}
 %{?systemd_requires}
 
-# The unit runs as user `smartmet`, mirroring the SmartMet daemon's
-# user so the dashboard reads the same access logs the daemon writes.
-# The smartmet user is normally created by smartmet-server's RPM; we
-# create it here too so smartmet-webmon can be installed standalone
-# (idempotent — does nothing if the user already exists).
-Requires(pre):  shadow-utils
+# The unit runs as `smartmet-server` so it can profile smartmetd
+# (cross-uid perf record is denied at the default
+# kernel.perf_event_paranoid=2) and read the access logs the
+# daemon writes. The smartmet-server user is created by the
+# smartmet-server RPM; declare a Recommends so packagers can pull
+# it in by default without making it a hard requirement (some
+# sites build smartmet-server from source under a different name).
+Recommends:     smartmet-server
 
 %description
 Browser-based companion to smartmet-monitor. Adds the `smwebmon`
@@ -54,6 +56,11 @@ daemon that serves a small dashboard (URLs panel in v1, more to
 follow) over HTTP+JSON on loopback. Reuses the data-collection layer
 from smartmet-monitor; does not pull X11 or any third-party Python
 packages.
+
+The unit runs as the `smartmet-server` user (the same user that
+owns the smartmetd processes). Override via a drop-in
+(`sudo systemctl edit smartmet-webmon`) if your deployment uses a
+different operator account.
 
 The unit is shipped disabled. Start when needed:
 
@@ -84,11 +91,6 @@ make install-webmon \
     UNITDIR=%{_unitdir} \
     SYSCONFDIR=%{_sysconfdir}
 
-%pre
-getent passwd smartmet >/dev/null || \
-    useradd -r -s /sbin/nologin -d /var/lib/smartmet \
-            -c "SmartMet Server" smartmet
-
 %post
 %systemd_post smartmet-webmon.service
 
@@ -107,6 +109,28 @@ getent passwd smartmet >/dev/null || \
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-5.fmi
+- Default unit user changed from `smartmet` to `smartmet-server`.
+  This is the user that owns smartmetd processes in production
+  FMI deployments, and the kernel sysctl
+  kernel.perf_event_paranoid=2 (the RHEL default) only allows
+  perf record for processes the calling user owns. Profiling
+  cross-uid was failing with exit=255 and a near-empty diagnostic
+  even though paranoid=2 should "permit profiling" — the catch is
+  the "your own processes" constraint. The unit now runs as the
+  same user as smartmetd, so perf works out of the box. Group is
+  intentionally unset so systemd derives it from the user's
+  primary group in /etc/passwd (htj at FMI, smartmet-server
+  elsewhere); use a drop-in if your site needs something different.
+- The %pre useradd that created a `smartmet` user has been
+  dropped. That user was a miscalibration in the original spec
+  (-1 was based on an off-the-cuff name; production uses
+  smartmet-server). Recommends: smartmet-server declares the
+  actual dependency without making it a hard requirement (some
+  sites build smartmet-server from source under different names).
+- Requires(pre): shadow-utils dropped — no scriptlet uses useradd
+  any more.
+
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-4.fmi
 - flame.js was not being shipped in the RPM payload. Same install
   bug class as the snapshots/ fix in -3: WEBMON_ASSETS was a

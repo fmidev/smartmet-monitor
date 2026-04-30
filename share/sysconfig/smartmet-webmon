@@ -19,7 +19,9 @@
 #                    installed and kernel.perf_event_paranoid <= 2,
 #                    which is the RHEL default. ~3 % sustained CPU
 #                    overhead per smartmetd target during recording
-#                    windows.)
+#                    windows. The unit runs as the smartmet-server
+#                    user so paranoid=2 grants access — perf record
+#                    only profiles processes the calling user owns.)
 #
 # On a typical SmartMet host the unit needs no configuration at all.
 

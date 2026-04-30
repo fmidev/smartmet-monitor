@@ -7,8 +7,21 @@ After=network.target
 Type=simple
 EnvironmentFile=-/etc/sysconfig/smartmet-webmon
 ExecStart=/usr/bin/smwebmon $SMWEBMON_OPTS
-User=smartmet
-Group=smartmet
+# smwebmon must run as the user that owns the smartmetd processes
+# (typically `smartmet-server`, created by the smartmet-server RPM)
+# so two things work:
+#   * `kernel.perf_event_paranoid=2` lets the daemon profile the
+#     smartmetd processes — perf record cross-uid is denied at any
+#     paranoid level above 0, and we want to keep the kernel sysctl
+#     at its RHEL default.
+#   * `/var/log/smartmet/*-access-log` (owned by the daemon writer)
+#     is readable without ACL trickery.
+# Group= is intentionally omitted so systemd derives it from the
+# user's primary group in /etc/passwd, which differs across sites
+# (htj at FMI, smartmet-server elsewhere). Override via a drop-in
+# (`sudo systemctl edit smartmet-webmon`) if your deployment uses
+# a different operator account.
+User=smartmet-server
 Restart=on-failure
 RestartSec=5
 

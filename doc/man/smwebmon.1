@@ -1,4 +1,4 @@
-.TH SMWEBMON 1 "2026-04-30" "smartmet-webmon-26.4.30-4" "SmartMet Server"
+.TH SMWEBMON 1 "2026-04-30" "smartmet-webmon-26.4.30-5" "SmartMet Server"
 .SH NAME
 smwebmon \- browser dashboard for SmartMet Server
 .SH SYNOPSIS
@@ -156,8 +156,14 @@ sudo systemctl start smartmet-webmon
 .RE
 .PP
 The unit runs as user
-.B smartmet
-so it reads the same access logs the SmartMet daemon writes.
+.B smartmet-server
+\- the same user that owns the smartmetd processes \- so the
+.RB ( "kernel.perf_event_paranoid=2" )
+constraint that perf can only profile processes you own is
+satisfied without requiring root, and access logs are readable
+without ACL trickery. Override via a drop-in
+.RB ( "sudo systemctl edit smartmet-webmon" )
+if your deployment uses a different operator account.
 .B smwebmon
 deliberately does not enable
 .B \-\-perf
