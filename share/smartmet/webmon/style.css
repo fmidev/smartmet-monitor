@@ -49,6 +49,22 @@ html, body {
 .indicator.live  { color: var(--good); }
 .indicator.error { color: var(--bad); }
 
+.cluster-select {
+  background: var(--bg);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 3px 8px;
+  font: inherit;
+  font-weight: bold;
+  margin-right: 0.5rem;
+}
+.cluster-select:hover { background: var(--bg-row-hover); }
+.cluster-select.hidden { display: none; }
+.cluster-select option.cluster-down {
+  color: var(--bad);
+}
+
 .tabs {
   display: flex;
   gap: 2px;

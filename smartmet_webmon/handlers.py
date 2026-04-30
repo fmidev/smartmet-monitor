@@ -310,7 +310,66 @@ def logs_stream(store, qs):
         filter_str=qs.get("filter", ""))
 
 
+# ---- Cluster (registry-scope, not store-scope) ------------------------------
+
+def clusters_list(registry, qs):
+    """List configured clusters with discovery status. Used by the UI's
+    cluster selector dropdown — populates one entry per cluster plus the
+    pseudo-entry "(single host)" if a non-empty single-host store
+    coexists with the registry."""
+    if registry is None:
+        return 200, {"clusters": []}
+    out = []
+    for ctx in registry.all():
+        backends = ctx.last_backends or []
+        alive = sum(1 for b in backends if b.alive)
+        out.append({
+            "name": ctx.config.name,
+            "frontend_url": ctx.config.frontend_url,
+            "discovery_status": ctx.discovery_status,
+            "backend_count": len(backends),
+            "alive_count": alive,
+            "polling_count": len(ctx.tasks),
+        })
+    return 200, {"clusters": out}
+
+
+def cluster_topology(registry, qs):
+    """Backend list for one cluster with handler service mix. Powers
+    the topology card (Phase 3) — backend prefixes, alive/down state,
+    and which services they host (so c2-c5 cluster as 'timeseries' nodes
+    while v1.q3 / v2.q3 cluster as 'q3' nodes)."""
+    name = qs.get("cluster", "")
+    if registry is None or not name:
+        return 400, {"error": "missing cluster query parameter"}
+    ctx = registry.get(name)
+    if ctx is None:
+        return 404, {"error": "no such cluster", "name": name}
+    backends = []
+    for b in ctx.last_backends:
+        backends.append({
+            "prefix": b.prefix,
+            "alive": b.alive,
+            "handlers": b.handlers,
+        })
+    return 200, {
+        "name": ctx.config.name,
+        "frontend_url": ctx.config.frontend_url,
+        "discovery_status": ctx.discovery_status,
+        "backends": backends,
+        "polling_prefixes": sorted(ctx.tasks.keys()),
+    }
+
+
 # ---- routing ----------------------------------------------------------------
+
+# Cluster-scope endpoints — these get the ``ClusterRegistry`` directly
+# (not a per-cluster Store) because they introspect the registry
+# itself.
+CLUSTER_ROUTES = {
+    "/clusters":         clusters_list,
+    "/cluster/topology": cluster_topology,
+}
 
 ROUTES = {
     # meta

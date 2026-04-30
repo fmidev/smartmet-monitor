@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.4.30
-Release:        11%{?dist}.fmi
+Release:        12%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -143,12 +143,62 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_datadir}/smartmet/webmon/
 %{_unitdir}/smartmet-webmon.service
 %config(noreplace) %{_sysconfdir}/sysconfig/smartmet-webmon
+%dir %{_sysconfdir}/smartmet-webmon
+%config(noreplace) %{_sysconfdir}/smartmet-webmon/clusters.conf
 %{_prefix}/lib/sysctl.d/99-smartmet-perf.conf
 %{_prefix}/lib/modules-load.d/smartmet-perf.conf
 %{_python3_sitelib}/smartmet_webmon/
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-12.fmi
+- Cluster-view groundwork (Phase 1 of 3). The dashboard can now
+  monitor multiple SmartMet clusters from a single smwebmon
+  instance: cluster discovery via the frontend's clusterinfo HTML,
+  per-backend admin polling through cluster-specific URL patterns,
+  cluster selector dropdown in the top bar, ?cluster=NAME on every
+  /api/* endpoint to route to the right per-cluster Store.
+- Auto-detection: when no clusters.conf is present (or empty),
+  smwebmon probes localhost for a SmartMet daemon, parses its
+  clusterinfo to identify role (FRONTEND vs BACKEND), and on a
+  frontend host derives a cluster definition from the local FQDN
+  (`<prefix>.<cluster>.<domain>` → cluster name = `<cluster>`,
+  admin-url-pattern = `http://{prefix}.<cluster>.<domain>:8081/admin`).
+  On a backend host or any FQDN that doesn't match the convention,
+  auto-detect quietly returns and single-host mode (existing 26.4
+  behaviour) takes over. --no-cluster-autodetect opts out.
+- /etc/smartmet-webmon/clusters.conf — INI-style file with one
+  section per cluster (frontend-url, admin-url-pattern, optional
+  log-glob / admin-interval / discovery-interval). Shipped with all
+  cluster sections commented out, so a fresh install lands in
+  auto-detect mode. Operators with non-FMI naming conventions
+  uncomment + adjust. %config(noreplace), so site edits survive
+  upgrades.
+- Two new endpoints exposed for the dashboard:
+    /api/clusters             — list configured clusters with
+                                discovery status (alive/total
+                                backend counts).
+    /api/cluster/topology     — per-cluster backend list with
+                                handler service mix; powers the
+                                planned topology card.
+- The same smartmet-webmon RPM works on backend and frontend
+  hosts. Behaviour is configuration-driven: backend host =
+  single-host mode (existing perf samplers + admin polling
+  localhost); frontend host = cluster mode (admin polling N
+  backends through the frontend's local clusterinfo). Both modes
+  can co-exist when frontend is colocated with a backend's
+  smartmetd.
+- Existing single-host functionality unchanged. With no
+  clusters.conf and auto-detect off, smwebmon behaves exactly as
+  in -11.
+
+  Phase 2 (multi-line cluster panels — overlay one line per
+  backend per panel) and Phase 3 (cluster topology card +
+  aggregates) are queued; this release is the wiring layer.
+  Existing per-host panels keep rendering all backends as separate
+  rows when ?cluster= is in scope, which is functional but not
+  the eventual cluster-friendly shape.
+
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-11.fmi
 - Chart Y-axis nice-tick algorithm switched from qdstat-style
   (2/5/10 ladder) to Heckbert-style (1/2/5/10 ladder). The two

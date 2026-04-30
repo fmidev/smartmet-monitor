@@ -9,6 +9,8 @@
 
   const state = {
     active: null,              // current panel id
+    activeCluster: null,       // current cluster name (null = single-host)
+    clusters: [],              // list of configured clusters (from /api/clusters)
     panels: {},                // per-panel local state
     poll: null,                // setInterval handle
   };
@@ -135,7 +137,16 @@
   // ---- HTTP -------------------------------------------------------
 
   async function getJSON(path, params) {
-    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+    // Auto-attach the active cluster to every request so panels never
+    // have to know about clustering. Endpoints that don't care about
+    // ?cluster= ignore it; endpoints that do (every store-bound /api/*)
+    // resolve to the right cluster's store.
+    const merged = Object.assign({}, params || {});
+    if (state.activeCluster && !("cluster" in merged)) {
+      merged.cluster = state.activeCluster;
+    }
+    const qs = Object.keys(merged).length
+      ? "?" + new URLSearchParams(merged).toString() : "";
     const r = await fetch(path + qs, { cache: "no-store" });
     if (!r.ok) throw new Error(`HTTP ${r.status} for ${path}`);
     return r.json();
@@ -1235,10 +1246,38 @@
   // boot, tab strip, polling
   // =================================================================
 
+  function _writeHash() {
+    const cluster = state.activeCluster
+      ? `cluster=${encodeURIComponent(state.activeCluster)}/` : "";
+    location.hash = `#/${cluster}${state.active || ""}`;
+  }
+
+  function _parseHash() {
+    // #/cluster=NAME/panel — cluster part optional.
+    const h = (location.hash || "").replace(/^#\//, "");
+    const m = h.match(/^cluster=([^/]+)\/(.*)$/);
+    if (m) return { cluster: decodeURIComponent(m[1]), panel: m[2] || null };
+    return { cluster: null, panel: h || null };
+  }
+
+  function activateCluster(name) {
+    if (state.activeCluster === name) return;
+    state.activeCluster = name;
+    const sel = document.getElementById("cluster-select");
+    if (sel) sel.value = name == null ? "" : name;
+    _writeHash();
+    // Re-render the current panel against the new cluster's store.
+    if (state.active) {
+      const id = state.active;
+      state.active = null;          // force re-init in activatePanel
+      activatePanel(id);
+    }
+  }
+
   function activatePanel(id) {
     if (state.active === id) return;
     state.active = id;
-    location.hash = "#/" + id;
+    _writeHash();
     document.querySelectorAll("#tabs .tab").forEach(t =>
       t.classList.toggle("active", t.dataset.id === id));
     const host = document.getElementById("panel-host");
@@ -1274,8 +1313,48 @@
     console.error(e);
   }
 
+  async function _loadClusters() {
+    // /api/clusters always returns 200 — empty list means single-host
+    // mode (no clusters.conf, or empty config), populated list means
+    // cluster mode is active and the dashboard should show the
+    // selector.
+    try {
+      const r = await fetch("/api/clusters", { cache: "no-store" });
+      if (!r.ok) return [];
+      return (await r.json()).clusters || [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function _renderClusterSelector(clusters) {
+    const sel = document.getElementById("cluster-select");
+    if (!sel) return;
+    sel.innerHTML = "";
+    if (!clusters.length) {
+      sel.classList.add("hidden");
+      return;
+    }
+    sel.classList.remove("hidden");
+    for (const c of clusters) {
+      const opt = el("option", { value: c.name },
+        `${c.name} (${c.alive_count}/${c.backend_count})`);
+      if (c.alive_count === 0 && c.backend_count > 0) {
+        opt.classList.add("cluster-down");
+      }
+      sel.appendChild(opt);
+    }
+    sel.addEventListener("change", () => activateCluster(sel.value));
+  }
+
   async function boot() {
     setIndicator("…");
+
+    // Discover clusters first so the URL-hash routing (which can
+    // include a cluster=NAME) matches what the server knows.
+    state.clusters = await _loadClusters();
+    _renderClusterSelector(state.clusters);
+
     let panels;
     try {
       panels = (await getJSON("/api/panels")).panels;
@@ -1290,7 +1369,22 @@
       tabHost.appendChild(b);
     }
 
-    fetch("/api/health", { cache: "no-store" })
+    // Pick initial cluster + panel from URL hash. Fallbacks: first
+    // cluster (or single-host), URLs panel.
+    const parsed = _parseHash();
+    const validCluster =
+      parsed.cluster && state.clusters.some(c => c.name === parsed.cluster)
+        ? parsed.cluster
+        : (state.clusters[0] ? state.clusters[0].name : null);
+    state.activeCluster = validCluster;
+    if (validCluster) {
+      const sel = document.getElementById("cluster-select");
+      if (sel) sel.value = validCluster;
+    }
+
+    fetch("/api/health" + (validCluster
+        ? "?cluster=" + encodeURIComponent(validCluster) : ""),
+        { cache: "no-store" })
       .then(r => r.json())
       .then(h => {
         document.getElementById("status").textContent =
@@ -1300,9 +1394,25 @@
       })
       .catch(() => {});
 
-    // Pick initial panel from location hash, fall back to URLs.
-    const hash = (location.hash || "").replace(/^#\//, "");
-    activatePanel(panels.some(p => p.id === hash) ? hash : "urls");
+    const initialPanel =
+      panels.some(p => p.id === parsed.panel) ? parsed.panel : "urls";
+    activatePanel(initialPanel);
+
+    // Periodically refresh the cluster list (alive counts in the
+    // dropdown drift as backends come/go) without thrashing.
+    setInterval(async () => {
+      const fresh = await _loadClusters();
+      // Only re-render if the set / counts changed, to avoid
+      // dropping the user's mid-selection focus.
+      if (JSON.stringify(fresh) !== JSON.stringify(state.clusters)) {
+        state.clusters = fresh;
+        _renderClusterSelector(fresh);
+        if (state.activeCluster) {
+          const sel = document.getElementById("cluster-select");
+          if (sel) sel.value = state.activeCluster;
+        }
+      }
+    }, 30 * 1000);
 
     state.poll = setInterval(tickActive, REFRESH_MS);
   }

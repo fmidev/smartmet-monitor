@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.30
-Release:        11%{?dist}.fmi
+Release:        12%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -120,6 +120,11 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-12.fmi
+- Co-bumped with smartmet-webmon for the cluster-view groundwork.
+  See smartmet-webmon changelog for the multi-cluster discovery,
+  registry, selector UI, and auto-detection from the local FQDN.
+
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-11.fmi
 - Co-bumped with smartmet-webmon for the chart Y-axis nice-tick
   algorithm switch from qdstat-style 2/5/10 to Heckbert-style
