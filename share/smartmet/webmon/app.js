@@ -969,7 +969,7 @@
       smartmet_only: true, thread: "all", search: "",
     };
     let flame, modeBar, statusEl, pidSel, threadBar, smartmetBtn,
-        searchBox, breadcrumbEl, topTbody;
+        searchBox, breadcrumbEl, topTbody, errorEl;
     return {
       title: "Flame",
       init(host) {
@@ -1007,6 +1007,7 @@
         });
 
         breadcrumbEl = el("div", { id: "flame-breadcrumb" });
+        errorEl = el("div", { id: "flame-error", class: "panel-empty hidden" });
 
         const canvas = el("canvas", { id: "flame-canvas" });
         const tooltip = document.getElementById("flame-tooltip");
@@ -1023,6 +1024,7 @@
         panel.appendChild(statusEl);
         panel.appendChild(ctrls);
         panel.appendChild(breadcrumbEl);
+        panel.appendChild(errorEl);
         panel.appendChild(canvas);
         host.appendChild(panel);
 
@@ -1065,6 +1067,57 @@
         threadBar.appendChild(b);
       }
     }
+    // Surface the multi-line errors the panel header truncates.
+    // Triggers when there are no samples at all OR when any sampler
+    // is in a "failed" state. The on-CPU sampler's full perf stderr
+    // (multi-line, paragraph-shaped) is the most useful payload —
+    // shown verbatim in monospace so the operator sees what perf
+    // actually said, not the panel-friendly first line.
+    function renderFlameDiagnostics(status, totalSamples) {
+      const issues = [];
+      const isFailing = s => s && /\bfail|error|denied|not found|unavailable|paranoid/i.test(s);
+      if (status.perf_last_error) {
+        issues.push({ label: "on-CPU (perf record)",
+                      text: status.perf_last_error });
+      } else if (isFailing(status.perf_status)) {
+        issues.push({ label: "on-CPU (perf record)",
+                      text: status.perf_status });
+      }
+      const others = [
+        ["off-CPU (offcputime-bpfcc)", status.offcpu_status],
+        ["page-fault",                  status.pagefault_status],
+        ["wakeup",                      status.wakeup_status],
+        ["block-I/O (blockflame)",      status.blockflame_status],
+        ["malloc",                      status.malloc_status],
+        ["biolat",                      status.biolat_status],
+        ["runqlat",                     status.runqlat_status],
+        ["perfstat",                    status.perfstat_status],
+      ];
+      for (const [label, s] of others) {
+        if (isFailing(s)) issues.push({ label, text: s });
+      }
+      if (totalSamples > 0 && issues.length === 0) {
+        errorEl.classList.add("hidden");
+        return;
+      }
+      if (issues.length === 0) {
+        errorEl.classList.add("hidden");
+        return;
+      }
+      const blocks = issues.map(i =>
+        `<div class="flame-issue">` +
+        `<div class="flame-issue-label">${escHtml(i.label)}</div>` +
+        `<pre class="flame-issue-text">${escHtml(i.text)}</pre>` +
+        `</div>`
+      ).join("");
+      errorEl.innerHTML =
+        `<div class="flame-issues-head">` +
+        `<strong>Sampler diagnostics</strong> ` +
+        `<span class="muted">(${issues.length} issue${
+          issues.length === 1 ? "" : "s"})</span></div>` + blocks;
+      errorEl.classList.remove("hidden");
+    }
+
     function renderBreadcrumb(path) {
       breadcrumbEl.innerHTML = "";
       const root = el("a",
@@ -1103,6 +1156,7 @@
       statusEl.querySelector(".panel-title").textContent =
         `Flame — ${totalSamples} sampled stacks`
         + (status.perf_status ? ` (${status.perf_status})` : "");
+      renderFlameDiagnostics(status, totalSamples);
 
       const args = {
         mode: ps.mode,

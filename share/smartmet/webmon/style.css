@@ -327,6 +327,36 @@ canvas.chart {
 }
 .flame-tooltip.hidden { display: none; }
 
+#flame-error {
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  background: rgba(248, 81, 73, 0.07);
+}
+#flame-error.hidden { display: none; }
+.flame-issues-head {
+  color: var(--bad);
+  margin-bottom: 0.4rem;
+}
+.flame-issue + .flame-issue { margin-top: 0.5rem; }
+.flame-issue-label {
+  color: var(--header);
+  font-weight: bold;
+  font-size: 0.95em;
+}
+.flame-issue-text {
+  margin: 0.2rem 0 0 0;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 0.9em;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  color: var(--fg);
+}
+
 /* ---- log scroller ------------------------------------------------------- */
 
 #logs-scroll {

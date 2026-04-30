@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.4.30
-Release:        5%{?dist}.fmi
+Release:        6%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -109,6 +109,18 @@ make install-webmon \
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-6.fmi
+- Flame tab now shows the full multi-line perf stderr (and the
+  per-mode status for off-CPU / page-fault / wakeup / blockflame /
+  malloc / biolat / runqlat / perfstat) when a sampler fails. The
+  panel header keeps showing the truncated one-line summary so it
+  stays compact; below the breadcrumb a new "Sampler diagnostics"
+  card surfaces every failing mode's full status text in monospace.
+  The "Error:" first-line truncation is no longer the operator's
+  only window into a perf failure — they see exactly what perf is
+  complaining about. See smartmet-monitor changelog for the
+  underlying snapshot change.
+
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-5.fmi
 - Default unit user changed from `smartmet` to `smartmet-server`.
   This is the user that owns smartmetd processes in production

@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.30
-Release:        5%{?dist}.fmi
+Release:        6%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -119,6 +119,19 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-6.fmi
+- FlameSnapshot.status() now exposes the full multi-line
+  perf_last_error (and the equivalents for off-CPU / page-fault /
+  wakeup / blockflame / malloc / biolat / runqlat / perfstat).
+  The panel-friendly *_status fields truncate to one short line so
+  they fit the panel header; the multi-line errors that perf
+  actually emits live in *_last_error, which previously could only
+  be read by stepping through the Python store. Now the Flame tab's
+  /api/flame/status endpoint returns them and the new "Sampler
+  diagnostics" card on the Flame panel renders them verbatim in
+  monospace so operators can see what perf actually said, not just
+  the panel-friendly first line.
+
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-5.fmi
 - Co-bumped with smartmet-webmon for the User=smartmet-server
   default-user fix. See smartmet-webmon changelog for details.

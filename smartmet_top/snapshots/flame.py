@@ -95,11 +95,28 @@ class FlameSnapshot:
         """Tell the client which modes have data right now plus the
         backend hints / install messages from the perf-capability
         probe. Used to grey out unavailable modes in the UI.
+
+        The ``*_status`` fields are panel-friendly (one short line, fits
+        the panel header even after truncation). When the underlying
+        sampler hits a multi-line error — perf's stderr is typically
+        paragraph-shaped and the first line is just "Error:" with the
+        diagnostic on the lines below — the full text is mirrored into
+        ``perf_last_error``. Without that, operators chase the real
+        error through journalctl instead of seeing it in the dashboard
+        where they're already looking.
         """
         out = {
             "perf_enabled": bool(store.perf_enabled),
             "perf_status": getattr(store, "perf_status", ""),
+            "perf_last_error": getattr(store, "perf_last_error", ""),
             "offcpu_status": getattr(store, "offcpu_status", ""),
+            "pagefault_status": getattr(store, "pagefault_status", ""),
+            "wakeup_status": getattr(store, "wakeup_status", ""),
+            "blockflame_status": getattr(store, "blockflame_status", ""),
+            "malloc_status": getattr(store, "malloc_status", ""),
+            "biolat_status": getattr(store, "biolat_status", ""),
+            "runqlat_status": getattr(store, "runqlat_status", ""),
+            "perfstat_status": getattr(store, "perfstat_status", ""),
             "modes": [],
         }
         for mode in MODES:
