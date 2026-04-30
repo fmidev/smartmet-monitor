@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.4.30
-Release:        10%{?dist}.fmi
+Release:        11%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -149,6 +149,32 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-11.fmi
+- Chart Y-axis nice-tick algorithm switched from qdstat-style
+  (2/5/10 ladder) to Heckbert-style (1/2/5/10 ladder). The two
+  algorithms agree on most inputs, but differ when vmax falls
+  in the "needs a 1-step" range. Concrete examples where qdstat
+  would produce coarser labels than the operator wants:
+                            qdstat            Heckbert
+    vmax=5,  maxTicks=5      0, 2, 4, 6        0, 1, 2, 3, 4, 5
+    vmax=50, maxTicks=5      0, 20, 40, 60     0, 10, 20, 30, 40, 50
+    vmax=6,  maxTicks=4      0, 2, 4, 6        0, 5, 10        (sparser, but right ladder)
+  Why: qdstat's 2/5/10 ladder is the right thing for histogram
+  *bin* boundaries — operators of qdstat want "double / halve the
+  bin count" granularity which lands naturally on 2/5/10. Chart
+  *axis* labels are a different problem; an operator looking at a
+  monitor chart that peaks at 5 reads 0, 1, 2, 3, 4, 5 more
+  naturally than 0, 2, 4, 6 with the axis overshooting to 6 to
+  contain the data. The 1 multiplier fills the gap. The 1/2/5/10
+  ladder is also the de-facto standard across chart libraries
+  (matplotlib, d3, plotly, R's pretty(), ggplot2), matching what
+  operators have learned elsewhere. qdstat itself stays unchanged
+  — its 2/5/10 ladder is correct for its histogram-bin use case;
+  smwebmon and qdstat now use different algorithms because they
+  serve different audiences. Inline comment in chart.js spells
+  out the reasoning so the next person to look at it doesn't
+  re-port qdstat's algorithm again "for consistency."
+
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-10.fmi
 - Y-axis labels on every chart now use "nice" tick boundaries
   (multiples of 1, 2, or 5 times a power of 10) instead of raw

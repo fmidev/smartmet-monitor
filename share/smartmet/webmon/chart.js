@@ -33,56 +33,74 @@
     return { ctx, w: cssW, h: cssH };
   }
 
-  // "Nice" tick selection — direct port of qdtools/main/qdstat.cpp's
-  // autotick + autoscale (the FMI house algorithm for "what bin
-  // boundaries should this histogram have?"). Ticks land at multiples
-  // of 1, 2, or 5 times a power of 10 — so operators see familiar
-  // 0, 1, 2, 3, 4 / 0, 2, 4, 6 / 0, 5, 10, 15 boundaries instead of
-  // 0.81, 1.62, 2.42, 3.23 from raw-value autoscaling.
+  // "Nice" tick selection — Heckbert's algorithm from "Nice numbers
+  // for graph labels" (Graphics Gems I, 1990). Two passes: first
+  // nice-round the range with a *loose* threshold ladder, then nice-
+  // round the step (range / (maxTicks − 1)) with a *round* ladder.
+  // Ticks land at 1, 2, or 5 times a power of 10.
   //
-  // Returns the tick step and a precision hint (decimal places that
-  // make sense for label formatting). The frac ladder is 2 / 5 / 10
-  // — when frac > 5 we step up one decade and absorb that as a "1 of
-  // the next magnitude" tick (e.g. step = 1 when the data range is
-  // ~5..10). This is the same ladder as qdstat.cpp:autotick.
-  function _autotick(range, maxbins) {
-    if (!Number.isFinite(range) || range <= 0) {
-      return { tick: 1, precision: 0 };
+  // Why Heckbert rather than qdtools/main/qdstat.cpp's autotick (a
+  // 2 / 5 / 10 ladder used here previously for codebase consistency)?
+  // qdstat's algorithm is correct for **histogram bin boundaries**,
+  // where users want "double the bins / halve the bins" granularity —
+  // that workflow naturally lands on the 2 / 5 / 10 ladder. **Chart
+  // axis labels** are a different problem: operators expect 0, 1, 2,
+  // 3, 4 on a chart whose data peaks at 5, not 0, 2, 4, 6 with the
+  // axis overshooting to 6. The 1 multiplier fills the gap. Concrete
+  // case where it matters:
+  //
+  //                        qdstat (2/5/10)         Heckbert (1/2/5/10)
+  //   vmax=5,  maxBins=5    0, 2, 4, 6              0, 1, 2, 3, 4, 5
+  //   vmax=50, maxBins=5    0, 20, 40, 60           0, 10, 20, 30, 40, 50
+  //
+  // The 1/2/5/10 ladder is also the de-facto standard across chart
+  // libraries (matplotlib, d3, plotly, R's pretty()), so the choice
+  // matches what operators have learned to read elsewhere. qdstat
+  // stays unchanged — its 2/5/10 ladder is right for histogram bins.
+  function _niceNumber(range, round) {
+    if (!Number.isFinite(range) || range <= 0) return 1;
+    const exponent = Math.floor(Math.log10(range));
+    const magnitude = Math.pow(10, exponent);
+    const fraction = range / magnitude;            // fraction ∈ [1, 10)
+    let nf;
+    if (round) {
+      // Picking a tick step: the boundaries (1.5, 3, 7) bias towards
+      // the more granular choice when the input is near a midpoint.
+      // E.g. fraction = 1.4 → tick = 1, fraction = 1.6 → tick = 2.
+      if      (fraction < 1.5) nf = 1;
+      else if (fraction < 3)   nf = 2;
+      else if (fraction < 7)   nf = 5;
+      else                     nf = 10;
+    } else {
+      // Picking the loose range: thresholds at the ladder values
+      // themselves so we can fully contain the data.
+      if      (fraction <= 1) nf = 1;
+      else if (fraction <= 2) nf = 2;
+      else if (fraction <= 5) nf = 5;
+      else                    nf = 10;
     }
-    const xx = range / Math.max(1, maxbins);
-    const xlog = Math.log10(xx);
-    let ilog = Math.trunc(xlog);
-    if (xlog < 0) ilog--;          // floor towards -inf, like C++ int(xlog)+(-1)
-    let precision = -ilog;
-    const pwr = Math.pow(10, ilog);
-    const frac = xx / pwr;
-    let tick;
-    if (frac <= 2)      tick = 2 * pwr;
-    else if (frac <= 5) tick = 5 * pwr;
-    else {
-      tick = 10 * pwr;
-      precision--;
-    }
-    precision = Math.max(0, precision);
-    return { tick, precision };
+    return nf * magnitude;
   }
 
   // Autoscale [0, vmax] to nice tick boundaries. Y-axis ticks always
-  // start at 0 in our charts (every plotted metric is non-negative —
-  // request rates, latencies, byte counts, error percentages). Returns
-  // { ticks, niceMax, step, precision }.
-  function _niceTicks(vmax, maxBins) {
+  // start at 0 in our charts — every plotted metric is non-negative
+  // (request rates, latencies, byte counts, error percentages).
+  // Returns { ticks, niceMax, step }; the topmost tick is niceMax,
+  // which is ≥ vmax so the data line never quite touches the chart's
+  // top edge.
+  function _niceTicks(vmax, maxTicks) {
     if (!Number.isFinite(vmax) || vmax <= 0) {
-      return { ticks: [0, 1], niceMax: 1, step: 1, precision: 0 };
+      return { ticks: [0, 1], niceMax: 1, step: 1 };
     }
-    const { tick, precision } = _autotick(vmax, Math.max(2, maxBins));
-    const niceMax = tick * Math.ceil(vmax / tick);
+    const range = _niceNumber(vmax, false);
+    const step  = _niceNumber(range / Math.max(2, maxTicks - 1), true);
+    const niceMax = step * Math.ceil(vmax / step);
     // Iterate by integer count to avoid float accumulation drift over
     // the tick stride.
-    const n = Math.round(niceMax / tick);
+    const n = Math.round(niceMax / step);
     const ticks = [];
-    for (let i = 0; i <= n; i++) ticks.push(i * tick);
-    return { ticks, niceMax, step: tick, precision };
+    for (let i = 0; i <= n; i++) ticks.push(i * step);
+    return { ticks, niceMax, step };
   }
 
   // Filled line chart with axis labels and interactive hover. Pass
