@@ -33,6 +33,58 @@
     return { ctx, w: cssW, h: cssH };
   }
 
+  // "Nice" tick selection — direct port of qdtools/main/qdstat.cpp's
+  // autotick + autoscale (the FMI house algorithm for "what bin
+  // boundaries should this histogram have?"). Ticks land at multiples
+  // of 1, 2, or 5 times a power of 10 — so operators see familiar
+  // 0, 1, 2, 3, 4 / 0, 2, 4, 6 / 0, 5, 10, 15 boundaries instead of
+  // 0.81, 1.62, 2.42, 3.23 from raw-value autoscaling.
+  //
+  // Returns the tick step and a precision hint (decimal places that
+  // make sense for label formatting). The frac ladder is 2 / 5 / 10
+  // — when frac > 5 we step up one decade and absorb that as a "1 of
+  // the next magnitude" tick (e.g. step = 1 when the data range is
+  // ~5..10). This is the same ladder as qdstat.cpp:autotick.
+  function _autotick(range, maxbins) {
+    if (!Number.isFinite(range) || range <= 0) {
+      return { tick: 1, precision: 0 };
+    }
+    const xx = range / Math.max(1, maxbins);
+    const xlog = Math.log10(xx);
+    let ilog = Math.trunc(xlog);
+    if (xlog < 0) ilog--;          // floor towards -inf, like C++ int(xlog)+(-1)
+    let precision = -ilog;
+    const pwr = Math.pow(10, ilog);
+    const frac = xx / pwr;
+    let tick;
+    if (frac <= 2)      tick = 2 * pwr;
+    else if (frac <= 5) tick = 5 * pwr;
+    else {
+      tick = 10 * pwr;
+      precision--;
+    }
+    precision = Math.max(0, precision);
+    return { tick, precision };
+  }
+
+  // Autoscale [0, vmax] to nice tick boundaries. Y-axis ticks always
+  // start at 0 in our charts (every plotted metric is non-negative —
+  // request rates, latencies, byte counts, error percentages). Returns
+  // { ticks, niceMax, step, precision }.
+  function _niceTicks(vmax, maxBins) {
+    if (!Number.isFinite(vmax) || vmax <= 0) {
+      return { ticks: [0, 1], niceMax: 1, step: 1, precision: 0 };
+    }
+    const { tick, precision } = _autotick(vmax, Math.max(2, maxBins));
+    const niceMax = tick * Math.ceil(vmax / tick);
+    // Iterate by integer count to avoid float accumulation drift over
+    // the tick stride.
+    const n = Math.round(niceMax / tick);
+    const ticks = [];
+    for (let i = 0; i <= n; i++) ticks.push(i * tick);
+    return { ticks, niceMax, step: tick, precision };
+  }
+
   // Filled line chart with axis labels and interactive hover. Pass
   // either opts.ts (one timestamp per value) or opts.last_ts +
   // opts.step_seconds; the chart computes per-point timestamps and
@@ -40,7 +92,7 @@
   // and the tooltip value (default formatMs).
   function drawLine(canvas, values, opts = {}) {
     const { ctx, w, h } = setupHiDPI(canvas);
-    const padL = 40, padR = 8, padT = 6, padB = 16;
+    const padL = 44, padR = 8, padT = 6, padB = 16;
     const innerW = w - padL - padR;
     const innerH = h - padT - padB;
 
@@ -56,23 +108,42 @@
     }
 
     const valid = values.filter(v => Number.isFinite(v));
-    const vmax = valid.length ? Math.max(...valid) : 1;
+    const dataMax = valid.length ? Math.max(...valid) : 1;
+    // Approx one tick label per ~28 px of vertical space, capped at
+    // 6 (more than that is just clutter on the small charts in the
+    // Proc / Network grids).
+    const desired = Math.max(2, Math.min(6, Math.floor(innerH / 28)));
+    const { ticks: yTicks, niceMax } =
+        _niceTicks(dataMax || 1, desired);
+    const vmax = niceMax;
     const yScale = vmax > 0 ? innerH / vmax : 0;
 
+    // Bottom axis + subtle horizontal gridlines at each interior tick.
     ctx.strokeStyle = PALETTE.grid;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(padL, padT + innerH);
     ctx.lineTo(padL + innerW, padT + innerH);
     ctx.stroke();
+    ctx.strokeStyle = "rgba(42, 49, 60, 0.55)";
+    for (let i = 1; i < yTicks.length - 1; i++) {
+      const y = padT + innerH - yTicks[i] * yScale;
+      ctx.beginPath();
+      ctx.moveTo(padL, y);
+      ctx.lineTo(padL + innerW, y);
+      ctx.stroke();
+    }
 
+    // Y-axis labels at every tick.
     ctx.fillStyle = PALETTE.axis;
     ctx.font = "11px ui-monospace, monospace";
     ctx.textBaseline = "middle";
     ctx.textAlign = "right";
-    ctx.fillText(opts.fmtY ? opts.fmtY(vmax) : formatMs(vmax),
-                  padL - 4, padT + 6);
-    ctx.fillText("0", padL - 4, padT + innerH);
+    const fmtY = opts.fmtY || formatMs;
+    for (const v of yTicks) {
+      const y = padT + innerH - v * yScale;
+      ctx.fillText(fmtY(v), padL - 4, y);
+    }
 
     const stepX = values.length > 1 ? innerW / (values.length - 1) : 0;
     ctx.strokeStyle = opts.lineColor || PALETTE.line;
@@ -365,13 +436,21 @@
       `<div class="hbar"><div class="hbar-fill ${cls}" style="width:${pct}%"></div></div>`;
   }
 
+  // Trim trailing-zero fractions: parseFloat normalises "1.00" → "1",
+  // "1.50" → "1.5". Used by the format helpers below so a nice-tick
+  // value of 1 renders as "1ms", not "1.0ms".
+  function _trim(n, decimals) {
+    if (!Number.isFinite(n)) return "";
+    return parseFloat(n.toFixed(decimals)).toString();
+  }
+
   function formatMs(v) {
     if (v == null || !Number.isFinite(v)) return "";
     if (v <= 0) return "0";
-    if (v < 1)  return v.toFixed(2) + "ms";
-    if (v < 10) return v.toFixed(1) + "ms";
-    if (v < 1000) return Math.round(v) + "ms";
-    return (v / 1000).toFixed(1) + "s";
+    if (v >= 1000) return _trim(v / 1000, 1) + "s";
+    if (v >= 10)   return Math.round(v) + "ms";
+    if (v >= 1)    return _trim(v, 1) + "ms";
+    return _trim(v, 2) + "ms";
   }
 
   function formatBytes(b) {
@@ -379,15 +458,15 @@
     const u = ["B", "K", "M", "G", "T"];
     let v = b, i = 0;
     while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
-    return v >= 100 ? `${v.toFixed(0)}${u[i]}` : `${v.toFixed(1)}${u[i]}`;
+    return v >= 100 ? `${Math.round(v)}${u[i]}` : `${_trim(v, 1)}${u[i]}`;
   }
 
   function formatCount(n) {
     if (n == null) return "";
     if (n < 10000) return String(n);
-    if (n < 1e6) return (n / 1e3).toFixed(1) + "k";
-    if (n < 1e9) return (n / 1e6).toFixed(1) + "M";
-    return (n / 1e9).toFixed(1) + "G";
+    if (n < 1e6)   return _trim(n / 1e3, 1) + "k";
+    if (n < 1e9)   return _trim(n / 1e6, 1) + "M";
+    return _trim(n / 1e9, 1) + "G";
   }
 
   global.smChart = {

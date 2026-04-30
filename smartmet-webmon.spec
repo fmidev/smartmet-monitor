@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.4.30
-Release:        9%{?dist}.fmi
+Release:        10%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -149,6 +149,25 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-10.fmi
+- Y-axis labels on every chart now use "nice" tick boundaries
+  (multiples of 1, 2, or 5 times a power of 10) instead of raw
+  vmax values. JS port of qdtools/main/qdstat.cpp:autotick +
+  autoscale (the FMI house algorithm for histogram bin
+  boundaries), so qdstat and smwebmon round the same way. The
+  user reported axis labels like 0, 0.81, 1.62, 2.42, 3.23 —
+  those become 0, 1, 2, 3, 4. For larger ranges: 0, 2, 4, 6, 8
+  or 0, 5, 10, 15 as the data demands. Tick count adapts to
+  chart height (more ticks on tall charts, fewer on the small
+  ones in the Proc / Network grids). Subtle horizontal grid
+  lines at each interior tick.
+- Y-axis chart scale now uses niceMax instead of dataMax, so
+  the topmost tick aligns with the chart's top edge instead of
+  the line just barely touching the ceiling.
+- Format helpers (formatMs / formatBytes / formatCount) trim
+  trailing-zero fractions so a nice-tick value of 1 renders as
+  "1ms" not "1.0ms" and 4 as "4" not "4.0".
+
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-9.fmi
 - Co-bumped with smartmet-monitor for the bulk_load-blocks-the-
   loop fix. The 26.4.30-8 reorder (schedule samplers before

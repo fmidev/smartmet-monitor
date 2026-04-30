@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.30
-Release:        9%{?dist}.fmi
+Release:        10%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -120,6 +120,10 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-10.fmi
+- Co-bumped with smartmet-webmon for the chart Y-axis nice-ticks
+  fix. See smartmet-webmon changelog for details.
+
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-9.fmi
 - Fixed bulk_load() blocking the asyncio event loop during --replay.
   bulk_load was `async def` but had no await points in its hot path
