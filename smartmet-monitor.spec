@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.30
-Release:        2%{?dist}.fmi
+Release:        3%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -119,6 +119,25 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-3.fmi
+- Install rule was shipping a broken RPM. The new
+  smartmet_top/snapshots/ subpackage (added in 26.4.28-1 to back the
+  smwebmon JSON endpoints) was on disk in the source tree but was
+  never listed in the Makefile's install target, so the RPM payload
+  did not contain it. `make check` did not catch this because it
+  imports from the source tree directly, not from %{python3_sitelib}.
+  smtop was unaffected (its panels were also imported from source
+  during dev; once installed they failed-to-import too, but no one
+  had restarted smtop on a host with the -2 RPM yet). smwebmon hit
+  it immediately on first systemctl-start with:
+
+    ModuleNotFoundError: No module named 'smartmet_top.snapshots'
+
+  Fix: switched the install rule to auto-discover subpackages of
+  smartmet_top/ instead of listing them explicitly. Adding a future
+  subpackage no longer requires a Makefile edit; the same class of
+  bug cannot recur.
+
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-2.fmi
 - `make check` (and therefore the RPM %build phase) failed on the
   RHEL 8 build host with `urllib.error.HTTPError: HTTP Error 403:

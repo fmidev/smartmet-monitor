@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.4.30
-Release:        2%{?dist}.fmi
+Release:        3%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -107,6 +107,13 @@ getent passwd smartmet >/dev/null || \
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-3.fmi
+- Co-bumped with smartmet-monitor for the install-rule fix that
+  was causing smwebmon to fail-fast at startup with
+  `ModuleNotFoundError: No module named 'smartmet_top.snapshots'`.
+  See smartmet-monitor changelog for details. Once both -3 RPMs
+  are installed, `systemctl start smartmet-webmon` works.
+
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-2.fmi
 - Co-bumped with smartmet-monitor for the make-check fix that
   restores the RPM build on the RHEL 8 build host (HTTP proxy

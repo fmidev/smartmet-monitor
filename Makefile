@@ -39,8 +39,7 @@ MANPAGES = smtop.1 bstat.1 bchart.1 burls.1 bstatus.1 bkeys.1 bperf.1 \
 WEBMON_ASSETS = index.html app.js chart.js style.css
 
 install:
-	install -d $(BINDIR) $(SHAREDIR) $(MANDIR) $(DOCDIR)
-	install -d $(SITEDIR) $(SITEDIR)/panels $(SITEDIR)/sources $(SITEDIR)/state $(SITEDIR)/views $(SITEDIR)/widgets
+	install -d $(BINDIR) $(SHAREDIR) $(MANDIR) $(DOCDIR) $(SITEDIR)
 	# smtop plus bstat-family command wrappers
 	install -m 0755 smtop $(BINDIR)/smtop
 	$(foreach t,$(BTOOLS),install -m 0755 bin/$(t) $(BINDIR)/$(t); )
@@ -51,13 +50,18 @@ install:
 	# bperf is a Python script (heavier than awk warrants); the wrapper
 	# in $(BINDIR)/bperf execs it with python3.9.
 	install -m 0644 share/smartmet/bperf.py $(SHAREDIR)/bperf.py
-	# python package
-	install -m 0644 smartmet_top/*.py         $(SITEDIR)/
-	install -m 0644 smartmet_top/panels/*.py  $(SITEDIR)/panels/
-	install -m 0644 smartmet_top/sources/*.py $(SITEDIR)/sources/
-	install -m 0644 smartmet_top/state/*.py   $(SITEDIR)/state/
-	install -m 0644 smartmet_top/views/*.py   $(SITEDIR)/views/
-	install -m 0644 smartmet_top/widgets/*.py $(SITEDIR)/widgets/
+	# python package — top-level modules + every subpackage. The
+	# subpackage list is auto-discovered (was an explicit list once,
+	# but adding a new subpackage and forgetting to update the list
+	# silently shipped a broken RPM — caught the hard way with the
+	# snapshots/ directory in 26.4.30-2).
+	install -m 0644 smartmet_top/*.py $(SITEDIR)/
+	for d in smartmet_top/*/; do \
+	    sub=`basename "$$d"`; \
+	    case "$$sub" in __pycache__) continue;; esac; \
+	    install -d "$(SITEDIR)/$$sub"; \
+	    install -m 0644 $$d*.py "$(SITEDIR)/$$sub/"; \
+	done
 	# man pages
 	$(foreach m,$(MANPAGES),install -m 0644 doc/man/$(m) $(MANDIR)/$(m); )
 	# README + the screenshot images it references
