@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.4.30
-Release:        8%{?dist}.fmi
+Release:        9%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -149,6 +149,15 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-9.fmi
+- Co-bumped with smartmet-monitor for the bulk_load-blocks-the-
+  loop fix. The 26.4.30-8 reorder (schedule samplers before
+  awaiting replay) was a necessary but insufficient half of the
+  fix; this release adds the other half. After upgrading, the
+  Flame panel populates with samples from second one even while
+  --replay is in progress. See smartmet-monitor changelog for
+  details.
+
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-8.fmi
 - The unit now ships with AmbientCapabilities=CAP_SYS_PTRACE +
   CAP_SYS_ADMIN and NoNewPrivileges=no. Investigation on

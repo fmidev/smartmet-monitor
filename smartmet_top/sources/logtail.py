@@ -189,6 +189,53 @@ async def tail_many(paths: Iterable[str], store, poll_interval: float = 0.25) ->
         await asyncio.sleep(poll_interval)
 
 
+def _bulk_load_one_file(path: str, store, max_bytes_per_file: int) -> None:
+    """Synchronous body of bulk_load — runs in a thread executor so
+    the asyncio event loop stays free to schedule sampler tasks in
+    parallel with replay. Was previously inlined in `bulk_load` but
+    that made bulk_load `async def` without any await points, which
+    silently monopolised the event loop for the full replay duration
+    — perf_loop / proc_loop / netstats_loop / etc. were scheduled
+    but couldn't run until replay finished, leaving the dashboard
+    showing initial-state ('disabled' / 'not started') strings for
+    every sampler during the replay window. Off-loading to an
+    executor lets the loop tick normally.
+    """
+    label = source_label_for(path)
+    store.register_source(label)
+    try:
+        size = os.path.getsize(path)
+        with _open_log(path) as fh:
+            # Seek-tail only works on the uncompressed live log;
+            # gzip files don't support cheap arbitrary-position
+            # seeks, so we read them fully and let the store's
+            # minute-bucket pruning bound memory.
+            if not path.endswith(".gz") and size > max_bytes_per_file:
+                fh.seek(size - max_bytes_per_file)
+                fh.readline()  # skip partial line
+            for line in fh:
+                line = line.rstrip("\n")
+                store.record_raw_line(line, source=label)
+                rec = parse(line)
+                if rec is None:
+                    continue
+                store.record_request(
+                    ts=rec["start_ts"],
+                    url=rec["path"],
+                    dur_ms=rec["dur_ms"],
+                    nbytes=rec["bytes"],
+                    status=rec["status"],
+                    apikey=rec["apikey"],
+                    source_label=label,
+                )
+    except FileNotFoundError:
+        return
+    except OSError as e:
+        # Surface I/O / gzip-corruption errors to the operator
+        # rather than crashing the whole replay.
+        store.logtail_status = f"replay error on {path}: {e}"
+
+
 async def bulk_load(paths: Iterable[str], store,
                     max_bytes_per_file: int = 256 * 1024 * 1024,
                     include_rotated: bool = False) -> None:
@@ -205,40 +252,14 @@ async def bulk_load(paths: Iterable[str], store,
     rotated daily log a 1 GB cap reads the most recent ~1 GB of
     that day's traffic, not the entire day. Raise `--replay-bytes`
     when a full day matters.
+
+    Each file is read in a thread-pool executor so the asyncio event
+    loop stays responsive — concurrent sampler tasks (perf_loop,
+    proc_loop, etc.) scheduled before replay get CPU during replay,
+    and the HTTP server keeps answering /api/* without lag.
     """
+    loop = asyncio.get_event_loop()
     for p in paths:
         for actual in (expand_rotated_paths(p) if include_rotated else [p]):
-            label = source_label_for(actual)
-            store.register_source(label)
-            try:
-                size = os.path.getsize(actual)
-                with _open_log(actual) as fh:
-                    # Seek-tail only works on the uncompressed live log;
-                    # gzip files don't support cheap arbitrary-position
-                    # seeks, so we read them fully and let the store's
-                    # minute-bucket pruning bound memory.
-                    if not actual.endswith(".gz") and size > max_bytes_per_file:
-                        fh.seek(size - max_bytes_per_file)
-                        fh.readline()  # skip partial line
-                    for line in fh:
-                        line = line.rstrip("\n")
-                        store.record_raw_line(line, source=label)
-                        rec = parse(line)
-                        if rec is None:
-                            continue
-                        store.record_request(
-                            ts=rec["start_ts"],
-                            url=rec["path"],
-                            dur_ms=rec["dur_ms"],
-                            nbytes=rec["bytes"],
-                            status=rec["status"],
-                            apikey=rec["apikey"],
-                            source_label=label,
-                        )
-            except FileNotFoundError:
-                continue
-            except OSError as e:
-                # Surface I/O / gzip-corruption errors to the operator
-                # rather than crashing the whole replay.
-                store.logtail_status = f"replay error on {actual}: {e}"
-                continue
+            await loop.run_in_executor(
+                None, _bulk_load_one_file, actual, store, max_bytes_per_file)

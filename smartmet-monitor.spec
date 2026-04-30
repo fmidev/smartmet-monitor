@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.30
-Release:        8%{?dist}.fmi
+Release:        9%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -120,6 +120,22 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-9.fmi
+- Fixed bulk_load() blocking the asyncio event loop during --replay.
+  bulk_load was `async def` but had no await points in its hot path
+  — the file-by-line reading was synchronous Python — so the entire
+  replay duration was spent inside one coroutine that monopolised
+  the loop. Sampler tasks scheduled before replay (per the
+  26.4.30-8 reorder) couldn't get CPU until replay finished,
+  leaving every Flame mode at its initial-state string ("(disabled
+  — start smtop with --perf)" etc.) while perf_enabled itself was
+  already true. Each file is now read in a thread-pool executor
+  via loop.run_in_executor(); the asyncio loop stays responsive,
+  perf_loop and the other samplers tick normally during replay,
+  and the HTTP server keeps answering /api/* without the
+  multi-second pauses an operator using a browser would notice
+  during replay.
+
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-8.fmi
 - snapshots/{overview,active,urls,proc}: chart payloads now include
   last_ts + step_seconds (or per-sample ts where available) so the
