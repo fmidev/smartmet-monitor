@@ -1082,13 +1082,44 @@ where-to-look-next guidance, which applies as-written.
 The cost analysis (~80–150 MB RSS, ~5 % of one core, ~43 200 admin
 requests/day at 2 s polling) was judged small but not free, which
 is why the unit ships disabled. The unit also installs defensive
-cgroup rails (`MemoryMax=512M`, `CPUQuota=50%`) so a future bug
+cgroup rails (`MemoryMax=512M`, `CPUQuota=200%`) so a future bug
 cannot eat the host. Override these via a drop-in if your host
 warrants it:
 
 ```sh
 sudo systemctl edit smartmet-webmon
 ```
+
+### Enabling the flame-graph modes
+
+The Flame panel's modes (on-CPU, off-CPU, page-fault, wakeup,
+block-I/O) and the Proc panel's perfstat numbers need access to
+hardware perf events and kernel tracepoints, which the RHEL default
+`kernel.perf_event_paranoid=2` denies to non-root users. Two ways to
+enable them:
+
+  * **Lower the sysctl** (broadest, simplest):
+    ```sh
+    echo 'kernel.perf_event_paranoid = 0' | \
+        sudo tee /etc/sysctl.d/99-smartmet-perf.conf
+    sudo sysctl --system
+    sudo systemctl restart smartmet-webmon
+    ```
+  * **Grant the unit `CAP_SYS_ADMIN`** via `sudo systemctl edit
+    smartmet-webmon` (more surgical, doesn't change the system-wide
+    paranoid level).
+
+For bcc-tools modes (off-CPU, biolat, runqlat) you also need the
+`kheaders` kernel module pre-loaded:
+
+```sh
+echo "kheaders" | sudo tee /etc/modules-load.d/kheaders.conf
+sudo modprobe kheaders
+```
+
+Full reasoning, per-feature compatibility table, and security
+trade-offs are in [`doc/perf-event-paranoid.md`](doc/perf-event-paranoid.md)
+(installed as `/usr/share/doc/smartmet-monitor/perf-event-paranoid.md`).
 
 ### What's NOT in v1 (deferred to follow-ups)
 

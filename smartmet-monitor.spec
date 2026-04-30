@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.30
-Release:        6%{?dist}.fmi
+Release:        7%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -115,10 +115,22 @@ make install \
 %{_mandir}/man1/bstat60.1*
 %{_mandir}/man1/bstat24.1*
 %doc %{_docdir}/smartmet-monitor/README.md
+%doc %{_docdir}/smartmet-monitor/perf-event-paranoid.md
 %doc %{_docdir}/smartmet-monitor/images/
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-7.fmi
+- New reference doc: /usr/share/doc/smartmet-monitor/perf-event-paranoid.md
+  covering the kernel.perf_event_paranoid sysctl, what each level
+  blocks, which monitor features need which level, the kheaders
+  module gotcha for bcc-tools, and the alternative of granting the
+  unit kernel capabilities. Linked from the README and the smwebmon
+  man page.
+- Co-bumped with smartmet-webmon, which now ships
+  kernel.perf_event_paranoid=0 + kheaders module-load defaults.
+  See smartmet-webmon changelog for details.
+
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-6.fmi
 - FlameSnapshot.status() now exposes the full multi-line
   perf_last_error (and the equivalents for off-CPU / page-fault /

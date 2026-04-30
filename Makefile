@@ -25,6 +25,8 @@ SITEDIR_WEBMON = $(DESTDIR)$(PYSITELIB)/smartmet_webmon
 WEBMON_ASSET_DIR = $(SHAREDIR)/webmon
 UNITDIR ?= /usr/lib/systemd/system
 SYSCONFDIR ?= /etc
+SYSCTLDIR ?= /usr/lib/sysctl.d
+MODLOADDIR ?= /usr/lib/modules-load.d
 
 .PHONY: all install uninstall clean check rpm install-webmon \
         uninstall-webmon webmon-rpm rpms _stage-tarball
@@ -63,8 +65,9 @@ install:
 	done
 	# man pages
 	$(foreach m,$(MANPAGES),install -m 0644 doc/man/$(m) $(MANDIR)/$(m); )
-	# README + the screenshot images it references
+	# README + the screenshot images it references + reference docs
 	install -m 0644 README.md $(DOCDIR)/README.md
+	install -m 0644 doc/perf-event-paranoid.md $(DOCDIR)/perf-event-paranoid.md
 	install -d $(DOCDIR)/images
 	install -m 0644 doc/images/*.png $(DOCDIR)/images/
 	# symlink for discoverability alongside smartmet-library-* and friends
@@ -83,6 +86,7 @@ uninstall:
 install-webmon:
 	install -d $(BINDIR) $(SITEDIR_WEBMON) $(WEBMON_ASSET_DIR) $(MANDIR)
 	install -d $(DESTDIR)$(UNITDIR) $(DESTDIR)$(SYSCONFDIR)/sysconfig
+	install -d $(DESTDIR)$(SYSCTLDIR) $(DESTDIR)$(MODLOADDIR)
 	install -m 0755 smwebmon $(BINDIR)/smwebmon
 	install -m 0644 smartmet_webmon/*.py $(SITEDIR_WEBMON)/
 	# Browser assets — auto-discovered so adding a new file (e.g.
@@ -98,6 +102,18 @@ install-webmon:
 	    $(DESTDIR)$(UNITDIR)/smartmet-webmon.service
 	install -m 0644 share/sysconfig/smartmet-webmon \
 	    $(DESTDIR)$(SYSCONFDIR)/sysconfig/smartmet-webmon
+	# Kernel-side prereqs for the Flame panel: lower
+	# perf_event_paranoid and pre-load the kheaders module so
+	# bcc-tools work. The package's audience is operators who
+	# install smartmet-webmon as a deliberate decision; ship the
+	# defaults that make the dashboard work, not defensive opt-in
+	# files. Sites that can't accept those defaults shouldn't
+	# install this package — the bstat / smtop CLI tools cover
+	# that audience.
+	install -m 0644 share/sysctl.d/99-smartmet-perf.conf \
+	    $(DESTDIR)$(SYSCTLDIR)/99-smartmet-perf.conf
+	install -m 0644 share/modules-load.d/smartmet-perf.conf \
+	    $(DESTDIR)$(MODLOADDIR)/smartmet-perf.conf
 	install -m 0644 doc/man/smwebmon.1 $(MANDIR)/smwebmon.1
 
 uninstall-webmon:
@@ -105,6 +121,8 @@ uninstall-webmon:
 	rm -rf $(SITEDIR_WEBMON) $(WEBMON_ASSET_DIR)
 	rm -f $(DESTDIR)$(UNITDIR)/smartmet-webmon.service
 	rm -f $(DESTDIR)$(SYSCONFDIR)/sysconfig/smartmet-webmon
+	rm -f $(DESTDIR)$(SYSCTLDIR)/99-smartmet-perf.conf
+	rm -f $(DESTDIR)$(MODLOADDIR)/smartmet-perf.conf
 	rm -f $(MANDIR)/smwebmon.1
 
 check:

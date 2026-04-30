@@ -1,4 +1,4 @@
-.TH SMWEBMON 1 "2026-04-30" "smartmet-webmon-26.4.30-6" "SmartMet Server"
+.TH SMWEBMON 1 "2026-04-30" "smartmet-webmon-26.4.30-7" "SmartMet Server"
 .SH NAME
 smwebmon \- browser dashboard for SmartMet Server
 .SH SYNOPSIS
@@ -164,12 +164,16 @@ satisfied without requiring root, and access logs are readable
 without ACL trickery. Override via a drop-in
 .RB ( "sudo systemctl edit smartmet-webmon" )
 if your deployment uses a different operator account.
-.B smwebmon
-deliberately does not enable
-.B \-\-perf
-\- operators who want flame graphs run
-.B smtop \-\-perf
-interactively, where the privilege requirement and overhead are obvious.
+All Flame panel modes (on-CPU, off-CPU, page-fault, wakeup,
+block-I/O) and the Proc panel's perfstat numbers need either a
+lower
+.B kernel.perf_event_paranoid
+than the RHEL default (2) or
+.B CAP_SYS_ADMIN
+on the unit. See
+.I /usr/share/doc/smartmet-monitor/perf-event-paranoid.md
+for the per-feature compatibility table and recommended sysctl
+values per host class.
 .SH FILES
 .TP
 .I /usr/share/smartmet/webmon/

@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.4.30
-Release:        6%{?dist}.fmi
+Release:        7%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -52,10 +52,29 @@ Recommends:     smartmet-server
 
 %description
 Browser-based companion to smartmet-monitor. Adds the `smwebmon`
-daemon that serves a small dashboard (URLs panel in v1, more to
-follow) over HTTP+JSON on loopback. Reuses the data-collection layer
-from smartmet-monitor; does not pull X11 or any third-party Python
-packages.
+daemon that serves the same per-panel data smtop renders, plus an
+interactive Canvas flame graph, over HTTP+JSON on loopback. Reuses
+the data-collection layer from smartmet-monitor; does not pull X11
+or any third-party Python packages.
+
+This package is for operators who study the dashboard's results.
+Installing it makes two host-level changes the dashboard needs to
+work fully:
+
+  * /usr/lib/sysctl.d/99-smartmet-perf.conf sets
+    kernel.perf_event_paranoid = 0 (the RHEL default 2 denies
+    hardware perf counters and tracepoints to unprivileged users,
+    breaking the Flame panel and the Proc panel's perfstat numbers).
+  * /usr/lib/modules-load.d/smartmet-perf.conf pre-loads the
+    kheaders kernel module so bcc-tools (offcputime-bpfcc,
+    biolatency-bpfcc, runqlat-bpfcc) can run without root.
+
+Both are applied at install time without requiring a reboot. The
+full reasoning, per-feature compatibility table, and security
+trade-offs are in
+/usr/share/doc/smartmet-monitor/perf-event-paranoid.md. Sites that
+can't accept those defaults should use the CLI tools (smtop, bstat,
+bperf) from smartmet-monitor instead and not install this package.
 
 The unit runs as the `smartmet-server` user (the same user that
 owns the smartmetd processes). Override via a drop-in
@@ -93,6 +112,15 @@ make install-webmon \
 
 %post
 %systemd_post smartmet-webmon.service
+# Apply the perf-event sysctl and load the kheaders module without
+# requiring a reboot. Both are also persistent across reboots via
+# the files in /usr/lib/sysctl.d/ and /usr/lib/modules-load.d/. The
+# || : guards keep package install from failing on hosts where the
+# kernel doesn't expose these (e.g. very old kernels that lack the
+# kheaders module); the dashboard will surface the resulting per-
+# sampler errors via /api/flame/status.
+sysctl --system >/dev/null 2>&1 || :
+modprobe kheaders >/dev/null 2>&1 || :
 
 %preun
 %systemd_preun smartmet-webmon.service
@@ -105,10 +133,29 @@ make install-webmon \
 %{_datadir}/smartmet/webmon/
 %{_unitdir}/smartmet-webmon.service
 %config(noreplace) %{_sysconfdir}/sysconfig/smartmet-webmon
+%{_prefix}/lib/sysctl.d/99-smartmet-perf.conf
+%{_prefix}/lib/modules-load.d/smartmet-perf.conf
 %{_python3_sitelib}/smartmet_webmon/
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-7.fmi
+- The package now ships the kernel-side prereqs the dashboard needs
+  to be useful: kernel.perf_event_paranoid = 0 via
+  /usr/lib/sysctl.d/99-smartmet-perf.conf and `kheaders` via
+  /usr/lib/modules-load.d/smartmet-perf.conf, both applied at
+  install time without requiring a reboot (sysctl --system + modprobe
+  kheaders in %post, with || : guards). Without these the Flame panel
+  is reduced to "no samples" and the Proc panel's perfstat numbers
+  show as zero — every operator who installed -1 through -6 hit this.
+  The package's audience is operators who run the dashboard as a
+  deliberate decision; sites that can't accept paranoid=0 should
+  use the smartmet-monitor CLI tools (smtop, bstat, bperf) instead
+  and skip this package.
+- %description rewritten to make these install-time host changes
+  explicit and to point at perf-event-paranoid.md for the full
+  reasoning.
+
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-6.fmi
 - Flame tab now shows the full multi-line perf stderr (and the
   per-mode status for off-CPU / page-fault / wakeup / blockflame /
