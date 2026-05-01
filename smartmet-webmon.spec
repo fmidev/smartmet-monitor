@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.4.30
-Release:        14%{?dist}.fmi
+Release:        15%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -151,6 +151,32 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-15.fmi
+- Cluster-view Phase 2c: URLs panel drill-down chart shows one line
+  per backend in cluster mode. Click a row in the URLs table; the
+  modal's "Per-backend latency, last 60 min" chart renders an
+  overlay with one line per alive backend (same color hashing as
+  the Active panel, so c2 matches across panels). A metric picker
+  in the chart header switches between p95 / p50 / mean / max /
+  count. Clicking a legend entry hides that backend's line.
+- Data path is on-demand parallel: when the chart refreshes, the
+  cluster-scope handler fires one HTTP request per backend (a
+  cluster has ≤10 backends in practice) to /admin?what=lastrequests
+  &minutes=60. ThreadPoolExecutor with one worker per backend means
+  wall time ≈ slowest backend, not sum. The rows are bucketed by
+  minute on the operator-clicked URL and the chosen metric is
+  computed per minute. No changes to the existing 2 s admin
+  polling — the per-cluster store still gets fed by it for the
+  URL table; the chart just reaches around the store to get
+  per-host attribution that the store does not retain.
+- New endpoint /api/cluster/urls/chart (cluster-scope) that
+  returns {series: [{label: prefix, values: [...]}], errors:
+  {prefix: msg}}. Errors per backend are surfaced inline in the
+  legend (a ⚠ next to the backend name with the error reason as
+  a tooltip) so a single misbehaving backend doesn't fail the
+  whole chart. Single-host mode keeps using /api/urls/chart as
+  before; the modal picks endpoint based on cluster mode.
+
 * Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-14.fmi
 - Cluster-view Phase 2a: Active panel reshaped for cluster mode.
   When a cluster is selected, the in-flight count chart shows one

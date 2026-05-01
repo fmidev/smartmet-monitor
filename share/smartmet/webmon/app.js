@@ -264,8 +264,30 @@
     }
     async function openUrlDetail(url) {
       ps.selected = url;
+      ps.detailHidden = ps.detailHidden || new Set();
       modal.open(url);
       const body = modal.body();
+      // Cluster mode: swap chart heading + add a metric picker and a
+      // legend container alongside the canvas. The store-derived
+      // single-line "/api/urls/chart" lives in the cluster's per-cluster
+      // store too (since lastrequests still feeds it), but only as an
+      // aggregate — the per-backend overlay needs the dedicated
+      // endpoint.
+      const isCluster = !!state.activeCluster;
+      const chartHeading = isCluster
+        ? `<div class="panel-controls">
+             <h3 style="margin:0;flex:1">Per-backend latency, last 60 min</h3>
+             <label>metric
+               <select id="d-metric">
+                 <option value="p95_ms">p95</option>
+                 <option value="p50_ms">p50</option>
+                 <option value="mean_ms">mean</option>
+                 <option value="max_ms">max</option>
+                 <option value="count">count</option>
+               </select>
+             </label>
+           </div>`
+        : `<h3>Mean latency, last 60 min</h3>`;
       body.innerHTML = `
         <h3>Windowed stats</h3>
         <table class="data-table"><thead><tr>
@@ -275,8 +297,9 @@
           <th class="num">avg sz</th><th class="num">total</th>
           <th class="num">err%</th>
         </tr></thead><tbody></tbody></table>
-        <h3>Mean latency, last 60 min</h3>
+        ${chartHeading}
         <canvas class="chart" data-role="line" height="160"></canvas>
+        <div class="chart-legend" id="d-legend"></div>
         <h3>Latency distribution</h3>
         <canvas class="chart" data-role="hist" height="200"></canvas>
         <h3>Status codes</h3>
@@ -288,10 +311,26 @@
           <th>apikey</th><th class="num">requests</th>
         </tr></thead><tbody></tbody></table>
       `;
+      ps.detailMetric = ps.detailMetric || "p95_ms";
+      const metricSel = body.querySelector("#d-metric");
+      if (metricSel) {
+        metricSel.value = ps.detailMetric;
+        metricSel.addEventListener("change", () => {
+          ps.detailMetric = metricSel.value;
+          if (state.modalRefresh) state.modalRefresh().catch(() => {});
+        });
+      }
       const refreshDetail = async () => {
+        // Only /api/urls/detail uses the per-cluster store path.
+        // The chart switches between the multi-line cluster endpoint
+        // and the single-line store endpoint based on cluster mode.
+        const chartReq = isCluster
+          ? getJSON("/api/cluster/urls/chart",
+                    { url, minutes: 60, metric: ps.detailMetric })
+          : getJSON("/api/urls/chart",  { url, window: 60 });
         const [d, c] = await Promise.all([
           getJSON("/api/urls/detail", { url, window: ps.window }),
-          getJSON("/api/urls/chart",  { url, window: 60 }),
+          chartReq,
         ]);
         const tb = body.querySelector("table tbody");
         const winCols = [
@@ -309,10 +348,40 @@
         ];
         renderTable(tb, winCols, (d.windows || []));
         const cs = body.querySelectorAll("canvas");
-        smChart.drawLine(cs[0], (c.values || []).map(Number),
-                          { xLabels: ["-60m", "now"],
-                            last_ts: c.last_ts,
-                            step_seconds: c.step_seconds });
+        const legend = body.querySelector("#d-legend");
+        if (isCluster && Array.isArray(c.series)) {
+          const series = c.series.map(s => Object.assign({}, s, {
+            color: smChart.colorFor(s.label),
+          }));
+          const visible = series.filter(s => !ps.detailHidden.has(s.label));
+          smChart.drawLineMulti(cs[0], visible,
+            { last_ts: c.last_ts, step_seconds: c.step_seconds,
+              fmtY: ps.detailMetric === "count"
+                    ? v => Math.round(v) : fmtMs });
+          legend.replaceChildren(...series.map(s => {
+            const errMsg = c.errors && c.errors[s.label];
+            const item = el("span",
+              { class: "lg-item"
+                       + (ps.detailHidden.has(s.label) ? " disabled" : "")
+                       + (errMsg ? " error" : ""),
+                title: errMsg || "" },
+              el("span", { class: "lg-swatch",
+                            style: `background:${s.color}` }),
+              s.label + (errMsg ? " ⚠" : ""));
+            item.addEventListener("click", () => {
+              if (ps.detailHidden.has(s.label)) ps.detailHidden.delete(s.label);
+              else ps.detailHidden.add(s.label);
+              if (state.modalRefresh) state.modalRefresh().catch(() => {});
+            });
+            return item;
+          }));
+        } else {
+          legend.replaceChildren();
+          smChart.drawLine(cs[0], (c.values || []).map(Number),
+                            { xLabels: ["-60m", "now"],
+                              last_ts: c.last_ts,
+                              step_seconds: c.step_seconds });
+        }
         smChart.drawHistogram(cs[1], d.histogram ? d.histogram.buckets : []);
         renderTable(body.querySelector("#d-status tbody"), [
           { key: "status",

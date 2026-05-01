@@ -343,7 +343,15 @@ check:
 	    from smartmet_webmon.clusters import ClusterRegistry, ClusterConfig; \
 	    _reg = ClusterRegistry(); \
 	    _reg.add(ClusterConfig(name="back", frontend_url="http://x/", admin_url_pattern="http://{prefix}.x:8081/admin")); \
-	    assert _reg.names() == ["back"] and _reg.get("back") is not None and _reg.get("nope") is None'
+	    assert _reg.names() == ["back"] and _reg.get("back") is not None and _reg.get("nope") is None; \
+	    from smartmet_webmon.handlers import cluster_urls_chart, CLUSTER_ROUTES; \
+	    assert "/cluster/urls/chart" in CLUSTER_ROUTES; \
+	    _st, _b = cluster_urls_chart(_reg, {"cluster": "back"}); \
+	    assert _st == 400, (_st, _b); \
+	    _st, _b = cluster_urls_chart(_reg, {"cluster": "nope", "url": "/foo"}); \
+	    assert _st == 404, (_st, _b); \
+	    _st, _b = cluster_urls_chart(_reg, {"cluster": "back", "url": "/foo"}); \
+	    assert _st == 200 and _b["series"] == [] and _b["metric"] == "p95_ms", (_st, _b)'
 	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
 	$(PYTHON) -m py_compile smartmet_webmon/*.py
 	$(PYTHON) -m py_compile share/smartmet/bperf.py
