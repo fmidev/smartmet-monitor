@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.4.30
-Release:        12%{?dist}.fmi
+Release:        13%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -151,6 +151,34 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-13.fmi
+- Auto-detect cluster naming changed from FQDN-based to prefix-
+  family-based. The FQDN approach (split <prefix>.<cluster>.<rest>
+  and use <cluster> as the name) misidentified two of the three FMI
+  clusters: `in1.back.smartmet.fmi.fi` and `c3.back.smartmet.fmi.fi`
+  share the `back.smartmet.fmi.fi` domain, so the FQDN-derived
+  name collided. `open1.smartmet.fmi.fi` had no `back` segment at
+  all, so the FQDN-derived name landed on `smartmet`. The
+  cluster identity is actually in the *prefix family* the local
+  frontend routes to:
+    * c1..c6 → cluster name "c" (FMI calls it back)
+    * in1..in4 → cluster name "in" (FMI calls it internal)
+    * open1..open3 → cluster name "open" (FMI calls it opendata)
+  Auto-detect now derives the name by stripping trailing digits
+  from each backend prefix and picking the most common stem.
+  Specialised dotted prefixes (e.g. v1.q3, v2.q3 q3-engine
+  pseudo-backends on the back cluster) are skipped during naming —
+  they're satellites, not what defines the cluster identity. The
+  `admin-url-pattern` still uses the local FQDN's tail as the
+  cluster's DNS domain, so all backends in the cluster are
+  reached as <other-prefix>.<this-domain>:8081 — that part of the
+  heuristic was correct in -12 and stays.
+- Operators who want friendlier names (`back` instead of `c`,
+  `internal` instead of `in`, `opendata` instead of `open`)
+  override via `/etc/smartmet-webmon/clusters.conf`. The
+  auto-detect output is "honest about what's observable" rather
+  than embedding FMI-specific naming knowledge in the package.
+
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-12.fmi
 - Cluster-view groundwork (Phase 1 of 3). The dashboard can now
   monitor multiple SmartMet clusters from a single smwebmon

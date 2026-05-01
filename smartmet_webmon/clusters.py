@@ -339,14 +339,16 @@ def start_cluster(ctx: ClusterContext, history_minutes: int) -> None:
 # ---------------------------------------------------------------------------
 
 def _detect_local_role(probe_timeout: float = 1.0
-                       ) -> Optional[Tuple[str, str]]:
+                       ) -> Optional[Tuple[str, str, str]]:
     """Probe localhost for a SmartMet daemon and identify whether it's
-    a frontend or a backend. Returns (role, base_url) or None.
+    a frontend or a backend. Returns (role, base_url, html) or None.
 
     Tries the standard FMI ports — 8080 (frontend convention) and 8081
     (backend convention) — but doesn't trust the port-to-role mapping;
     the actual role comes from parsing the clusterinfo HTML which
     self-identifies as ``This server is a FRONTEND`` / ``a BACKEND``.
+    The HTML is returned alongside so callers can do further parsing
+    without a second HTTP fetch.
     """
     for port in (8080, 8081):
         base = f"http://localhost:{port}"
@@ -355,56 +357,101 @@ def _detect_local_role(probe_timeout: float = 1.0
         except Exception:
             continue
         if "FRONTEND" in html:
-            return ("frontend", base)
+            return ("frontend", base, html)
         if "BACKEND" in html:
-            return ("backend", base)
+            return ("backend", base, html)
     return None
 
 
-def _derive_cluster_domain(local_fqdn: str
-                           ) -> Optional[Tuple[str, str]]:
-    """From the local FQDN derive (cluster_name, cluster_dns_domain).
+def _cluster_name_from_prefixes(prefixes: List[str]) -> Optional[str]:
+    """Derive a cluster's display name from its backend prefix list.
 
-    The naming convention this code assumes — and the only one that
-    seems to be in use at FMI — is ``<prefix>.<cluster>.<rest>``,
-    e.g. ``c3.back.smartmet.fmi.fi`` → cluster_name="back",
-    cluster_dns_domain="back.smartmet.fmi.fi". Backends in the cluster
-    are then reachable as ``<other-prefix>.back.smartmet.fmi.fi``.
+    The naming approach is "shared stem after stripping trailing
+    digits": ``c1..c6`` → ``c``, ``open1..open3`` → ``open``,
+    ``in1..in4`` → ``in``. Specialised prefixes that contain a dot
+    (e.g. ``v1.q3`` for q3-engine pseudo-backends seen on the FMI
+    back cluster) are skipped — they're not what defines the
+    cluster's identity, they're satellites.
 
-    Returns None for hostnames that don't fit the pattern (too short,
-    or single-label); operator falls back to writing clusters.conf
-    by hand.
+    The reason we don't use the local FQDN's domain segment for
+    this: at FMI, ``c1..c6.back.smartmet.fmi.fi`` and
+    ``in1..in4.back.smartmet.fmi.fi`` share the ``back.smartmet.fmi.fi``
+    domain (since "frontends are placed on backend hosts to not
+    waste resources" — back and internal clusters live in the same
+    DNS space). The prefix family is what actually distinguishes them.
+
+    Returns the most-common stem from non-dotted prefixes, ties broken
+    alphabetically. Returns None if no usable stems are present.
     """
-    parts = local_fqdn.split(".")
-    if len(parts) < 3:
+    from collections import Counter
+    if not prefixes:
         return None
-    cluster_name = parts[1]
-    cluster_dns = ".".join(parts[1:])
-    return (cluster_name, cluster_dns)
+    stems: List[str] = []
+    for p in prefixes:
+        if "." in p:
+            continue            # specialised prefix, skip for naming
+        # Strip a trailing digit run; for "c2" → "c", "in4" → "in",
+        # "open3" → "open". Empty result (a pure-digit prefix) falls
+        # back to the original string so we don't end up with "".
+        stem = re.sub(r"\d+$", "", p) or p
+        if stem:
+            stems.append(stem)
+    if not stems:
+        return None
+    counts = Counter(stems)
+    ranked = sorted(counts.items(), key=lambda x: (-x[1], x[0]))
+    return ranked[0][0]
+
+
+def _derive_cluster_domain(local_fqdn: str) -> Optional[str]:
+    """The DNS domain to use in ``admin-url-pattern``. Strip the
+    leading hostname-prefix off the FQDN and return the rest:
+
+      * ``c3.back.smartmet.fmi.fi`` → ``back.smartmet.fmi.fi``
+      * ``in1.back.smartmet.fmi.fi`` → ``back.smartmet.fmi.fi``
+      * ``open1.smartmet.fmi.fi`` → ``smartmet.fmi.fi``
+
+    The cluster's other backends are reachable at
+    ``<other-prefix>.<this-domain>:8081`` because the FMI deployment
+    pattern keeps every backend in a cluster on the same DNS domain.
+
+    Returns None for single-label hostnames where there's no domain
+    to derive.
+    """
+    if "." not in local_fqdn:
+        return None
+    return local_fqdn.split(".", 1)[1]
 
 
 def autodetect_cluster(probe_timeout: float = 1.0
                        ) -> Optional[ClusterConfig]:
     """If localhost runs a SmartMet frontend, build a ClusterConfig
-    from its clusterinfo + the local FQDN's domain. Operator-friendly
-    default for hosts that match FMI's deployment convention; sites
-    that don't can still write clusters.conf by hand and the
-    autodetect simply returns None.
+    from its clusterinfo prefix list + the local FQDN's domain.
+
+    Cluster *name* comes from the prefix family (``c`` / ``in`` /
+    ``open`` etc — see ``_cluster_name_from_prefixes``); cluster
+    *domain* (substituted into the admin-url-pattern) comes from the
+    local FQDN's tail. Both are derived from observable signals,
+    no FMI-specific name mappings. Operators wanting friendlier
+    names (e.g. ``c`` → ``back``, ``in`` → ``internal``) override
+    via ``/etc/smartmet-webmon/clusters.conf``.
 
     Returns None if:
-      * No frontend on localhost (we're on a backend, an ops box, or
-        a host without SmartMet)
-      * Local FQDN is single-label or two-label (no cluster domain
-        component to extract)
+      * No frontend on localhost (we're on a pure backend, an ops
+        box, or a host without SmartMet)
+      * Local FQDN is single-label
+      * No usable prefix stems found (clusterinfo empty or only
+        specialised dotted prefixes)
     """
     role = _detect_local_role(probe_timeout=probe_timeout)
     if role is None or role[0] != "frontend":
         return None
-    frontend_base = role[1]
-    derived = _derive_cluster_domain(socket.getfqdn())
-    if derived is None:
+    _, frontend_base, html = role
+    prefixes = [b.prefix for b in parse_clusterinfo(html)]
+    name = _cluster_name_from_prefixes(prefixes)
+    cluster_dns = _derive_cluster_domain(socket.getfqdn())
+    if name is None or cluster_dns is None:
         return None
-    name, cluster_dns = derived
     return ClusterConfig(
         name=name,
         frontend_url=frontend_base,

@@ -325,15 +325,21 @@ check:
 	    _panels = _json.loads(_resp).get("panels"); \
 	    assert isinstance(_panels, list) and len(_panels) >= 10, _panels; \
 	    _wserv.stop(); \
-	    from smartmet_webmon.clusters import parse_clusterinfo, _derive_cluster_domain; \
+	    from smartmet_webmon.clusters import parse_clusterinfo, _derive_cluster_domain, _cluster_name_from_prefixes; \
 	    _ci_lines = ["    URI /", "        c2/", "    URI /c1/", "    URI /c1/timeseries", "    URI /c2/", "        c2/", "        c2/timeseries", "    URI /c2/timeseries", "        c2/timeseries", "    URI /v1.q3/", "        v1.q3/"]; \
 	    _bs = parse_clusterinfo(chr(10).join(_ci_lines)); \
 	    _by = {b.prefix: b for b in _bs}; \
 	    assert set(_by) == {"c1", "c2", "v1.q3"}, list(_by); \
 	    assert _by["c1"].alive is False and _by["c2"].alive and _by["v1.q3"].alive, _by; \
-	    assert _derive_cluster_domain("c3.back.smartmet.fmi.fi") == ("back", "back.smartmet.fmi.fi"); \
-	    assert _derive_cluster_domain("opendata1.opendata.fmi.fi") == ("opendata", "opendata.fmi.fi"); \
+	    assert _derive_cluster_domain("c3.back.smartmet.fmi.fi") == "back.smartmet.fmi.fi"; \
+	    assert _derive_cluster_domain("in1.back.smartmet.fmi.fi") == "back.smartmet.fmi.fi"; \
+	    assert _derive_cluster_domain("open1.smartmet.fmi.fi") == "smartmet.fmi.fi"; \
 	    assert _derive_cluster_domain("localhost") is None; \
+	    assert _cluster_name_from_prefixes(["c1","c2","c3","c4","c5","c6","v1.q3","v2.q3"]) == "c", "back cluster"; \
+	    assert _cluster_name_from_prefixes(["in1","in2","in3","in4"]) == "in", "internal cluster"; \
+	    assert _cluster_name_from_prefixes(["open1","open2","open3"]) == "open", "opendata cluster"; \
+	    assert _cluster_name_from_prefixes([]) is None; \
+	    assert _cluster_name_from_prefixes(["v1.q3","v2.q3"]) is None, "all dotted prefixes"; \
 	    from smartmet_webmon.clusters import ClusterRegistry, ClusterConfig; \
 	    _reg = ClusterRegistry(); \
 	    _reg.add(ClusterConfig(name="back", frontend_url="http://x/", admin_url_pattern="http://{prefix}.x:8081/admin")); \
