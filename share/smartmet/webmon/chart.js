@@ -317,27 +317,79 @@
       _chartLeave.call(canvas);
       return;
     }
+    // Snap the cursor to the nearest data column. For multi-line we
+    // use s.n (longest series); for single-line s.values.length.
+    const xPoints = s.multi ? s.n : s.values.length;
     const idx = s.stepX > 0
-        ? Math.max(0, Math.min(s.values.length - 1,
+        ? Math.max(0, Math.min(xPoints - 1,
                                 Math.round((cssX - s.padL) / s.stepX)))
         : 0;
     canvas._hoverIdx = idx;
 
     // Redraw the chart cleanly (this also re-applies the overlay
-    // because drawLine sees _hoverIdx is set).
-    drawLine(canvas, s.values, s.opts);
+    // because drawLine / drawLineMulti sees _hoverIdx is set).
+    if (s.multi) drawLineMulti(canvas, s.series, s.opts);
+    else drawLine(canvas, s.values, s.opts);
 
-    const v = s.values[idx];
     const fmtY = s.opts.fmtY || formatMs;
-    const valueStr = Number.isFinite(v) ? fmtY(v) : "—";
     const timeStr = s.ts ? formatTimeFull(s.ts[idx]) : "";
     const tooltip = _chartTooltipEl();
-    tooltip.innerHTML =
-      (timeStr ? `<span class="ct-time">${_esc(timeStr)}</span> ` : "") +
-      `<span class="ct-value">${_esc(valueStr)}</span>`;
+    let html = "";
+    if (timeStr) {
+      html += `<div class="ct-time">${_esc(timeStr)}</div>`;
+    }
+    if (s.multi) {
+      // One row per visible series, sorted descending by value so the
+      // busiest backend is at the top (operators are nearly always
+      // looking for the worst-performing line).
+      const rows = [];
+      for (const ser of s.series) {
+        const offset = s.n - ser.values.length;
+        const localIdx = idx - offset;
+        const v = (localIdx >= 0 && localIdx < ser.values.length)
+                  ? ser.values[localIdx] : null;
+        rows.push({
+          label: ser.label,
+          color: ser.color || colorFor(ser.label),
+          v: Number.isFinite(v) ? v : null,
+        });
+      }
+      rows.sort((a, b) => (b.v ?? -Infinity) - (a.v ?? -Infinity));
+      for (const r of rows) {
+        const valStr = r.v == null ? "—" : fmtY(r.v);
+        html += `<div class="ct-row">`
+              + `<span class="ct-swatch" style="background:${r.color}"></span>`
+              + `<span class="ct-label">${_esc(r.label)}</span>`
+              + `<span class="ct-value">${_esc(valStr)}</span>`
+              + `</div>`;
+      }
+    } else {
+      const v = s.values[idx];
+      const valueStr = Number.isFinite(v) ? fmtY(v) : "—";
+      html += `<div class="ct-row">`
+            + `<span class="ct-value">${_esc(valueStr)}</span>`
+            + `</div>`;
+    }
+    tooltip.innerHTML = html;
     tooltip.classList.remove("hidden");
-    tooltip.style.left = (e.clientX + 14) + "px";
-    tooltip.style.top  = (e.clientY + 14) + "px";
+
+    // Position. The X tracks the cursor (with edge-flip when there's
+    // no room on the right). The Y is **pinned to the canvas's top
+    // edge** — never anchored to e.clientY or to the data point —
+    // so the tooltip does not bounce up and down as the cursor
+    // crosses peaks and valleys in the line. (Operators specifically
+    // dislike the bouncing-box behavior; following the cursor in X
+    // is fine.)
+    const tipW = tooltip.offsetWidth || 120;
+    const margin = 14;
+    let left = e.clientX + margin;
+    if (left + tipW + 4 > window.innerWidth) {
+      left = e.clientX - tipW - margin;
+    }
+    if (left < 4) left = 4;
+    const top = Math.max(4, rect.top + 4);
+    tooltip.style.left = left + "px";
+    tooltip.style.top  = top + "px";
   }
 
   function _chartLeave() {
@@ -345,7 +397,10 @@
     if (canvas._hoverIdx == null) return;
     canvas._hoverIdx = null;
     const s = canvas._chartState;
-    if (s) drawLine(canvas, s.values, s.opts);
+    if (s) {
+      if (s.multi) drawLineMulti(canvas, s.series, s.opts);
+      else drawLine(canvas, s.values, s.opts);
+    }
     _chartTooltipEl().classList.add("hidden");
   }
 

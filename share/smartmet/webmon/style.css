@@ -406,8 +406,36 @@ canvas.chart {
   font-variant-numeric: tabular-nums;
 }
 .chart-tooltip.hidden { display: none; }
-.chart-tooltip .ct-time { color: var(--fg-muted); margin-right: 0.4rem; }
-.chart-tooltip .ct-value { color: var(--accent); font-weight: bold; }
+.chart-tooltip .ct-time {
+  color: var(--fg-muted);
+  font-size: 0.95em;
+  padding-bottom: 2px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--border);
+}
+.chart-tooltip .ct-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.4;
+}
+.chart-tooltip .ct-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  display: inline-block;
+  flex: 0 0 auto;
+}
+.chart-tooltip .ct-label {
+  color: var(--fg);
+  flex: 1 1 auto;
+  margin-right: 0.6rem;
+}
+.chart-tooltip .ct-value {
+  color: var(--accent);
+  font-weight: bold;
+  text-align: right;
+}
 
 #flame-error {
   text-align: left;

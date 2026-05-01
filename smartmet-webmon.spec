@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.4.30
-Release:        15%{?dist}.fmi
+Release:        16%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -151,6 +151,21 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-16.fmi
+- Chart hover tooltip no longer bounces vertically. The tooltip box
+  is now pinned to the canvas's top edge in viewport coordinates and
+  only its X tracks the cursor (with edge-flip when there is no room
+  on the right). Earlier the box followed e.clientY, so as the
+  operator's cursor naturally tracked peaks and valleys in a busy
+  latency chart the tooltip jittered up and down — distracting and
+  hard to read. The vertical guide line and per-series dots still
+  appear AT the cursor's data points; only the value-readout box
+  is anchored.
+- The tooltip is now multi-row for drawLineMulti charts: one row
+  per backend with a color swatch, label, and value, sorted
+  descending so the busiest backend is at the top. (Previously
+  even cluster-mode charts showed only a single value.)
+
 * Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-15.fmi
 - Cluster-view Phase 2c: URLs panel drill-down chart shows one line
   per backend in cluster mode. Click a row in the URLs table; the
