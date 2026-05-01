@@ -65,6 +65,36 @@ html, body {
   color: var(--bad);
 }
 
+/* Multi-line chart legend — clickable per-line toggles. */
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 0.4rem 0.5rem 0;
+  font-size: 0.85em;
+}
+.chart-legend .lg-item {
+  cursor: pointer;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.chart-legend .lg-item:hover { background: var(--bg-row-hover); }
+.chart-legend .lg-item.disabled {
+  color: var(--fg-dim);
+  text-decoration: line-through;
+}
+.chart-legend .lg-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
 .tabs {
   display: flex;
   gap: 2px;

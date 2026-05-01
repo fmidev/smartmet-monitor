@@ -612,7 +612,8 @@
   // -- Active -------------------------------------------------------
 
   PANELS.active = (function () {
-    let chartCanvas, tbody, headEl;
+    const ps = state.panels.active = { hidden: new Set() };
+    let chartCanvas, tbody, headEl, legendEl;
     return {
       title: "Active",
       init(host) {
@@ -623,8 +624,10 @@
           el("span", { class: "muted", id: "active-summary" }));
         const chartCard = el("div", { class: "section-card" },
           el("h4", null, "in-flight count"),
-          el("canvas", { class: "chart", height: "120" }));
+          el("canvas", { class: "chart", height: "160" }));
         chartCanvas = chartCard.querySelector("canvas");
+        legendEl = el("div", { class: "chart-legend" });
+        chartCard.appendChild(legendEl);
         const grid = el("div", { class: "section-grid" }, chartCard);
         const table = el("table", { class: "data-table" },
           el("thead", null, el("tr", null,
@@ -640,16 +643,64 @@
         host.appendChild(panel);
       },
       async refresh() {
+        // In cluster mode, request the per-host series for line
+        // overlays. Otherwise fall back to the aggregated single line.
+        const isCluster = !!state.activeCluster;
         const [tab, ch] = await Promise.all([
           getJSON("/api/active"),
-          getJSON("/api/active/chart"),
+          getJSON("/api/active/chart",
+            isCluster ? { multi: 1 } : null),
         ]);
-        document.getElementById("active-summary").textContent =
-          `current ${ch.current}, peak ${ch.peak}`;
-        smChart.drawLine(chartCanvas, ch.values || [],
-                          { fmtY: v => Math.round(v),
-                            last_ts: ch.last_ts,
-                            step_seconds: ch.step_seconds });
+
+        if (isCluster && Array.isArray(ch.series)) {
+          // Multi-line cluster mode: one line per backend, colored by
+          // stable hash, clickable legend.
+          const series = ch.series.map(s => Object.assign({}, s, {
+            color: smChart.colorFor(s.label),
+          }));
+          // Apply user's hide-toggles (legend clicks).
+          const visible = series.filter(s => !ps.hidden.has(s.label));
+          smChart.drawLineMulti(chartCanvas, visible,
+            { fmtY: v => Math.round(v),
+              last_ts: ch.last_ts,
+              step_seconds: ch.step_seconds });
+          // Render legend: every backend's swatch + label, with
+          // visibility toggled on click.
+          legendEl.replaceChildren(...series.map(s => {
+            const item = el("span",
+              { class: "lg-item" + (ps.hidden.has(s.label) ? " disabled" : "") },
+              el("span", { class: "lg-swatch",
+                            style: `background:${s.color}` }),
+              s.label);
+            item.addEventListener("click", () => {
+              if (ps.hidden.has(s.label)) ps.hidden.delete(s.label);
+              else ps.hidden.add(s.label);
+              // Force re-render on next tick (or immediately).
+              PANELS.active.refresh().catch(() => {});
+            });
+            return item;
+          }));
+          // Summary: total across visible lines, peak across all.
+          const lastValues = visible
+            .map(s => s.values[s.values.length - 1])
+            .filter(v => Number.isFinite(v));
+          const total = lastValues.reduce((a, b) => a + b, 0);
+          const peakAll = series.reduce((m, s) =>
+            Math.max(m, ...(s.values.length ? s.values : [0])), 0);
+          document.getElementById("active-summary").textContent =
+            `cluster total ${total}, per-backend peak ${peakAll}` +
+            (ps.hidden.size ? ` (${ps.hidden.size} hidden)` : "");
+        } else {
+          // Single-host / single-line mode: existing behavior.
+          legendEl.replaceChildren();
+          smChart.drawLine(chartCanvas, ch.values || [],
+            { fmtY: v => Math.round(v),
+              last_ts: ch.last_ts,
+              step_seconds: ch.step_seconds });
+          document.getElementById("active-summary").textContent =
+            `current ${ch.current}, peak ${ch.peak}`;
+        }
+
         renderTable(tbody, [
           { key: "host" },
           { key: "id",          class: "num" },

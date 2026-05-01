@@ -19,6 +19,28 @@
     accent2: "#d2a8ff",
   };
 
+  // Tableau 10 categorical palette (Brewer-quality contrast at small
+  // sizes, color-blind friendly). 10 slots is enough for FMI's largest
+  // cluster (6 backends + a few specialised pseudo-backends like
+  // v1.q3 / v2.q3); larger clusters wrap.
+  const CATEGORICAL = [
+    "#4e79a7", "#f28e2c", "#e15759", "#76b7b2", "#59a14f",
+    "#edc949", "#af7aa1", "#ff9da7", "#9c755f", "#bab0ab",
+  ];
+
+  // Stable color assignment by hashing the label — `c2` gets the same
+  // color across every panel, every refresh, every browser session.
+  // Operators learn one mapping cluster-wide instead of having to
+  // re-orient per chart.
+  function colorFor(label) {
+    let h = 0;
+    const s = String(label);
+    for (let i = 0; i < s.length; i++) {
+      h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+    }
+    return CATEGORICAL[Math.abs(h) % CATEGORICAL.length];
+  }
+
   // Resize for HiDPI: bump backing-store resolution while CSS keeps
   // the laid-out width.
   function setupHiDPI(canvas) {
@@ -362,6 +384,179 @@
     return `${ymd} ${hms}`;
   }
 
+  // Multi-line variant of drawLine. Each entry in `series` is
+  // ``{label, color, values}``. All values arrays should align
+  // index-by-index (same timestamp metadata applies to every line).
+  // Y-axis nice-ticks are derived from the union max across all series.
+  // Hover shows a vertical guide + a dot per line at the cursor's
+  // index, plus a multi-row tooltip listing every series' value
+  // sorted descending so the busiest backend is at the top.
+  function drawLineMulti(canvas, series, opts = {}) {
+    const { ctx, w, h } = setupHiDPI(canvas);
+    const padL = 44, padR = 8, padT = 6, padB = 16;
+    const innerW = w - padL - padR;
+    const innerH = h - padT - padB;
+
+    ctx.fillStyle = PALETTE.bg;
+    ctx.fillRect(0, 0, w, h);
+
+    series = (series || []).filter(s => s && s.values);
+    if (!series.length) {
+      ctx.fillStyle = PALETTE.axis;
+      ctx.font = "12px ui-monospace, monospace";
+      ctx.fillText("(no data)", padL, padT + 14);
+      canvas._chartState = null;
+      return;
+    }
+
+    // Length is the longest series; shorter series render as fewer
+    // segments anchored at the right edge. (In practice the cluster's
+    // per-backend buffers are length-aligned by the source, so this
+    // pad-with-undefined is defensive.)
+    let n = 0;
+    for (const s of series) if (s.values.length > n) n = s.values.length;
+
+    let dataMax = 0;
+    for (const s of series) {
+      for (const v of s.values) {
+        if (Number.isFinite(v) && v > dataMax) dataMax = v;
+      }
+    }
+    const desiredTicks = Math.max(2, Math.min(6, Math.floor(innerH / 28)));
+    const { ticks: yTicks, niceMax } =
+        _niceTicks(dataMax || 1, desiredTicks);
+    const yScale = niceMax > 0 ? innerH / niceMax : 0;
+
+    // Bottom axis + interior gridlines.
+    ctx.strokeStyle = PALETTE.grid;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padL, padT + innerH);
+    ctx.lineTo(padL + innerW, padT + innerH);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(42, 49, 60, 0.55)";
+    for (let i = 1; i < yTicks.length - 1; i++) {
+      const y = padT + innerH - yTicks[i] * yScale;
+      ctx.beginPath();
+      ctx.moveTo(padL, y);
+      ctx.lineTo(padL + innerW, y);
+      ctx.stroke();
+    }
+
+    // Y labels.
+    const fmtY = opts.fmtY || formatMs;
+    ctx.fillStyle = PALETTE.axis;
+    ctx.font = "11px ui-monospace, monospace";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "right";
+    for (const v of yTicks) {
+      const y = padT + innerH - v * yScale;
+      ctx.fillText(fmtY(v), padL - 4, y);
+    }
+
+    const stepX = n > 1 ? innerW / (n - 1) : 0;
+
+    // Each series — line only (no fill, multi-line fills overlap and
+    // become unreadable).
+    ctx.lineWidth = 1.5;
+    for (const s of series) {
+      ctx.strokeStyle = s.color || colorFor(s.label);
+      ctx.beginPath();
+      let started = false;
+      const offset = n - s.values.length;   // align to right edge
+      for (let i = 0; i < s.values.length; i++) {
+        const v = s.values[i];
+        const x = padL + (i + offset) * stepX;
+        if (!Number.isFinite(v)) { started = false; continue; }
+        const y = padT + innerH - v * yScale;
+        if (!started) { ctx.moveTo(x, y); started = true; }
+        else { ctx.lineTo(x, y); }
+      }
+      ctx.stroke();
+    }
+
+    // Build the timestamp array (same logic as drawLine).
+    let ts = null;
+    if (opts.ts && opts.ts.length === n) {
+      ts = opts.ts;
+    } else if (opts.last_ts != null && opts.step_seconds) {
+      const lt = +opts.last_ts;
+      const st = +opts.step_seconds;
+      ts = Array.from({ length: n }, (_, i) => lt - (n - 1 - i) * st);
+    }
+
+    ctx.fillStyle = PALETTE.axis;
+    ctx.textBaseline = "alphabetic";
+    if (ts && ts.length >= 2) {
+      const tickCount = innerW >= 360 ? 5 : 3;
+      for (let t = 0; t < tickCount; t++) {
+        const idx = Math.round(t * (n - 1) / (tickCount - 1));
+        const x = padL + idx * stepX;
+        ctx.textAlign = t === 0 ? "left"
+                      : t === tickCount - 1 ? "right"
+                      : "center";
+        ctx.fillText(formatTimeShort(ts[idx]), x, h - 2);
+      }
+    }
+    if (opts.title) {
+      ctx.fillStyle = PALETTE.label;
+      ctx.textAlign = "left";
+      ctx.fillText(opts.title, padL, padT - 2);
+    }
+
+    canvas._chartState = {
+      multi: true,
+      series, ts, niceMax, opts,
+      padL, padT, innerW, innerH, stepX, n,
+    };
+    if (canvas._hoverIdx != null) {
+      const idx = Math.max(0, Math.min(n - 1, canvas._hoverIdx));
+      _drawHoverOverlayMulti(canvas, idx);
+    }
+    if (!canvas._chartWired) {
+      canvas.addEventListener("mousemove", _chartHover);
+      canvas.addEventListener("mouseleave", _chartLeave);
+      canvas._chartWired = true;
+    }
+  }
+
+  function _drawHoverOverlayMulti(canvas, idx) {
+    const s = canvas._chartState;
+    if (!s) return;
+    const ctx = canvas.getContext("2d");
+    const x = s.padL + idx * s.stepX;
+
+    // Vertical guide.
+    ctx.save();
+    ctx.strokeStyle = "rgba(217, 225, 234, 0.45)";
+    ctx.setLineDash([3, 3]);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, s.padT);
+    ctx.lineTo(x, s.padT + s.innerH);
+    ctx.stroke();
+    ctx.restore();
+
+    // Dot per series at the cursor's index.
+    if (s.niceMax > 0) {
+      for (const ser of s.series) {
+        const offset = s.n - ser.values.length;
+        const localIdx = idx - offset;
+        if (localIdx < 0 || localIdx >= ser.values.length) continue;
+        const v = ser.values[localIdx];
+        if (!Number.isFinite(v)) continue;
+        const y = s.padT + s.innerH - (v / s.niceMax) * s.innerH;
+        ctx.fillStyle = ser.color || colorFor(ser.label);
+        ctx.beginPath();
+        ctx.arc(x, y, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#0e1116";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    }
+  }
+
   // Sparkline — chromeless line, fills its container. Auto-scales
   // per call so each row can show its own shape regardless of others.
   function drawSparkline(canvas, values, opts = {}) {
@@ -488,8 +683,10 @@
   }
 
   global.smChart = {
-    drawLine, drawSparkline, drawHistogram, applyHbar,
+    drawLine, drawLineMulti, drawSparkline, drawHistogram, applyHbar,
     formatMs, formatBytes, formatCount,
+    colorFor,
     PALETTE,
+    CATEGORICAL,
   };
 })(window);

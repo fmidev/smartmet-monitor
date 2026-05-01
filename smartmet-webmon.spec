@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.4.30
-Release:        13%{?dist}.fmi
+Release:        14%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -151,6 +151,38 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-14.fmi
+- Cluster-view Phase 2a: Active panel reshaped for cluster mode.
+  When a cluster is selected, the in-flight count chart shows one
+  line per backend instead of the aggregated cluster-total. Each
+  line gets a stable color (Tableau-categorical 10-slot palette
+  hashed by backend prefix, so c2 is the same color across every
+  panel and every refresh). Clickable legend below the chart
+  toggles per-backend visibility. Single-host mode (no cluster
+  selected) keeps the existing aggregated single-line shape
+  unchanged.
+- New chart helper drawLineMulti in chart.js — accepts
+  [{label, color, values}, ...] and renders all overlaid with
+  shared Y-axis nice-ticks (Heckbert), shared X-axis time labels,
+  and a hover crosshair that draws a dot per series at the
+  cursor's index plus a vertical guide line. Existing drawLine
+  unchanged; the multi variant is a peer.
+- New ActiveSnapshot.chart_per_host returning per-backend
+  in-flight count series. Existing chart() (aggregated total)
+  unchanged; the per-host variant is what the cluster-mode UI
+  fetches via ?multi=1 on the existing /api/active/chart endpoint.
+  Backwards-compatible: old clients without ?multi=1 still get
+  the aggregated form.
+- Color assignment is deterministic (hash of label → palette slot)
+  so operators learn one mapping cluster-wide instead of having
+  to re-orient on every panel.
+
+  Phase 2 still has: URLs / Plugins / Caches / Services / Keys
+  to reshape (separate commits — Caches and Services already have
+  per-host data in Store and are next; URLs / Plugins / Keys need
+  per-host accumulation in Store first because their stats are
+  currently global tail-derived).
+
 * Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-13.fmi
 - Auto-detect cluster naming changed from FQDN-based to prefix-
   family-based. The FQDN approach (split <prefix>.<cluster>.<rest>

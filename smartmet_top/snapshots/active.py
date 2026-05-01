@@ -66,3 +66,33 @@ class ActiveSnapshot:
             "last_ts": time.time(),
             "step_seconds": 2.0,
         }
+
+    @staticmethod
+    def chart_per_host(store) -> dict:
+        """Per-host in-flight count history, for cluster-mode line
+        overlay (one line per backend instead of the aggregated total).
+
+        Returned shape:
+          {
+            "step_seconds": <admin poll interval>,
+            "last_ts":      <Unix epoch of most recent sample>,
+            "series":       [{"label": <host>, "values": [...] }, ...]
+          }
+
+        Hosts with no buffered samples yet are skipped. The client
+        decides ordering / color assignment.
+        """
+        series = []
+        for host in store.admin_hosts:
+            buf = store.active_count_history.get(host)
+            if not buf:
+                continue
+            series.append({
+                "label": host,
+                "values": [int(v) for v in buf],
+            })
+        return {
+            "series": series,
+            "last_ts": time.time(),
+            "step_seconds": 2.0,
+        }

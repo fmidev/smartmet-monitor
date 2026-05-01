@@ -207,6 +207,10 @@ def active_table(store, qs):
 
 
 def active_chart(store, qs):
+    # ?multi=1 returns one series per backend (for cluster-mode line
+    # overlay); the default is the aggregated cluster-total series.
+    if _bool(qs.get("multi"), default=False):
+        return 200, ActiveSnapshot.chart_per_host(store)
     return 200, ActiveSnapshot.chart(store)
 
 
