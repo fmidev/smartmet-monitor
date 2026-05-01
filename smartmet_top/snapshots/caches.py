@@ -63,3 +63,63 @@ class CachesSnapshot:
                     "values": [round(float(v), 3) for v in vs],
                 })
         return {"metric": metric, "samples": samples, "rows": out}
+
+    @staticmethod
+    def cluster_chart_per_host(store, *, cache_name: str,
+                               metric: str = "hits_per_min",
+                               samples: int = 150,
+                               step_seconds: float = 2.0):
+        """One per-host series for a single cache, for the cluster-mode
+        multi-line chart. Reuses the existing per-host cache_history so
+        no extra HTTP fetches are needed (cachestats is polled on the
+        same 2 s admin cadence as everything else)."""
+        series = []
+        for host in store.admin_hosts:
+            hist = store.cache_history.get(host)
+            if hist is None:
+                continue
+            vs = list(hist.series(cache_name, metric, samples=samples))
+            if not vs:
+                continue
+            series.append({
+                "label": host,
+                "values": [round(float(v), 3) for v in vs],
+            })
+        return {
+            "cache_name": cache_name,
+            "metric": metric,
+            "step_seconds": step_seconds,
+            "last_ts": _last_fetched(store.cachestats, store.admin_hosts),
+            "series": series,
+        }
+
+    @staticmethod
+    def cluster_cache_names(store):
+        """Union of every cache name observed across all hosts in the
+        cluster's store. Powers the cache picker in the Caches panel
+        for cluster mode."""
+        names: set = set()
+        for host in store.admin_hosts:
+            hist = store.cache_history.get(host)
+            if hist is None:
+                continue
+            names.update(hist.names())
+            snap = store.cachestats.get(host)
+            if snap is not None and snap.ok:
+                for r in snap.rows or []:
+                    names.add(str(r.get("cache_name")
+                                  or r.get("name") or "?"))
+        return sorted(names)
+
+
+def _last_fetched(snapshot_dict, hosts) -> float:
+    """Most recent ``fetched_at`` across the given snapshot dict; used
+    to label the right edge of cluster trend charts."""
+    best = 0.0
+    for host in hosts:
+        snap = snapshot_dict.get(host)
+        if snap is None:
+            continue
+        if snap.fetched_at and snap.fetched_at > best:
+            best = snap.fetched_at
+    return best

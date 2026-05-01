@@ -565,11 +565,53 @@
   // -- Caches -------------------------------------------------------
 
   PANELS.caches = (function () {
-    let tbody;
+    const ps = state.panels.caches = {
+      cacheName: "", metric: "hits_per_min", hidden: new Set(),
+    };
+    let tbody, chartCard, chartCanvas, legendEl, namePicker, metricPicker;
+    const METRICS = [
+      ["hits_per_min",    "hits/min"],
+      ["inserts_per_min", "inserts/min"],
+      ["hitrate",         "hit %"],
+      ["size",            "size"],
+    ];
     return {
       title: "Caches",
       init(host) {
         host.replaceChildren();
+        // Cluster-mode chart card. Hidden by default; shown when a
+        // cluster is selected. Single-host mode keeps using the
+        // per-row sparkline and ignores this card.
+        chartCard = el("div", { class: "section-card", id: "caches-chart-card" });
+        const ctrls = el("div", { class: "panel-controls" },
+          el("span", { class: "panel-title" }, "Per-backend cache trend"),
+          el("label", null, "cache",
+            (namePicker = el("select", { id: "caches-name" }))),
+          el("label", null, "metric",
+            (metricPicker = el("select", { id: "caches-metric" },
+              ...METRICS.map(([v, l]) => {
+                const o = el("option", { value: v }, l);
+                if (v === ps.metric) o.setAttribute("selected", "");
+                return o;
+              })))),
+        );
+        chartCard.appendChild(ctrls);
+        chartCanvas = el("canvas", { class: "chart", height: "180" });
+        chartCard.appendChild(chartCanvas);
+        legendEl = el("div", { class: "chart-legend" });
+        chartCard.appendChild(legendEl);
+        chartCard.style.display = "none";
+        host.appendChild(chartCard);
+
+        namePicker.addEventListener("change", () => {
+          ps.cacheName = namePicker.value;
+          PANELS.caches.refresh().catch(() => {});
+        });
+        metricPicker.addEventListener("change", () => {
+          ps.metric = metricPicker.value;
+          PANELS.caches.refresh().catch(() => {});
+        });
+
         const panel = el("section", { class: "panel" },
           el("div", { class: "panel-controls" },
             el("span", { class: "panel-title" }, "Caches")),
@@ -586,6 +628,36 @@
         host.appendChild(panel);
       },
       async refresh() {
+        const isCluster = !!state.activeCluster;
+        chartCard.style.display = isCluster ? "" : "none";
+        if (isCluster) {
+          const cc = await getJSON("/api/caches/cluster_chart", {
+            cache_name: ps.cacheName, metric: ps.metric,
+          });
+          // Refresh cache picker options from server-discovered names.
+          const names = cc.cache_names || [];
+          if (!ps.cacheName && names.length) ps.cacheName = names[0];
+          const current = ps.cacheName;
+          namePicker.replaceChildren(
+            ...names.map(n => {
+              const o = el("option", { value: n }, n);
+              if (n === current) o.setAttribute("selected", "");
+              return o;
+            }));
+          if (current && namePicker.value !== current) {
+            namePicker.value = current;
+          }
+          // If picker changed (was empty), refetch chart for the new
+          // cache name on next tick. Otherwise render now.
+          if (current && cc.cache_name !== current) {
+            const cc2 = await getJSON("/api/caches/cluster_chart", {
+              cache_name: current, metric: ps.metric,
+            });
+            _renderCachesChart(cc2);
+          } else {
+            _renderCachesChart(cc);
+          }
+        }
         const [data, trends] = await Promise.all([
           getJSON("/api/caches"),
           getJSON("/api/caches/trends"),
@@ -619,16 +691,82 @@
         });
       },
     };
+    function _renderCachesChart(cc) {
+      const series = (cc.series || []).map(s => Object.assign({}, s, {
+        color: smChart.colorFor(s.label),
+      }));
+      const visible = series.filter(s => !ps.hidden.has(s.label));
+      const fmtY = ps.metric === "hitrate"
+                   ? v => v.toFixed(0) + "%"
+                   : ps.metric === "size"
+                     ? fmtCount
+                     : v => v.toFixed(1);
+      smChart.drawLineMulti(chartCanvas, visible,
+        { fmtY, last_ts: cc.last_ts, step_seconds: cc.step_seconds });
+      legendEl.replaceChildren(...series.map(s => {
+        const item = el("span",
+          { class: "lg-item" + (ps.hidden.has(s.label) ? " disabled" : "") },
+          el("span", { class: "lg-swatch",
+                        style: `background:${s.color}` }),
+          s.label);
+        item.addEventListener("click", () => {
+          if (ps.hidden.has(s.label)) ps.hidden.delete(s.label);
+          else ps.hidden.add(s.label);
+          PANELS.caches.refresh().catch(() => {});
+        });
+        return item;
+      }));
+    }
   })();
 
   // -- Services -----------------------------------------------------
 
   PANELS.services = (function () {
-    let tbody;
+    const ps = state.panels.services = {
+      handler: "", metric: "req_per_min", hidden: new Set(),
+    };
+    let tbody, chartCard, chartCanvas, legendEl, namePicker, metricPicker;
+    const METRICS = [
+      ["req_per_min",  "req/min"],
+      ["req_per_hour", "req/hour"],
+      ["req_per_day",  "req/day"],
+      ["avg_ms",       "avg ms"],
+      ["avg_cpu_ms",   "avg cpu ms"],
+    ];
     return {
       title: "Services",
       init(host) {
         host.replaceChildren();
+        chartCard = el("div", { class: "section-card", id: "services-chart-card" });
+        const ctrls = el("div", { class: "panel-controls" },
+          el("span", { class: "panel-title" }, "Per-backend handler trend"),
+          el("label", null, "handler",
+            (namePicker = el("select", { id: "services-name" }))),
+          el("label", null, "metric",
+            (metricPicker = el("select", { id: "services-metric" },
+              ...METRICS.map(([v, l]) => {
+                const o = el("option", { value: v }, l);
+                if (v === ps.metric) o.setAttribute("selected", "");
+                return o;
+              })))),
+        );
+        chartCard.appendChild(ctrls);
+        chartCanvas = el("canvas", { class: "chart", height: "180" });
+        chartCard.appendChild(chartCanvas);
+        legendEl = el("div", { class: "chart-legend" });
+        chartCard.appendChild(legendEl);
+        chartCard.style.display = "none";
+        host.appendChild(chartCard);
+
+        namePicker.addEventListener("change", () => {
+          ps.handler = namePicker.value;
+          PANELS.services.refresh().catch(() => {});
+        });
+        metricPicker.addEventListener("change", () => {
+          ps.metric = metricPicker.value;
+          PANELS.services.refresh().catch(() => {});
+        });
+
         const panel = el("section", { class: "panel" },
           el("div", { class: "panel-controls" },
             el("span", { class: "panel-title" }, "Services")),
@@ -644,6 +782,33 @@
         host.appendChild(panel);
       },
       async refresh() {
+        const isCluster = !!state.activeCluster;
+        chartCard.style.display = isCluster ? "" : "none";
+        if (isCluster) {
+          const cc = await getJSON("/api/services/cluster_chart", {
+            handler: ps.handler, metric: ps.metric,
+          });
+          const handlers = cc.handlers || [];
+          if (!ps.handler && handlers.length) ps.handler = handlers[0];
+          const current = ps.handler;
+          namePicker.replaceChildren(
+            ...handlers.map(n => {
+              const o = el("option", { value: n }, n);
+              if (n === current) o.setAttribute("selected", "");
+              return o;
+            }));
+          if (current && namePicker.value !== current) {
+            namePicker.value = current;
+          }
+          if (current && cc.handler !== current) {
+            const cc2 = await getJSON("/api/services/cluster_chart", {
+              handler: current, metric: ps.metric,
+            });
+            _renderServicesChart(cc2);
+          } else {
+            _renderServicesChart(cc);
+          }
+        }
         const [data, trends] = await Promise.all([
           getJSON("/api/services"),
           getJSON("/api/services/trends"),
@@ -676,6 +841,29 @@
         });
       },
     };
+    function _renderServicesChart(cc) {
+      const series = (cc.series || []).map(s => Object.assign({}, s, {
+        color: smChart.colorFor(s.label),
+      }));
+      const visible = series.filter(s => !ps.hidden.has(s.label));
+      const fmtY = (ps.metric === "avg_ms" || ps.metric === "avg_cpu_ms")
+                   ? fmtMs : v => v.toFixed(0);
+      smChart.drawLineMulti(chartCanvas, visible,
+        { fmtY, last_ts: cc.last_ts, step_seconds: cc.step_seconds });
+      legendEl.replaceChildren(...series.map(s => {
+        const item = el("span",
+          { class: "lg-item" + (ps.hidden.has(s.label) ? " disabled" : "") },
+          el("span", { class: "lg-swatch",
+                        style: `background:${s.color}` }),
+          s.label);
+        item.addEventListener("click", () => {
+          if (ps.hidden.has(s.label)) ps.hidden.delete(s.label);
+          else ps.hidden.add(s.label);
+          PANELS.services.refresh().catch(() => {});
+        });
+        return item;
+      }));
+    }
   })();
 
   // -- Active -------------------------------------------------------

@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.4.30
-Release:        16%{?dist}.fmi
+Release:        17%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -120,6 +120,12 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-17.fmi
+- New CachesSnapshot.cluster_chart_per_host /
+  ServicesSnapshot.cluster_chart_per_host snapshot methods backing
+  the cluster-mode multi-line trend charts in smwebmon (Phase 2b).
+- Co-bumped with smartmet-webmon. See smartmet-webmon changelog.
+
 * Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-16.fmi
 - Co-bumped with smartmet-webmon for the chart hover tooltip fix
   (no more vertical bouncing; multi-row layout). See smartmet-webmon

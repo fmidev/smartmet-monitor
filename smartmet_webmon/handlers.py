@@ -191,6 +191,27 @@ def caches_trends(store, qs):
         samples=_int(qs.get("samples"), 30))
 
 
+def caches_cluster_chart(store, qs):
+    """Per-backend trend for one cache. Reads from store.cache_history
+    (already populated by the per-host admin polling) — no extra HTTP
+    fetches, in contrast to /api/cluster/urls/chart."""
+    name = qs.get("cache_name", "")
+    if not name:
+        # No cache picked yet — return the list of available caches so
+        # the UI can populate its picker on first paint.
+        return 200, {
+            "cache_names": CachesSnapshot.cluster_cache_names(store),
+            "series": [], "cache_name": "",
+        }
+    payload = CachesSnapshot.cluster_chart_per_host(
+        store,
+        cache_name=name,
+        metric=qs.get("metric", "hits_per_min"),
+        samples=_int(qs.get("samples"), 150))
+    payload["cache_names"] = CachesSnapshot.cluster_cache_names(store)
+    return 200, payload
+
+
 # ---- Services ---------------------------------------------------------------
 
 def services_table(store, qs):
@@ -203,6 +224,23 @@ def services_trends(store, qs):
         store,
         metric=qs.get("metric", "req_per_min"),
         samples=_int(qs.get("samples"), 30))
+
+
+def services_cluster_chart(store, qs):
+    """Per-backend trend for one service handler."""
+    handler = qs.get("handler", "")
+    if not handler:
+        return 200, {
+            "handlers": ServicesSnapshot.cluster_handler_names(store),
+            "series": [], "handler": "",
+        }
+    payload = ServicesSnapshot.cluster_chart_per_host(
+        store,
+        handler=handler,
+        metric=qs.get("metric", "req_per_min"),
+        samples=_int(qs.get("samples"), 150))
+    payload["handlers"] = ServicesSnapshot.cluster_handler_names(store)
+    return 200, payload
 
 
 # ---- Active -----------------------------------------------------------------
@@ -557,11 +595,13 @@ ROUTES = {
     "/plugins":           plugins_table,
     "/plugins/trends":    plugins_trends,
     # Caches
-    "/caches":            caches_table,
-    "/caches/trends":     caches_trends,
+    "/caches":               caches_table,
+    "/caches/trends":        caches_trends,
+    "/caches/cluster_chart": caches_cluster_chart,
     # Services
-    "/services":          services_table,
-    "/services/trends":   services_trends,
+    "/services":               services_table,
+    "/services/trends":        services_trends,
+    "/services/cluster_chart": services_cluster_chart,
     # Active
     "/active":            active_table,
     "/active/chart":      active_chart,

@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.4.30
-Release:        16%{?dist}.fmi
+Release:        17%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -151,6 +151,34 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-17.fmi
+- Cluster-view Phase 2b: Caches and Services panels add a per-backend
+  trend chart in cluster mode. Pick a cache (or service handler) from
+  the dropdown and the multi-line chart shows that entity's metric
+  over time, one line per backend, same color hashing as the URLs
+  and Active panels. Metric pickers cover hits/min, inserts/min,
+  hit %, size for caches; req/min, req/hour, req/day, avg ms,
+  avg cpu ms for services. Clickable legend toggles per-backend
+  visibility.
+- Data path is zero extra HTTP: cachestats and servicestats are
+  already polled per-host on the 2 s admin cadence (one task per
+  backend, asyncio.gather in adminapi.poll_all), and the per-host
+  results land in store.cache_history and store.service_history.
+  The new cluster_chart_per_host snapshot methods just rearrange
+  the existing per-host series into the {label, values} shape that
+  drawLineMulti consumes. Cluster size scales linearly in storage
+  cost only (no extra requests per panel refresh).
+- New endpoints /api/caches/cluster_chart and
+  /api/services/cluster_chart. Both return the per-host series
+  plus the union of available entity names so the UI's dropdown
+  stays current as new backends come online (the cluster's
+  discovery loop catches added prefixes within ~60 s).
+- Single-host mode unchanged: the trend card stays hidden and the
+  per-row sparkline-trend column continues to be the operator's
+  view. Cluster mode shows the chart card above the table; the
+  per-row trends remain so the table is still useful for
+  cross-backend at-a-glance scanning.
+
 * Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-16.fmi
 - Chart hover tooltip no longer bounces vertically. The tooltip box
   is now pinned to the canvas's top edge in viewport coordinates and
