@@ -115,10 +115,15 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         help="Per-minute history retention (default: 1440 = 24h).",
     )
     p.add_argument(
-        "--journal-unit", type=str, default="smartmet-server",
-        metavar="UNIT",
-        help="systemd unit to follow as a [journal] source. Pass an "
-             "empty string to disable.",
+        "--journal-unit", type=str,
+        default="smartmet-backend,smartmet-frontend",
+        metavar="UNIT[,UNIT...]",
+        help="systemd unit(s) to follow as a [journal] source. "
+             "Comma-separated for multiple units; lines from all of "
+             "them are merged into one timestamp-ordered stream. "
+             "Default: smartmet-backend,smartmet-frontend (covers a "
+             "host running either or both daemons). Pass an empty "
+             "string to disable.",
     )
     p.add_argument(
         "--asset-root", default=None, metavar="PATH",

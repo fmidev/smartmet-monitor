@@ -53,7 +53,7 @@ def start_sources(store: Store, *,
                   perf_interval: float = 10.0,
                   perf_record_seconds: int = 3,
                   malloc_flame_min_bytes: Optional[int] = None,
-                  journal_unit: str = "smartmet-server",
+                  journal_unit: str = "smartmet-backend,smartmet-frontend",
                   ) -> List[asyncio.Task]:
     """Schedule the always-on and opt-in source tasks. Returns the list
     of created tasks so the caller can cancel/await them.
@@ -61,7 +61,10 @@ def start_sources(store: Store, *,
     Always-on tasks: ``proc_loop``, ``netstats_loop``, ``vmstats_loop``.
     Plus ``tail_many`` if ``log_paths`` is non-empty, ``poll_all`` if
     ``admin_urls`` is non-empty, ``journal_loop`` if ``journal_unit`` is
-    a non-empty string.
+    a non-empty string. ``journal_unit`` may be comma-separated to
+    follow multiple systemd units in one merged stream — this is the
+    default ("smartmet-backend,smartmet-frontend") so a host that runs
+    both daemons is covered without operator intervention.
 
     Opt-in (gated on ``enable_perf``): on-CPU/off-CPU/page-fault/
     wakeup/block flame samplers, biolat, runqlat, perfstat. The

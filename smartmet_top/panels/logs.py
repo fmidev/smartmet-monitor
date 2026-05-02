@@ -37,8 +37,10 @@ class LogsPanel(Panel):
     )
     panel_help = """\
 Live tail across every configured source: each `*-access-log`
-file plus the systemd journal of the smartmet-server unit (when
---journal-unit is non-empty). All sources share the same
+file plus the systemd journal of the SmartMet daemon units (by
+default smartmet-backend and smartmet-frontend, both followed in
+one merged stream when --journal-unit is non-empty). All sources
+share the same
 viewer; press ←/→ on the top tab bar to flip between them.
 
 Source tab bar (top of panel):
