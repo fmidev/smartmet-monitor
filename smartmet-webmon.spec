@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.5.2
-Release:        4%{?dist}.fmi
+Release:        5%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -151,6 +151,15 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-5.fmi
+- Bump smartmet_top.__version__ and smartmet_webmon.__version__ to
+  26.5.2 (the spec versions had been bumped over the cluster-view
+  Phase 2/3 work, but the Python package metadata still reported
+  26.4.30 at runtime). The Makefile's source-tarball name is
+  derived from __version__, so this also fixes the make-rpms
+  failure where rpmbuild looked for smartmet-monitor-26.5.2.tar.gz
+  while git archive was producing smartmet-monitor-26.4.30.tar.gz.
+
 * Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-4.fmi
 - Cluster on-demand lastrequests fetches now share a 10 s server-side
   cache keyed on (cluster, minutes). Without it, the URL drill-down
