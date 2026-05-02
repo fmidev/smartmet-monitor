@@ -466,6 +466,7 @@ direction; the dedicated single-panel views below remain for sortable
 | `f`              | toggle inline flamegraph (Proc); also the Flame view mnemonic |
 | `↑↓←→` `Enter` `Esc/u` `0` | navigate / zoom in / zoom out / reset (Flame view) |
 | `C` / `B` / `L` / `M` / `W` / `I` / `A` | Flame mode: on-CPU / off-CPU / locks / memory faults / wakeup / block-I/O issue / allocations (dev-only) |
+| `a`              | freeze every recorder ring and analyse the captured stacks (Flame view) |
 | `+` / `-`        | grow / shrink sparkline height in the Proc panel (1–6 rows; default 2) |
 | `m` / `b` / `i`  | toggle time spark / size spark / idle handlers (Graphs panel) |
 | `!`              | open the alerts overlay (any panel)                |
@@ -768,6 +769,50 @@ the offending function can be:
 - Avoided (caching the result somewhere upstream).
 - Pre-warmed (background touch of pages before request time).
 - Refactored to read fewer or smaller files.
+
+#### Analyse overlay (Flame view, `a` to freeze + analyse)
+
+**What it does.** Pressing `a` in the Flame view freezes every
+recorder ring (perf, off-CPU, page-fault, wakeup, block-I/O,
+malloc) and runs a small set of detectors against the captured
+stacks. The recorders idle until you press `a` again, so the
+flame underneath the overlay does not drift while you study it.
+
+**The six detectors v1.**
+
+| Detector | Mode of evidence | Fires when… |
+|---|---|---|
+| locale lock on stream construction | off-CPU (locks) | a non-trivial fraction of off-CPU time waits on a mutex inside `std::ios_base::Init` / `__use_facet` / `basic_stringstream` / `boost::lexical_cast` |
+| regex compiled per request | on-CPU | request-class stacks (under `callRequestHandler`) frequently end in `std::__detail::_Compiler` / `boost::regex_traits` |
+| DNS lookup in request path | on-CPU + off-CPU | request-class stacks contain `getaddrinfo` / `__nss_lookup` — even a tiny share is suspicious |
+| GDAL/PROJ initialisation in request path | on-CPU | request-class stacks contain `OGRRegisterAll` / `pj_create` / `OSRImportFromEPSG` |
+| lock-holder/waiter pair | off-CPU + wakeup | the same SmartMet function appears as a heavy off-CPU lock-waiter *and* in the wakeup ring (= it's both blocking on and releasing the same lock) |
+| major faults dominated by file-backed mmap | page-fault | a large share of major faults land in `filemap_fault` / `do_read_fault` — the working set exceeds RAM |
+
+**Healthy shape.** No findings, or only LOW-severity entries on
+known-warm code paths (e.g. a tiny lock-pair share on the
+querydata repository during a model publish).
+
+**Trouble shape.** Any HIGH-severity finding on a request-class
+stack is a smell. DNS in the request path at any share is
+almost always a bug; per-request regex compile and per-request
+GDAL init are the next worst offenders because the code that
+caused them is usually one line away from a one-time-init fix.
+
+**How to use the overlay.** Up/down moves between findings; the
+selected finding's hint sits below the list. `Enter` jumps the
+flame to the evidence stack (switching mode if necessary) and
+dismisses the overlay so you can navigate the frozen flame
+freely. `Esc` dismisses without jumping but keeps the freeze
+active. Press `a` again to resume recording — the rings start
+collecting fresh stacks again at the next cycle boundary.
+
+**What this is not.** Detectors are heuristics that flag suspect
+patterns from already-collected stacks; they do not prove a bug.
+A hot loop with accidental complexity (e.g. O(N²) where O(N) was
+intended) cannot be told apart from legitimately hot work
+(Trax contouring, GDAL projection) on the flame alone — that is
+clang-tidy's job, run on the source before code lands.
 
 #### CPU efficiency — IPC + cache & branch miss rates (Proc panel)
 

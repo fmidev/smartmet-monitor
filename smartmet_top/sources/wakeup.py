@@ -84,6 +84,9 @@ async def wakeup_loop(store, interval: float = 10.0,
     store.wakeup_status = "waiting for PID"
     rs = max(1, int(record_seconds))
     while True:
+        if getattr(store, "profile_paused", False):
+            await asyncio.sleep(0.5)
+            continue
         pid: Optional[int] = store.proc_selected()
         if pid is None:
             await asyncio.sleep(0.5)

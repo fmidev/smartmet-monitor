@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.5.2
-Release:        13%{?dist}.fmi
+Release:        14%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -120,6 +120,15 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-14.fmi
+- Flame panel: press `a` to freeze every recorder ring and run six
+  anti-pattern detectors against the frozen stacks (locale-lock on
+  stream construction, per-request regex compile, per-request DNS,
+  per-request GDAL/PROJ init, lock-holder/waiter pair, major-fault
+  working-set pressure). Findings list with severity / share% /
+  hint; Enter on a finding zooms the flame to the evidence stack.
+  Press `a` again to resume recording.
+
 * Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-13.fmi
 - Co-bumped with smartmet-webmon for the cluster Proc panel
   (per-backend memory / IO / threads / page-fault overlays

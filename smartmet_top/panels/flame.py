@@ -29,6 +29,7 @@ import curses
 from typing import Dict, List, Optional, Tuple
 
 from .. import theme
+from ..sources.analyze import Finding, SEV_HIGH, SEV_MED, analyze
 from ..sources.smartmet_filter import (
     THREAD_CLASS_ALL,
     THREAD_CLASS_BACKGROUND,
@@ -308,6 +309,16 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
         # `s`-keyed record-duration selection overlay state.
         self._seconds_menu_open: bool = False
         self._seconds_menu_idx: int = 0
+        # `a`-keyed analyse overlay state. The overlay lists findings
+        # produced by sources.analyze.analyze() against the frozen
+        # rings. Pause is sticky relative to the overlay: pressing `a`
+        # toggles pause AND re-runs the analyser; Esc / Enter dismiss
+        # the overlay but leave the recorders paused so the operator
+        # can study the flame without it changing under them. Press
+        # `a` again to resume recording.
+        self._findings_overlay_open: bool = False
+        self._findings: List[Finding] = []
+        self._findings_idx: int = 0
         # `o` cycles through four modes:
         #   on-cpu          — perf record -F 99 -ag (default)
         #   off-cpu         — bcc-tools' offcputime, weighted by us-blocked
@@ -338,6 +349,10 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
         # — including arrows that would otherwise navigate the flame.
         if self._seconds_menu_open:
             return self._handle_seconds_menu_key(key, store)
+        # Same precedence rule for the analyse overlay: while it's
+        # open, arrows scroll the findings list and Enter picks one.
+        if self._findings_overlay_open:
+            return self._handle_findings_overlay_key(key, store)
 
         # PID switching is allowed regardless of perf state.
         procs = store.proc_list()
@@ -372,6 +387,30 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
         # the first cycle starts.
         if key == ord("s") and store.perf_enabled:
             self._open_seconds_menu(store)
+            return True
+
+        # `a` (analyse) toggles the freeze-and-analyse mode. First press
+        # pauses every recorder (the rings stop receiving fresh stacks)
+        # and runs the detector pack against the frozen ring. Second
+        # press resumes recording and clears the overlay/findings.
+        # Lowercase per the panel-hotkey case convention: uppercase
+        # would conflict with the global panel switcher.
+        if key == ord("a") and store.perf_enabled:
+            if store.profile_paused:
+                # Resume.
+                store.profile_paused = False
+                self._findings_overlay_open = False
+                self._findings = []
+                self._findings_idx = 0
+            else:
+                # Pause and analyse the focused PID. proc_selected()
+                # is the same source the recorders read; no per-overlay
+                # PID state needed.
+                store.profile_paused = True
+                pid = store.proc_selected()
+                self._findings = analyze(store, pid) if pid is not None else []
+                self._findings_idx = 0
+                self._findings_overlay_open = True
             return True
 
         # Direct-key mode selection. Uppercase mnemonics so the
@@ -447,6 +486,44 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
         else:
             return False
         return True
+
+    # ---- analyse overlay --------------------------------------------------
+
+    def _handle_findings_overlay_key(self, key, store) -> bool:
+        if key == curses.KEY_UP:
+            self._findings_idx = max(0, self._findings_idx - 1)
+        elif key == curses.KEY_DOWN:
+            self._findings_idx = min(max(0, len(self._findings) - 1),
+                                     self._findings_idx + 1)
+        elif key in (10, 13, curses.KEY_ENTER):
+            # Jump the flame view to the selected finding's evidence.
+            # Pause stays active so the flame doesn't drift while the
+            # operator inspects the suspect path; press `a` to resume.
+            if 0 <= self._findings_idx < len(self._findings):
+                self._jump_to_finding(self._findings[self._findings_idx])
+            self._findings_overlay_open = False
+        elif key in (27, ord("q")):
+            # Esc / q dismiss the overlay but leave pause active so the
+            # operator can navigate the flame freely against the frozen
+            # ring. Resume with another `a`.
+            self._findings_overlay_open = False
+        # Always intercept while open so stray keys don't leak through
+        # to the flame navigation behind the modal.
+        return True
+
+    def _jump_to_finding(self, finding: Finding) -> None:
+        """Switch flame mode to the finding's source ring and place
+        the cursor on the evidence stack so the operator sees the
+        suspect path framed and highlighted on next render."""
+        if finding.mode != self.mode:
+            self.mode = finding.mode
+            self._last_root = {}
+            self._last_frames = []
+        # Reset zoom so the full evidence chain is visible from the
+        # root — the operator can then zoom in by pressing Enter once
+        # the cursor is parked on the suspect leaf.
+        self.zoom_path = ()
+        self.cursor_path = finding.evidence_stack
 
     # ---- record-duration overlay ------------------------------------------
 
@@ -599,7 +676,13 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
         flame_bottom = self._draw_flame_section(win, store, info, sel_bottom + 1)
         self._draw_top_symbols(win, store, info, flame_bottom)
         self._draw_footer(win, n_procs=len(procs))
-        # Draw the modal overlay last so it sits on top of the flame.
+        # Draw the modal overlays last so they sit on top of the flame.
+        # Only one is open at a time (handle_key gates entry on the
+        # other being closed), so the order between these two doesn't
+        # matter — but the seconds menu is small and the findings
+        # overlay can be tall, so we draw findings first.
+        if self._findings_overlay_open:
+            self._draw_findings_overlay(win, store)
         if self._seconds_menu_open:
             self._draw_seconds_menu(win, store)
 
@@ -684,6 +767,13 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
                 f" Flame on-CPU — pid={info.pid}  status={store.perf_status}  "
                 f"last={sample_count}  zoom={breadcrumb}  {filt}"
             )
+        # Stamp a PAUSED marker on the header line whenever the
+        # analyse-mode freeze switch is engaged. The recorders are
+        # idle and the rings are frozen — the operator needs to see
+        # this at a glance so they don't mistake the unchanging
+        # flame for a stuck sampler.
+        if getattr(store, "profile_paused", False):
+            header = header + "  [PAUSED — press a to resume]"
         safe_addstr(win, row, 0, header.ljust(w - 1),
                     theme.attr(theme.P_TAB_ACTIVE))
 
@@ -1397,6 +1487,11 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
         x = write_label(win, h - 1, x, " reset  ", 0, base, base)
         x = write_label(win, h - 1, x, "s", 0, base, hot)
         x = write_label(win, h - 1, x, " seconds  ", 0, base, base)
+        # `a` toggles the freeze-and-analyse overlay. The header line
+        # already carries [PAUSED] when the recorders are frozen, so
+        # we keep the footer hint short.
+        x = write_label(win, h - 1, x, "a", 0, base, hot)
+        x = write_label(win, h - 1, x, " analyse  ", 0, base, base)
         # SmartMet-only toggle — show the active state inline so the
         # operator does not need to glance up at the header.
         s_label = "S" + ("●" if self.smartmet_only else "○")
@@ -1462,3 +1557,120 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
         footer = " ↑↓ select  Enter apply  Esc cancel "
         safe_addstr(win, top + menu_h - 1, left, footer.center(menu_w),
                     theme.attr(theme.P_DIM))
+
+    def _draw_findings_overlay(self, win, store) -> None:
+        """Centered modal listing the analyser's findings.
+
+        Layout: title row, then one row per finding (severity badge +
+        share% + title), then a separator, then the selected finding's
+        hint wrapped over the available width, then a footer of key
+        hints. The whole thing is sized to fit the longest finding +
+        the hint on a single line, with a hard cap at 80% of screen
+        width so the underlying flame remains visible at the edges.
+        """
+        h, w = win.getmaxyx()
+        if not self._findings:
+            # Empty case: short modal explaining what happened. Lets
+            # the operator know analyse ran successfully and just
+            # found nothing actionable, vs. silently doing nothing.
+            menu_w = min(60, max(40, w - 4))
+            menu_h = 7
+            if menu_h >= h or menu_w >= w:
+                return
+            top = max(0, (h - menu_h) // 2)
+            left = max(0, (w - menu_w) // 2)
+            bg = theme.attr(theme.P_TITLE)
+            for y in range(top, top + menu_h):
+                safe_addstr(win, y, left, " " * menu_w, bg)
+            safe_addstr(win, top, left,
+                        " analyse — no findings ".center(menu_w),
+                        theme.attr(theme.P_TAB_ACTIVE, curses.A_BOLD))
+            safe_addstr(win, top + 2, left + 2,
+                        "Detectors found nothing above threshold.",
+                        theme.attr(theme.P_DIM))
+            safe_addstr(win, top + 3, left + 2,
+                        "Recorders are paused on the current rings.",
+                        theme.attr(theme.P_DIM))
+            safe_addstr(win, top + 4, left + 2,
+                        "Press 'a' to resume, Esc to dismiss this box.",
+                        theme.attr(theme.P_DIM))
+            safe_addstr(win, top + menu_h - 1, left,
+                        " a resume  Esc dismiss ".center(menu_w),
+                        theme.attr(theme.P_DIM))
+            return
+
+        # Sized model: at most 12 findings on screen at once (matches
+        # the panel-help convention for "top X" lists), plus 5 chrome
+        # rows (title + blank + separator + 2-row hint + footer).
+        max_visible = min(12, len(self._findings))
+        menu_w = min(max(60, w - 8), int(w * 0.8))
+        menu_h = max_visible + 6
+        if menu_h >= h or menu_w >= w:
+            return
+        top = max(0, (h - menu_h) // 2)
+        left = max(0, (w - menu_w) // 2)
+
+        bg = theme.attr(theme.P_TITLE)
+        for y in range(top, top + menu_h):
+            safe_addstr(win, y, left, " " * menu_w, bg)
+
+        title = f" analyse — {len(self._findings)} finding(s) "
+        safe_addstr(win, top, left, title.center(menu_w),
+                    theme.attr(theme.P_TAB_ACTIVE, curses.A_BOLD))
+
+        # Findings list. Scrolling: when the cursor is past the visible
+        # window, slide the visible slice. Simple top-anchored scroll
+        # is enough — the list is at most ~6 entries in practice.
+        visible_top = 0
+        if self._findings_idx >= max_visible:
+            visible_top = self._findings_idx - max_visible + 1
+        for i in range(max_visible):
+            idx = visible_top + i
+            if idx >= len(self._findings):
+                break
+            f = self._findings[idx]
+            row_y = top + 2 + i
+            is_cursor = (idx == self._findings_idx)
+            row_attr = (theme.attr(theme.P_HIGHLIGHT, curses.A_BOLD)
+                        if is_cursor else bg)
+            sev_attr = self._severity_attr(f.severity)
+            sev_badge = f"[{f.severity.upper():>4}]"
+            line = f" {sev_badge}  {f.share_pct:>5.1f}%  {f.title}"
+            line = line[:menu_w - 4]
+            safe_addstr(win, row_y, left + 2,
+                        line.ljust(menu_w - 4),
+                        sev_attr if not is_cursor else row_attr)
+
+        # Selected finding's hint, wrapped over two rows.
+        hint_y = top + 2 + max_visible + 1
+        if 0 <= self._findings_idx < len(self._findings):
+            sel = self._findings[self._findings_idx]
+            hint_w = menu_w - 6
+            hint = sel.hint
+            # Naive wrap: break at the last space before hint_w.
+            line1, line2 = hint, ""
+            if len(hint) > hint_w:
+                cut = hint.rfind(" ", 0, hint_w)
+                if cut == -1:
+                    cut = hint_w
+                line1 = hint[:cut]
+                line2 = hint[cut:].lstrip()[:hint_w]
+            safe_addstr(win, hint_y, left + 3, line1,
+                        theme.attr(theme.P_DIM))
+            if line2:
+                safe_addstr(win, hint_y + 1, left + 3, line2,
+                            theme.attr(theme.P_DIM))
+
+        footer = " ↑↓ select  Enter zoom to evidence  Esc dismiss  a resume "
+        safe_addstr(win, top + menu_h - 1, left, footer.center(menu_w),
+                    theme.attr(theme.P_DIM))
+
+    def _severity_attr(self, severity: str) -> int:
+        """Colour findings by severity. Reuses the existing palette
+        slots so we don't need a new colour pair: P_BAD for high,
+        P_ACCENT for med, P_DIM for low."""
+        if severity == SEV_HIGH:
+            return theme.attr(theme.P_BAD, curses.A_BOLD)
+        if severity == SEV_MED:
+            return theme.attr(theme.P_ACCENT, curses.A_BOLD)
+        return theme.attr(theme.P_DIM)

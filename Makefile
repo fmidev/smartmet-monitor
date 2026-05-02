@@ -363,7 +363,19 @@ check:
 	    assert _st == 200 and _b["series"] == [] and "apikeys" in _b, (_st, _b); \
 	    _st, _b = cluster_overview_chart(_reg, {"cluster": "back", "metrics": "count,mean_ms,p95_ms"}); \
 	    assert _st == 200 and set(_b["charts"]) == {"count","mean_ms","p95_ms"}, (_st, _b); \
-	    assert _plugin_label("/timeseries") == "timeseries" and _plugin_label("/wms/sub") == "wms" and _plugin_label("/") == ""'
+	    assert _plugin_label("/timeseries") == "timeseries" and _plugin_label("/wms/sub") == "wms" and _plugin_label("/") == ""; \
+	    from smartmet_top.sources.analyze import analyze, Finding, SEV_HIGH; \
+	    _aregex_stack = ("main","SmartMet::Spine::SmartMetPlugin::callRequestHandler","SmartMet::P::q","std::__detail::_Compiler<X>::_M_compile"); \
+	    _AStore = type("_AStore", (), { \
+	        "perf_recent_stacks":     lambda self, pid: [_aregex_stack] * 10, \
+	        "offcpu_recent_stacks":   lambda self, pid: [], \
+	        "wakeup_recent_stacks":   lambda self, pid: [], \
+	        "pagefault_recent_stacks":lambda self, pid: [], \
+	        "blockflame_recent_stacks":lambda self, pid: [], \
+	        "malloc_recent_stacks":   lambda self, pid: [], \
+	    }); \
+	    _af = analyze(_AStore(), 1); \
+	    assert any(f.detector_id == "request-regex-compile" and f.severity == SEV_HIGH for f in _af), _af'
 	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
 	$(PYTHON) -m py_compile smartmet_webmon/*.py
 	$(PYTHON) -m py_compile share/smartmet/bperf.py

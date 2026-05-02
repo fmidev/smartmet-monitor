@@ -482,6 +482,14 @@ class Store:
         # view's `s`-keyed selection overlay; perf_loop reads it on
         # each iteration so changes take effect on the next cycle.
         self.perf_record_seconds: int = 3
+        # Global freeze switch read by every recorder loop (perf,
+        # offcpu, pagefault, wakeup, blockflame, malloc). Set by the
+        # Flame view's `a` (analyze) overlay so the captured stack
+        # rings stay frozen while the operator studies the findings;
+        # cleared when the overlay is dismissed. Pause takes effect at
+        # the next iteration boundary — worst-case lag is one
+        # record_seconds cycle.
+        self.profile_paused: bool = False
         # Off-CPU profiling state — populated when the off-CPU loop is
         # running. Probed lazily; if no backend (bcc-tools / perf-fallback)
         # is available, offcpu_enabled stays False and offcpu_status

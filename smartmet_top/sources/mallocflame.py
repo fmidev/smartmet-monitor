@@ -177,6 +177,9 @@ async def mallocflame_loop(store, min_bytes: int = 4096,
     )
     rs = max(1, int(record_seconds))
     while True:
+        if getattr(store, "profile_paused", False):
+            await asyncio.sleep(0.5)
+            continue
         pid: Optional[int] = store.proc_selected()
         if pid is None:
             await asyncio.sleep(0.5)

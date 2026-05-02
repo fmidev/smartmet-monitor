@@ -142,6 +142,14 @@ async def perf_loop(store, interval: float = DEFAULT_INTERVAL,
     store.perf_record_seconds = record_seconds
     store.perf_status = "waiting for PID"
     while True:
+        # Honour the global freeze switch toggled by the Flame view's
+        # analyze overlay. We poll on a coarse cadence — instantaneous
+        # cancellation of an already-running perf record isn't worth
+        # the bookkeeping, and the operator-visible delay is bounded
+        # by perf_record_seconds (default 3 s).
+        if getattr(store, "profile_paused", False):
+            await asyncio.sleep(0.5)
+            continue
         pid: Optional[int] = store.proc_selected()
         if pid is None:
             await asyncio.sleep(0.5)

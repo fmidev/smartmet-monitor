@@ -141,6 +141,9 @@ async def offcpu_loop(store, interval: float = 10.0,
 async def _run_bcc_loop(store, binary: str, interval: float,
                         record_seconds: int) -> None:
     while True:
+        if getattr(store, "profile_paused", False):
+            await asyncio.sleep(0.5)
+            continue
         pid: Optional[int] = store.proc_selected()
         if pid is None:
             await asyncio.sleep(0.5)
