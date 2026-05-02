@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.5.2
-Release:        10%{?dist}.fmi
+Release:        11%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -151,6 +151,13 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-11.fmi
+- Co-bumped with smartmet-monitor for the smtop curses-side section
+  toggle work: bracketed ``[k]`` chips on every section divider,
+  per-section toggle keys on Network (t/c/l/b) and Proc (m/i/g),
+  and the Proc paired-cycle widget ``< b PID n >``. See
+  smartmet-monitor changelog.
+
 * Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-10.fmi
 - Click any card heading to collapse / expand it. Every
   ``.section-card`` in every panel becomes collapsible — the

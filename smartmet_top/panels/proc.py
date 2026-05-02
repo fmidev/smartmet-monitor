@@ -23,7 +23,7 @@ from ..snapshots.proc import ProcSnapshot
 from ..sources.proc import read_smaps_rollup
 from ..state.store import ProcInfo, ProcSample
 from ..widgets.bars import human_bytes, human_count, sparkline, vchart
-from .base import Panel, safe_addstr, write_label, write_row
+from .base import Panel, safe_addstr, write_label, write_row, write_section_header
 
 
 def _fmt_us(microseconds: int) -> str:
@@ -262,7 +262,8 @@ class ProcPanel(Panel):
     help_text = (
         "Per-process memory + I/O + host-wide reclaim, network and "
         "scheduler metrics (with --perf, also live perf-top + "
-        "flamegraph). n cycle PID (or 1-9 by index), r smaps_rollup, "
+        "flamegraph). b/n cycle PID (or 1-9 by index), m/i/g toggle "
+        "Memory/I/O/paGe-fault sections, r smaps_rollup, "
         "f flamegraph toggle, +/- adjust sparkline height."
     )
     panel_help = """\
@@ -328,8 +329,11 @@ Perf top / Flamegraph (with --perf):
   Flame view (mnemonic f at panel level) is a fuller renderer.
 
 Keys:
-  n          cycle selected smartmetd PID (next in the list)
+  b / n      cycle selected smartmetd PID (back / next)
   1 - 9      jump to PID by index (red [N] mnemonic per row)
+  m          toggle Memory section
+  i          toggle I/O section
+  g          toggle paGe-fault rate section
   N          switch to Network panel (uppercase = panel switch)
   r          read /proc/PID/smaps_rollup (expensive — runs
              only when pressed)
@@ -352,6 +356,12 @@ Keys:
         self.rollup_msg = ""
         self.flame_view = False  # toggled by 'f'
         self._spark_h = self.SPARK_H_DEFAULT
+        # Section visibility set. Lowercase letters (m/i/g) toggle
+        # each of the always-on sections; the optional sampler-gated
+        # sections (vmstats, biolat, runqlat, perfstat, netstats,
+        # perf, rollup) appear only when their data exists, so a
+        # toggle on top would be redundant — they hide naturally.
+        self._visible = {"m", "i", "g"}
 
     # ---- key handling ------------------------------------------------------
 
@@ -366,14 +376,27 @@ Keys:
             store.proc_select(selected)
 
         # Hotkey case convention: lowercase = within-panel,
-        # uppercase = switch-panel. Lowercase ``n`` cycles the
-        # selected smartmetd PID; uppercase ``N`` is *not* consumed
-        # here so the App-level dispatcher can switch to Network.
-        # Same for ``p`` / ``P`` (uppercase falls through to switch
-        # to Proc — a no-op when we are already on Proc).
+        # uppercase = switch-panel. Lowercase ``b`` and ``n`` cycle
+        # the selected smartmetd PID (back / next — the bottom-of-
+        # panel ``< b PID n >`` widget mirrors this); uppercase
+        # ``B`` and ``N`` are *not* consumed so the App-level
+        # dispatcher can switch panels (only ``N`` matches a panel
+        # currently — Network).
         if key == ord("n"):
             i = pids.index(selected)
             store.proc_select(pids[(i + 1) % len(pids)])
+        elif key == ord("b"):
+            i = pids.index(selected)
+            store.proc_select(pids[(i - 1) % len(pids)])
+        elif key in (ord("m"), ord("i"), ord("g")):
+            # Section toggle: m = Memory, i = I/O, g = paGe-faults.
+            # The visibility set is the source of truth for both the
+            # renderer (skip drawing) and the section-header chevron.
+            letter = chr(key)
+            if letter in self._visible:
+                self._visible.discard(letter)
+            else:
+                self._visible.add(letter)
         elif ord("1") <= key <= ord("9"):
             idx = key - ord("1")
             if idx < len(pids):
@@ -511,27 +534,32 @@ Keys:
                     theme.attr(theme.P_TAB_ACTIVE))
         return top + 2
 
-    def _section_divider(self, win, y: int, label: str) -> None:
-        h, w = win.getmaxyx()
-        text = f"─ {label} "
-        line = text + "─" * max(0, w - len(text) - 1)
-        safe_addstr(win, y, 0, line, theme.attr(theme.P_DIM))
+    def _section_divider(self, win, y: int, label: str,
+                          hotkey: str = "", hidden: bool = False) -> None:
+        """Render the section header. If ``hotkey`` is given the divider
+        carries a ``[k]`` red chip and a ▾/▸ chevron showing collapse
+        state; otherwise it falls back to the plain ``─ Label ─`` form
+        used by sections that aren't toggleable."""
+        write_section_header(win, y, hotkey, label, hidden=hidden)
 
     def _draw_memory(self, win, info: ProcInfo, row: int) -> int:
         h, w = win.getmaxyx()
-        # 4 stacked sparklines × spark_h rows each + divider — bail
-        # early if the section will not fit so we don't half-render.
-        section_h = 1 + 4 * self._spark_h
-        if row + section_h >= h:
+        if row >= h:
+            return row
+        hidden = "m" not in self._visible
+        self._section_divider(win, row, "Memory", hotkey="m", hidden=hidden)
+        row += 1
+        # 4 stacked sparklines × spark_h rows each — bail early if the
+        # section will not fit so we don't half-render. Hidden sections
+        # fall through after rendering only the chevroned header.
+        section_body_h = 4 * self._spark_h
+        if hidden or row + section_body_h >= h:
             return row
         latest = info.samples[-1] if info.samples else ProcSample()
         rss_series = [s.vm_rss_kb / 1024.0 for s in info.samples]
         file_series = [s.rss_file_kb / 1024.0 for s in info.samples]
         anon_series = [s.rss_anon_kb / 1024.0 for s in info.samples]
         spark_w = max(20, min(40, w - 50))
-
-        self._section_divider(win, row, "Memory")
-        row += 1
         rows = [
             ("RSS",   latest.vm_rss_kb,    rss_series,  theme.P_SPARK),
             ("File",  latest.rss_file_kb,  file_series, theme.P_GOOD),
@@ -567,10 +595,13 @@ Keys:
 
     def _draw_io(self, win, info: ProcInfo, row: int) -> int:
         h, w = win.getmaxyx()
-        if row + 1 + self._spark_h >= h:
+        if row >= h:
             return row
-        self._section_divider(win, row, "I/O")
+        hidden = "i" not in self._visible
+        self._section_divider(win, row, "I/O", hotkey="i", hidden=hidden)
         row += 1
+        if hidden or row + self._spark_h >= h:
+            return row
         latest = info.samples[-1] if info.samples else ProcSample()
         samples = list(info.samples)
         rrate = _io_rate(samples, "io_read_bytes")
@@ -605,10 +636,14 @@ Keys:
         latency spike that on-CPU profiling cannot see.
         """
         h, w = win.getmaxyx()
-        if row + 1 + self._spark_h >= h:
+        if row >= h:
             return row
-        self._section_divider(win, row, "Page faults (major)")
+        hidden = "g" not in self._visible
+        self._section_divider(win, row, "Page faults (major)",
+                              hotkey="g", hidden=hidden)
         row += 1
+        if hidden or row + self._spark_h >= h:
+            return row
         samples = list(info.samples)
         rate = _majflt_rate(samples)
         spark_w = max(15, min(60, w - 50))
@@ -1030,12 +1065,30 @@ Keys:
         base = theme.attr(theme.P_TITLE)
         x = 0
         safe_addstr(win, h - 1, 0, " ", base); x += 1
-        # Lowercase ``n`` cycles the selected PID; uppercase ``N``
-        # falls through to the global panel-switch dispatcher
-        # (→ Network). 1-9 jump to a PID by its red [N] mnemonic.
+        # Paired-cycle widget: ``< b PID n >``. ``b`` cycles the
+        # selected PID backward, ``n`` forward. The angle brackets
+        # are visual arrow cues; the noun ``PID`` is the thing being
+        # navigated. Uppercase B / N fall through to global panel-
+        # switch dispatch (only N matches a panel — Network).
         if n_procs > 1:
+            safe_addstr(win, h - 1, x, "< ", base); x += 2
+            x = write_label(win, h - 1, x, "b", 0, base, hot)
+            safe_addstr(win, h - 1, x, " PID ", base); x += 5
             x = write_label(win, h - 1, x, "n", 0, base, hot)
-            x = write_label(win, h - 1, x, "ext PID   ", 0, base, base)
+            safe_addstr(win, h - 1, x, " >   ", base); x += 5
+        # Section toggles, each rendered as a ``[k]`` chip whose
+        # colour reflects the visibility state — red+bold when the
+        # section is showing, dim when it's hidden. Mirrors the
+        # convention used in the Network panel's footer.
+        safe_addstr(win, h - 1, x, "toggle ", base); x += 7
+        for letter, _label in (("m", "Memory"), ("i", "I/O"),
+                                 ("g", "Page-faults")):
+            on = letter in self._visible
+            chip_attr = (theme.attr(theme.P_MNEMONIC, curses.A_BOLD)
+                         if on else theme.attr(theme.P_DIM))
+            safe_addstr(win, h - 1, x, f"[{letter}]", chip_attr); x += 3
+            safe_addstr(win, h - 1, x, " ", base); x += 1
+        safe_addstr(win, h - 1, x, "  ", base); x += 2
         x = write_label(win, h - 1, x, "r", 0, base, hot)
         x = write_label(win, h - 1, x, "ollup   ", 0, base, base)
         if perf_enabled:

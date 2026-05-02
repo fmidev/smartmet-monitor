@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.5.2
-Release:        10%{?dist}.fmi
+Release:        11%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -120,6 +120,38 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-11.fmi
+- Smtop section-header convention: every multi-section curses panel
+  (Network and Proc today) renders its section dividers as ``▾ [k]
+  Section Title ──────`` with the letter in red bold inside square
+  brackets and a ``▾`` chevron that rotates to ``▸`` when the
+  section is hidden. The bracket-prefix style coexists with section
+  titles that are inherently all-caps (TCP, I/O) — the chip is a
+  separate visual token, not a letter embedded in the title.
+- Section toggle keys on the Network panel: ``t`` TCP host-wide,
+  ``c`` Connection states, ``l`` Listen sockets, ``b`` Per-NIC
+  bandwidth. Pressing the lowercase letter hides or shows that
+  section; the freed vertical space flows to the remaining
+  sections automatically (each section's body is gated behind the
+  visibility set, the headers always render so the operator can
+  see what's available even when collapsed). Mirror toggles on
+  Proc: ``m`` Memory, ``i`` I/O, ``g`` paGe-fault rate. The
+  optional sampler-gated sections (vmstats, biolat, runqlat,
+  perfstat, netstats compact summary, perf, smaps rollup) keep
+  their pre-existing "show only when data exists" gating since a
+  letter on top would be redundant — they hide naturally.
+- Proc panel paired-cycle widget: bottom-of-panel legend renders
+  ``< b PID n >`` with ``b`` and ``n`` in red, where ``b`` cycles
+  the focused smartmetd PID backward and ``n`` forward. The angle
+  brackets are visual arrow cues; the word ``PID`` between them
+  is the noun being navigated. ``b`` is new (was previously only
+  ``n`` for forward); 1-9 still jump to a PID by its red
+  ``[N]``-mnemonic row.
+- Footer chips on both panels also show toggle state — a section's
+  ``[t]`` chip is red+bold when visible, dim grey when hidden, so
+  the operator gets a glance-state without scanning section
+  headers.
+
 * Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-10.fmi
 - Co-bumped with smartmet-webmon for click-to-collapse on every
   ``.section-card`` (Network / Proc / Overview history grid plus the

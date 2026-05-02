@@ -36,7 +36,19 @@ from typing import List
 from .. import theme
 from ..snapshots.network import NetworkSnapshot
 from ..widgets.bars import human_bytes, sparkline
-from .base import Panel, safe_addstr, write_label, write_row
+from .base import Panel, safe_addstr, write_label, write_row, write_section_header
+
+
+# Per-section toggles. Lowercase letters per the established case
+# convention: uppercase = switch panels, lowercase = within-panel.
+# t / c / l / b cycle each of the four Network sections on or off; a
+# hidden section frees its vertical space for the rest.
+_SECTION_KEYS = (
+    ("t", "TCP host-wide"),
+    ("c", "TCP connection states"),
+    ("l", "Listen sockets"),
+    ("b", "Per-interface bandwidth"),
+)
 
 
 class NetworkPanel(Panel):
@@ -90,6 +102,10 @@ Per-interface bandwidth:
   throughput; the URLs panel will show every handler queueing.
 
 Keys:
+  t        toggle TCP host-wide section
+  c        toggle Connection states section
+  l        toggle Listen sockets section
+  b        toggle Per-interface bandwidth section
   + / -    grow / shrink sparkline height (1-6 rows)
   e / E    export connection-state distribution as CSV / JSON
 """
@@ -98,8 +114,20 @@ Keys:
         # Spark height for the per-NIC + per-state rows. 2 rows
         # gives the same density as the Proc panel's default.
         self._spark_h = 2
+        # Section visibility set. All sections start visible; toggles
+        # below add / remove letters. The set is the source of truth
+        # for both the renderer (skip drawing) and the section-header
+        # chevron (▾ vs ▸).
+        self._visible = {k for k, _ in _SECTION_KEYS}
 
     def handle_key(self, key, store):
+        for letter, _label in _SECTION_KEYS:
+            if key == ord(letter):
+                if letter in self._visible:
+                    self._visible.discard(letter)
+                else:
+                    self._visible.add(letter)
+                return True
         if key in (ord("+"), ord("=")):
             self._spark_h = min(6, self._spark_h + 1)
             return True
@@ -136,6 +164,10 @@ Keys:
         safe_addstr(win, 0, 0, header.ljust(w - 1),
                     theme.attr(theme.P_TAB_ACTIVE))
         row = 2
+        # Hidden sections still render their one-row header (chevron +
+        # greyed label) so the operator can see what's available and
+        # which letter to press to bring it back. Visible sections
+        # render their full body.
         row = self._draw_summary_row(win, store, row)
         row = self._draw_state_table(win, store, row, counts)
         row = self._draw_listen_table(win, store, row, listen_socks)
@@ -146,11 +178,13 @@ Keys:
 
     def _draw_summary_row(self, win, store, row: int) -> int:
         h, w = win.getmaxyx()
-        if row + 2 + self._spark_h >= h:
+        if row >= h:
             return row
-        safe_addstr(win, row, 0, "─ TCP host-wide " + "─" * (w - 17),
-                    theme.attr(theme.P_DIM))
+        hidden = "t" not in self._visible
+        write_section_header(win, row, "t", "TCP host-wide", hidden=hidden)
         row += 1
+        if hidden or row + 1 + self._spark_h >= h:
+            return row + (0 if hidden else 0)
         retrans, overflows, drops = store.netstats_tcp_series()
         latest_r = retrans[-1] if retrans else 0.0
         latest_o = overflows[-1] if overflows else 0.0
@@ -175,12 +209,14 @@ Keys:
     def _draw_state_table(self, win, store, row: int,
                           counts) -> int:
         h, w = win.getmaxyx()
-        if row + 3 >= h:
+        if row >= h:
             return row
-        safe_addstr(win, row, 0,
-                    "─ TCP connection states " + "─" * max(0, w - 25),
-                    theme.attr(theme.P_DIM))
+        hidden = "c" not in self._visible
+        write_section_header(win, row, "c", "TCP connection states",
+                              hidden=hidden)
         row += 1
+        if hidden or row + 2 >= h:
+            return row
         # Header line
         cells = [
             ("  state            ", theme.attr(theme.P_HEADER, curses.A_BOLD)),
@@ -212,12 +248,15 @@ Keys:
     def _draw_listen_table(self, win, store, row: int,
                            listen_socks) -> int:
         h, w = win.getmaxyx()
-        if not listen_socks or row + 3 >= h:
+        if row >= h:
             return row
-        safe_addstr(win, row, 0,
-                    "─ Listen sockets " + "─" * max(0, w - 17),
-                    theme.attr(theme.P_DIM))
+        hidden = "l" not in self._visible
+        # Render the header even if there are no listen sockets — the
+        # ``[l]`` chip stays so the operator can find the toggle.
+        write_section_header(win, row, "l", "Listen sockets", hidden=hidden)
         row += 1
+        if hidden or not listen_socks or row + 2 >= h:
+            return row
         cells = [
             ("  port      ", theme.attr(theme.P_HEADER, curses.A_BOLD)),
             ("Recv-Q (current backlog)",
@@ -243,12 +282,14 @@ Keys:
     def _draw_iface_table(self, win, store, row: int) -> int:
         h, w = win.getmaxyx()
         ifaces = store.netstats_iface_names()
-        if not ifaces or row + 3 >= h:
+        if row >= h:
             return row
-        safe_addstr(win, row, 0,
-                    "─ Per-interface bandwidth " + "─" * max(0, w - 27),
-                    theme.attr(theme.P_DIM))
+        hidden = "b" not in self._visible
+        write_section_header(win, row, "b", "Per-interface bandwidth",
+                              hidden=hidden)
         row += 1
+        if hidden or not ifaces or row + 2 >= h:
+            return row
         for iface in ifaces:
             if row + self._spark_h >= h - 2:
                 break
@@ -316,7 +357,18 @@ Keys:
         hot = theme.attr(theme.P_MNEMONIC, curses.A_BOLD | curses.A_UNDERLINE)
         base = theme.attr(theme.P_TITLE)
         x = 0
-        safe_addstr(win, h - 1, x, " ", base); x += 1
+        safe_addstr(win, h - 1, x, " toggle ", base); x += 8
+        # One chip per section, reflecting visibility — letter is
+        # underlined+bold in red when active, plain when hidden, so
+        # the footer doubles as a state indicator.
+        for letter, _label in _SECTION_KEYS:
+            on = letter in self._visible
+            chip = f"[{letter}]"
+            chip_attr = (theme.attr(theme.P_MNEMONIC, curses.A_BOLD)
+                         if on else theme.attr(theme.P_DIM))
+            safe_addstr(win, h - 1, x, chip, chip_attr); x += 3
+            safe_addstr(win, h - 1, x, " ", base); x += 1
+        safe_addstr(win, h - 1, x, "  ", base); x += 2
         x = write_label(win, h - 1, x, "+", 0, base, hot)
         x = write_label(win, h - 1, x, "/", 0, base, base)
         x = write_label(win, h - 1, x, "-", 0, base, hot)

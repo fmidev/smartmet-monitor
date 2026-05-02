@@ -85,6 +85,48 @@ def write_label(win, y, x, label: str, mnemonic_pos: int,
     return x
 
 
+def write_section_header(win, y: int, hotkey: str, label: str,
+                         hidden: bool = False) -> None:
+    """Render a section divider with a bracketed hotkey chip.
+
+    Layout: ``▾ [t] TCP host-wide ─────────────`` (or ``▸`` when
+    ``hidden=True``). ``[t]`` is drawn with the letter in
+    P_MNEMONIC red bold; the label uses P_HEADER bold when visible
+    and P_DIM (no bold) when hidden, so a collapsed section greys
+    out its title. Trailing dashes fill the row.
+
+    Used as the standard section-header widget on the Network and
+    Proc panels (and any future multi-section curses panel) so the
+    keyboard convention — uppercase = panel switch, lowercase =
+    within-panel toggle — has a single, consistent visualisation.
+
+    For sections that are not toggleable (no hotkey wired), pass
+    ``hotkey=""`` and only the label + dashes render.
+    """
+    from .. import theme  # avoid circular import at module load time
+    h, w = win.getmaxyx()
+    base = theme.attr(theme.P_DIM)
+    x = 0
+    chevron = "▸" if hidden else "▾"
+    if hotkey:
+        safe_addstr(win, y, x, chevron + " ", base)
+        x += 2
+        safe_addstr(win, y, x, "[", base); x += 1
+        safe_addstr(win, y, x, hotkey,
+                    theme.attr(theme.P_MNEMONIC, curses.A_BOLD))
+        x += 1
+        safe_addstr(win, y, x, "] ", base); x += 2
+    else:
+        safe_addstr(win, y, x, "─ ", base)
+        x += 2
+    label_attr = (theme.attr(theme.P_DIM) if hidden
+                  else theme.attr(theme.P_HEADER, curses.A_BOLD))
+    safe_addstr(win, y, x, label + " ", label_attr)
+    x += len(label) + 1
+    if x < w - 1:
+        safe_addstr(win, y, x, "─" * max(0, w - x - 1), base)
+
+
 def write_row(win, y, x, cells, row_attr=0):
     """Write a list of (text, attr) cells left-to-right on one row.
 
