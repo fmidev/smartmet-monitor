@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.5.2
-Release:        11%{?dist}.fmi
+Release:        12%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -120,6 +120,11 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-12.fmi
+- Co-bumped with smartmet-webmon for the collapsed-card grid
+  reflow fix (collapsed cards now hide entirely; a hidden-cards
+  chip strip restores them). See smartmet-webmon changelog.
+
 * Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-11.fmi
 - Smtop section-header convention: every multi-section curses panel
   (Network and Proc today) renders its section dividers as ``▾ [k]

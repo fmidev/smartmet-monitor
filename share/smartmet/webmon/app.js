@@ -214,23 +214,20 @@
     const panelId = state.active;
     const allState = _loadCardState();
     const panelState = allState[panelId] || {};
+    const titleByCardId = {};        // cardId -> human-readable title
     for (const card of host.querySelectorAll(".section-card")) {
       // Two card-header shapes in this codebase:
       //   1. <h4>title</h4> ... (Network / Proc / Overview history)
       //   2. <div class="panel-controls"><span class="panel-title">
       //        title</span><label>...controls...</label></div> ...
       //      (cluster-mode trend cards in Caches / Services / Plugins / Keys)
-      // Pattern 2's whole control row stays visible when collapsed
-      // (so the operator can still see / use the dropdowns the picker
-      // exposes) and clicking the title-span toggles. The CSS rule
-      // below keeps both shapes visible:
-      //     .section-card.collapsed > *:not(h4):not(.panel-controls)
       const titleEl = card.querySelector("h4, .panel-title");
       if (!titleEl) continue;
-      const cardId = card.dataset.cardId
-                  || _slugify(titleEl.textContent || titleEl.innerText || "");
+      const titleText = (titleEl.textContent || titleEl.innerText || "").trim();
+      const cardId = card.dataset.cardId || _slugify(titleText);
       if (!cardId) continue;
       card.dataset.cardId = cardId;
+      titleByCardId[cardId] = titleText;
 
       if (panelState[cardId] && panelState[cardId].collapsed) {
         card.classList.add("collapsed");
@@ -255,16 +252,70 @@
           const cs = _loadCardState();
           const ps = cs[panelId] || (cs[panelId] = {});
           if (card.classList.contains("collapsed")) {
-            ps[cardId] = Object.assign({}, ps[cardId] || {}, { collapsed: true });
+            ps[cardId] = Object.assign({}, ps[cardId] || {}, {
+              collapsed: true, title: titleText,
+            });
           } else if (ps[cardId]) {
             delete ps[cardId].collapsed;
             if (!Object.keys(ps[cardId]).length) delete ps[cardId];
           }
           if (!Object.keys(cs[panelId] || {}).length) delete cs[panelId];
           _saveCardState(cs);
+          // Re-build the strip to reflect the change.
+          _renderHiddenStrip(host, panelId, _loadCardState()[panelId] || {},
+                             titleByCardId);
         });
       }
     }
+    _renderHiddenStrip(host, panelId, panelState, titleByCardId);
+  }
+
+  // Render (or clear) the per-panel hidden-cards strip at the top of
+  // the panel host. Empty when nothing is collapsed — the CSS hides
+  // empty strips so no chrome is taken in the common case. Each chip
+  // restores its card on click via the same localStorage round-trip
+  // setupCardCollapse uses, then re-runs setupCardCollapse to apply.
+  function _renderHiddenStrip(host, panelId, panelState, titleByCardId) {
+    const hiddenIds = Object.keys(panelState || {})
+      .filter(id => panelState[id] && panelState[id].collapsed);
+    let strip = host.querySelector(":scope > .hidden-strip");
+    if (!hiddenIds.length) {
+      if (strip) strip.replaceChildren();
+      return;
+    }
+    if (!strip) {
+      strip = document.createElement("div");
+      strip.className = "hidden-strip";
+      host.insertBefore(strip, host.firstChild);
+    }
+    const items = [el("span", { class: "hs-label" }, "hidden:")];
+    for (const id of hiddenIds.sort()) {
+      // Title comes from the live DOM if the card still exists in the
+      // tree (display:none does not strip it), else from the saved
+      // ``title`` field stored when it was collapsed.
+      const label = (titleByCardId && titleByCardId[id])
+                  || (panelState[id] && panelState[id].title)
+                  || id;
+      const chip = el("button", { class: "hidden-chip", type: "button" },
+                       label);
+      chip.addEventListener("click", () => {
+        const cs = _loadCardState();
+        const ps = cs[panelId] || {};
+        if (ps[id]) {
+          delete ps[id].collapsed;
+          delete ps[id].title;
+          if (!Object.keys(ps[id]).length) delete ps[id];
+        }
+        if (!Object.keys(ps).length) delete cs[panelId];
+        else cs[panelId] = ps;
+        _saveCardState(cs);
+        // Re-run on the current host: the card unhides and the strip
+        // refreshes minus this chip.
+        setupCardCollapse(host);
+      });
+      items.push(chip);
+    }
+    strip.replaceChildren(...items);
   }
 
   // ---- HTTP -------------------------------------------------------

@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.5.2
-Release:        11%{?dist}.fmi
+Release:        12%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -151,6 +151,25 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-12.fmi
+- Collapsed cards no longer leave dead space in the grid. The
+  click-to-collapse from -10 hid only the card body; the card
+  itself kept its grid cell, so adjacent cards could not reflow
+  into the freed space. Now a collapsed card is fully removed
+  from layout (``display: none`` on the whole card), and CSS
+  Grid's ``auto-fit, minmax(420px, 1fr)`` automatically widens
+  the remaining cards to fill the freed columns.
+- A "hidden:" chip strip appears at the top of any panel with
+  collapsed cards, listing each one as a clickable pill (e.g.
+  ``hidden: [Memory ▸] [Page-faults ▸]``). Clicking a chip
+  restores that card to the grid and removes the chip. The
+  strip is empty when nothing is hidden, in which case CSS
+  ``:empty`` collapses it so the panel keeps its full chrome.
+- Each hidden card's title is persisted in localStorage
+  alongside the ``collapsed: true`` flag, so the chip strip
+  re-renders correctly across page reloads even before the
+  panel's first refresh has built the cards.
+
 * Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-11.fmi
 - Co-bumped with smartmet-monitor for the smtop curses-side section
   toggle work: bracketed ``[k]`` chips on every section divider,

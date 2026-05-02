@@ -596,11 +596,53 @@ canvas.chart {
 .section-card.collapsed .panel-title::before {
   transform: rotate(-90deg);
 }
-/* Hide everything below the heading row when the card is collapsed.
-   ``.panel-controls`` is the cluster-mode title-and-pickers row;
-   it's the heading for those cards so it must stay visible too. */
-.section-card.collapsed > *:not(h4):not(.panel-controls) {
+/* A collapsed card is fully removed from layout. Without this, the
+   card kept its grid cell — short body, tall row anchor from a
+   sibling — and other cards could not reflow into the freed space.
+   Operators get the card back via the chip strip below the topbar
+   (.hidden-strip), which lists every collapsed card per panel. */
+.section-card.collapsed {
   display: none;
+}
+
+/* Strip of "hidden:" chips at the top of each panel, one per
+   collapsed card. Empty by default (display:none via :empty), so
+   panels with no collapsed cards get no extra chrome. Chip click
+   restores the card and removes the chip. */
+.hidden-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  align-items: center;
+  padding: 0.4rem 0.75rem;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85em;
+}
+.hidden-strip:empty { display: none; }
+.hidden-strip .hs-label {
+  color: var(--fg-muted);
+  margin-right: 0.3em;
+}
+.hidden-strip .hidden-chip {
+  background: var(--bg);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1px 10px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.95em;
+  line-height: 1.4;
+}
+.hidden-strip .hidden-chip:hover {
+  background: var(--bg-row-hover);
+  color: var(--fg);
+  border-color: var(--accent);
+}
+.hidden-strip .hidden-chip::after {
+  content: " ▸";
+  color: var(--fg-dim);
 }
 /* The heading is interactive but should NOT inherit text-link styling
    on panels where the card is inside a clickable parent (e.g. URL
