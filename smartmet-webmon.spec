@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.5.2
-Release:        2%{?dist}.fmi
+Release:        3%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -151,6 +151,22 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-3.fmi
+- Cluster multi-line charts no longer draw a misleading flat-zero
+  line for backends whose lastrequests fetch failed. The errored
+  backends are now omitted from the chart series; they appear in
+  the legend with a ⚠ marker, color-hashed to their normal color
+  but drawn at 40 % opacity, with the failure reason as a tooltip.
+  Previously a "fetch failed" backend was indistinguishable from
+  a "no traffic for this URL/plugin/key" backend on the chart —
+  both rendered as a flat line at zero. Now the legend tells the
+  operator the truth.
+- Refactored the four panel legend builders (URLs / Plugins /
+  Keys / Active) to share a single _buildClusterLegend helper.
+  Cuts ~80 lines of duplicated DOM-building. The errored-prefix
+  pass at the end ensures the legend lists every prefix the
+  cluster polled, not only the ones the chart shows.
+
 * Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-2.fmi
 - Cluster-view Phase 3: backend-pill topology strip below the top
   bar (cluster mode only). One pill per backend prefix; the dot

@@ -134,6 +134,47 @@
     return b;
   }
 
+  // Build legend items for cluster multi-line charts. Combines the
+  // chart's actual series (successful backends) with the cc.errors
+  // map (failed-fetch backends) — failed backends are omitted from
+  // the chart so a flat-zero line doesn't lie about traffic, but
+  // they appear in the legend with a ⚠ marker and tooltip so the
+  // operator sees the failure. ``hidden`` is the per-panel Set of
+  // user-toggled-off labels; ``onToggle(label)`` updates it and
+  // triggers a redraw.
+  function _buildClusterLegend(cc, series, hidden, onToggle) {
+    const items = [];
+    const labelsInChart = new Set(series.map(s => s.label));
+    for (const s of series) {
+      const errMsg = cc.errors && cc.errors[s.label];
+      const item = el("span",
+        { class: "lg-item"
+                 + (hidden.has(s.label) ? " disabled" : "")
+                 + (errMsg ? " error" : ""),
+          title: errMsg || "" },
+        el("span", { class: "lg-swatch",
+                      style: `background:${s.color}` }),
+        s.label + (errMsg ? " ⚠" : ""));
+      item.addEventListener("click", () => onToggle(s.label));
+      items.push(item);
+    }
+    // Errored backends — sorted, color-hashed for consistency, but
+    // not toggleable (clicking a not-in-chart legend entry would do
+    // nothing visible).
+    const erroredLabels = Object.keys(cc.errors || {})
+      .filter(l => !labelsInChart.has(l)).sort();
+    for (const label of erroredLabels) {
+      const errMsg = cc.errors[label];
+      const item = el("span",
+        { class: "lg-item error disabled", title: errMsg || "" },
+        el("span", { class: "lg-swatch",
+                      style: `background:${smChart.colorFor(label)};opacity:0.4` }),
+        label + " ⚠");
+      items.push(item);
+    }
+    return items;
+  }
+
   // ---- HTTP -------------------------------------------------------
 
   async function getJSON(path, params) {
@@ -358,23 +399,16 @@
             { last_ts: c.last_ts, step_seconds: c.step_seconds,
               fmtY: ps.detailMetric === "count"
                     ? v => Math.round(v) : fmtMs });
-          legend.replaceChildren(...series.map(s => {
-            const errMsg = c.errors && c.errors[s.label];
-            const item = el("span",
-              { class: "lg-item"
-                       + (ps.detailHidden.has(s.label) ? " disabled" : "")
-                       + (errMsg ? " error" : ""),
-                title: errMsg || "" },
-              el("span", { class: "lg-swatch",
-                            style: `background:${s.color}` }),
-              s.label + (errMsg ? " ⚠" : ""));
-            item.addEventListener("click", () => {
-              if (ps.detailHidden.has(s.label)) ps.detailHidden.delete(s.label);
-              else ps.detailHidden.add(s.label);
+          // Legend = successful series + any errored prefixes (which
+          // the server omits from `series` so the chart doesn't show
+          // a misleading flat-zero line for a failed backend).
+          legend.replaceChildren(..._buildClusterLegend(c, series,
+            ps.detailHidden,
+            label => {
+              if (ps.detailHidden.has(label)) ps.detailHidden.delete(label);
+              else ps.detailHidden.add(label);
               if (state.modalRefresh) state.modalRefresh().catch(() => {});
-            });
-            return item;
-          }));
+            }));
         } else {
           legend.replaceChildren();
           smChart.drawLine(cs[0], (c.values || []).map(Number),
@@ -572,23 +606,13 @@
       const fmtY = ps.cMetric === "count" ? v => Math.round(v) : fmtMs;
       smChart.drawLineMulti(chartCanvas, visible,
         { fmtY, last_ts: cc.last_ts, step_seconds: cc.step_seconds });
-      legendEl.replaceChildren(...series.map(s => {
-        const errMsg = cc.errors && cc.errors[s.label];
-        const item = el("span",
-          { class: "lg-item"
-                   + (ps.cHidden.has(s.label) ? " disabled" : "")
-                   + (errMsg ? " error" : ""),
-            title: errMsg || "" },
-          el("span", { class: "lg-swatch",
-                        style: `background:${s.color}` }),
-          s.label + (errMsg ? " ⚠" : ""));
-        item.addEventListener("click", () => {
-          if (ps.cHidden.has(s.label)) ps.cHidden.delete(s.label);
-          else ps.cHidden.add(s.label);
+      legendEl.replaceChildren(..._buildClusterLegend(cc, series,
+        ps.cHidden,
+        label => {
+          if (ps.cHidden.has(label)) ps.cHidden.delete(label);
+          else ps.cHidden.add(label);
           PANELS.plugins.refresh().catch(() => {});
-        });
-        return item;
-      }));
+        }));
     }
   })();
 
@@ -1271,23 +1295,13 @@
       const fmtY = ps.cMetric === "count" ? v => Math.round(v) : fmtMs;
       smChart.drawLineMulti(chartCanvas, visible,
         { fmtY, last_ts: cc.last_ts, step_seconds: cc.step_seconds });
-      legendEl.replaceChildren(...series.map(s => {
-        const errMsg = cc.errors && cc.errors[s.label];
-        const item = el("span",
-          { class: "lg-item"
-                   + (ps.cHidden.has(s.label) ? " disabled" : "")
-                   + (errMsg ? " error" : ""),
-            title: errMsg || "" },
-          el("span", { class: "lg-swatch",
-                        style: `background:${s.color}` }),
-          s.label + (errMsg ? " ⚠" : ""));
-        item.addEventListener("click", () => {
-          if (ps.cHidden.has(s.label)) ps.cHidden.delete(s.label);
-          else ps.cHidden.add(s.label);
+      legendEl.replaceChildren(..._buildClusterLegend(cc, series,
+        ps.cHidden,
+        label => {
+          if (ps.cHidden.has(label)) ps.cHidden.delete(label);
+          else ps.cHidden.add(label);
           PANELS.keys.refresh().catch(() => {});
-        });
-        return item;
-      }));
+        }));
     }
   })();
 

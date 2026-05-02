@@ -563,10 +563,21 @@ def _build_cluster_chart(prefixes, rows_by_prefix, *,
     (returns True if the row should be counted in the chosen entity's
     series). Returns the response envelope shared by all four
     on-demand cluster chart endpoints (URLs / Plugins / Keys /
-    Overview)."""
+    Overview).
+
+    Backends whose fetch failed (i.e. listed in ``errors``) are
+    omitted from ``series`` — a flat-zero line for an errored
+    backend is indistinguishable from "no traffic" and would
+    mislead the reading. The errored prefixes still appear in the
+    response's ``errors`` map so the panel legend can list them
+    with a warning marker.
+    """
+    err_set = set(errors or ())
     now_min = int(time.time() // 60)
     series = []
     for prefix in prefixes:
+        if prefix in err_set:
+            continue
         rows = rows_by_prefix.get(prefix, [])
         buckets: dict = {}
         for r in rows:

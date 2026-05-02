@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.5.2
-Release:        2%{?dist}.fmi
+Release:        3%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -120,6 +120,11 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-3.fmi
+- _build_cluster_chart now omits errored backends from the chart
+  series (the legend still surfaces them with a warning marker).
+  Backing the cluster multi-line chart UX fix in smartmet-webmon.
+
 * Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-2.fmi
 - Co-bumped with smartmet-webmon for the cluster-view Phase 3
   topology strip and README cluster-mode documentation. See
