@@ -1455,17 +1455,22 @@
   // -- Proc ---------------------------------------------------------
 
   PANELS.proc = (function () {
-    const ps = state.panels.proc = { pid: null };
-    let pidSel, body;
+    const ps = state.panels.proc = {
+      pid: null,
+      // Per-backend visibility for cluster-mode legend toggles.
+      cHidden: new Set(),
+    };
+    let pidSel, pidLabel, body;
     return {
       title: "Proc",
       init(host) {
         host.replaceChildren();
         const panel = el("section", { class: "panel" });
+        pidLabel = el("label", null, "pid",
+            (pidSel = el("select", { id: "proc-pid" })));
         const ctrls = el("div", { class: "panel-controls" },
           el("span", { class: "panel-title" }, "Process"),
-          el("label", null, "pid",
-            (pidSel = el("select", { id: "proc-pid" }))));
+          pidLabel);
         pidSel.addEventListener("change",
           () => { ps.pid = +pidSel.value; refresh(); });
         body = el("div");
@@ -1474,6 +1479,13 @@
         host.appendChild(panel);
       },
       async refresh() {
+        const isCluster = !!state.activeCluster;
+        // The PID selector is meaningless in cluster mode (each
+        // backend's smwebmon picks its own default smartmetd) — hide
+        // it so it doesn't pretend to control anything.
+        if (pidLabel) pidLabel.style.display = isCluster ? "none" : "";
+        if (isCluster) { await refreshCluster(); return; }
+
         const [pids, det] = await Promise.all([
           getJSON("/api/proc/pids"),
           getJSON("/api/proc/detail",
@@ -1554,6 +1566,133 @@
           { fmtY: v => v.toFixed(2), ts: S.ts });
       },
     };
+
+    // Cluster-mode render path. Fans out via /api/cluster/proc/detail
+    // (which itself parallel-fetches each backend's /api/proc/detail
+    // — backend smwebmon must be running and reachable). One chart
+    // card per metric, each a multi-line overlay with one line per
+    // backend, color-hashed the same way as the other cluster panels.
+    async function refreshCluster() {
+      const cc = await getJSON("/api/cluster/proc/detail");
+      if (!cc.configured) {
+        body.innerHTML =
+          `<div class="panel-empty">
+             cluster Proc panel needs <code>webmon-url-pattern</code>
+             in <code>/etc/smartmet-webmon/clusters.conf</code> and
+             <code>smwebmon</code> running on each backend.
+             See README "Cluster mode" for setup.
+           </div>`;
+        return;
+      }
+      const backends = cc.backends || {};
+      const errors = cc.errors || {};
+      const labels = Object.keys(backends).sort();
+      if (!labels.length) {
+        const errList = Object.keys(errors).sort()
+          .map(p => `<li><code>${escHtml(p)}</code>: ${escHtml(errors[p])}</li>`)
+          .join("");
+        body.innerHTML =
+          `<div class="panel-empty">
+             no backends with reachable <code>smwebmon</code> yet.
+             ${errList ? `<ul>${errList}</ul>` : ""}
+           </div>`;
+        return;
+      }
+
+      // Build the metric series. Each backend's snapshot has its own
+      // .series.ts; we use the longest backend's ts as the chart's
+      // x-axis reference (slight inaccuracy across hosts whose admin
+      // polling drifted by < 2 s, acceptable for trend visibility).
+      let refTs = null;
+      for (const label of labels) {
+        const ts = (backends[label].series || {}).ts || [];
+        if (!refTs || ts.length > refTs.length) refTs = ts;
+      }
+
+      const buildSeries = (key, transform) => labels.map(label => {
+        const arr = (backends[label].series || {})[key] || [];
+        return {
+          label,
+          color: smChart.colorFor(label),
+          values: transform ? arr.map(transform) : arr.slice(),
+        };
+      });
+
+      const memSeries = buildSeries("vm_rss_kb", v => v * 1024);
+      const ioReadSeries = buildSeries("io_read_bps");
+      const ioWriteSeries = buildSeries("io_write_bps");
+      const threadSeries = buildSeries("threads");
+      const majfltSeries = buildSeries("majflt_per_s");
+
+      body.innerHTML = `
+        <div class="section-grid">
+          <div class="section-card" data-card-id="memory">
+            <h4>Memory (RSS) — per backend</h4>
+            <canvas class="chart" data-role="rss" height="160"></canvas>
+            <div class="chart-legend" data-legend="rss"></div>
+          </div>
+          <div class="section-card" data-card-id="io">
+            <h4>I/O read rate — per backend</h4>
+            <canvas class="chart" data-role="io-r" height="120"></canvas>
+            <div class="chart-legend" data-legend="io-r"></div>
+            <h4 style="margin-top:0.6rem">I/O write rate — per backend</h4>
+            <canvas class="chart" data-role="io-w" height="120"></canvas>
+          </div>
+          <div class="section-card" data-card-id="threads">
+            <h4>Threads — per backend</h4>
+            <canvas class="chart" data-role="threads" height="120"></canvas>
+            <div class="chart-legend" data-legend="threads"></div>
+          </div>
+          <div class="section-card" data-card-id="majflt">
+            <h4>Major page-fault rate — per backend</h4>
+            <canvas class="chart" data-role="majflt" height="120"></canvas>
+            <div class="chart-legend" data-legend="majflt"></div>
+          </div>
+        </div>
+        ${Object.keys(errors).length
+          ? `<div class="muted" style="margin:0.4rem 0.75rem">
+               unreachable backends:
+               ${Object.keys(errors).sort().map(p =>
+                  `<code>${escHtml(p)}</code> (${escHtml(errors[p])})`)
+                .join(", ")}
+             </div>`
+          : ""}
+      `;
+
+      const drawWith = (selector, series, fmtY, legendKey) => {
+        const canvas = body.querySelector(`canvas[data-role="${selector}"]`);
+        if (!canvas) return;
+        const visible = series.filter(s => !ps.cHidden.has(s.label));
+        smChart.drawLineMulti(canvas, visible,
+          { fmtY,
+            ts: refTs && refTs.length ? refTs.slice(-visible[0]?.values.length) : undefined });
+        if (legendKey) {
+          const legend = body.querySelector(
+            `[data-legend="${legendKey}"]`);
+          if (legend) {
+            legend.replaceChildren(...series.map(s => {
+              const item = el("span",
+                { class: "lg-item" + (ps.cHidden.has(s.label) ? " disabled" : "") },
+                el("span", { class: "lg-swatch",
+                              style: `background:${s.color}` }),
+                s.label);
+              item.addEventListener("click", () => {
+                if (ps.cHidden.has(s.label)) ps.cHidden.delete(s.label);
+                else ps.cHidden.add(s.label);
+                PANELS.proc.refresh().catch(() => {});
+              });
+              return item;
+            }));
+          }
+        }
+      };
+
+      drawWith("rss", memSeries, fmtBytes, "rss");
+      drawWith("io-r", ioReadSeries, fmtBytes, "io-r");
+      drawWith("io-w", ioWriteSeries, fmtBytes, null);
+      drawWith("threads", threadSeries, v => Math.round(v), "threads");
+      drawWith("majflt", majfltSeries, v => v.toFixed(2), "majflt");
+    }
   })();
 
   // -- Network ------------------------------------------------------

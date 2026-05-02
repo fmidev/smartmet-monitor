@@ -1154,6 +1154,7 @@ Where the data comes from is panel-dependent and worth knowing:
 | Active             | per-host buffers in `store.active_count_history` already collected by the 2 s admin polling      | 0 extra fetches       |
 | Caches / Services  | per-host `store.cache_history` / `store.service_history` from the 2 s admin polling              | 0 extra fetches       |
 | URLs / Plugins / Keys / Overview | parallel on-demand `?what=lastrequests&minutes=N` from each backend at chart-refresh time | N (one per alive backend, in parallel) |
+| **Proc** (cluster) | parallel on-demand fetch of each backend's own `<webmon>/api/proc/detail` (requires `smwebmon` running on each backend; configured via `webmon-url-pattern` in `clusters.conf`) | N (one per Proc-capable backend, in parallel) |
 
 The on-demand-parallel pattern is used where per-host attribution
 is not retained in the store: `_ingest_lastrequests` aggregates
@@ -1163,6 +1164,64 @@ needed by the multi-line chart has to be re-derived. Wall time
 for the on-demand fetch is approximately the slowest backend's
 response time (the requests run concurrently in a thread pool),
 typically under 1 s for a six-backend cluster.
+
+#### Cluster Proc panel — backend smwebmon required
+
+`/proc` data (RSS, IO, threads, page-faults) is per-host kernel
+state, not exposed by the SmartMet admin plugin. The dashboard's
+cluster Proc panel sources it by **fanning out to each backend's
+own `smwebmon`**: when `webmon-url-pattern` is set in
+`clusters.conf`, the cluster discovery loop probes each backend's
+`smwebmon` at `/api/health` on every cycle, and the cluster Proc
+panel calls each Proc-capable backend's `/api/proc/detail` in
+parallel at refresh time.
+
+Setup:
+
+1. Install `smartmet-webmon` on every backend (the same RPM the
+   frontend already has). Each backend's `smwebmon` reports its
+   local kernel's view, no admin plugin extension needed.
+2. Bind the backend's `smwebmon` to a routable address. The
+   default is loopback-only, which the frontend cannot reach.
+   Edit `/etc/sysconfig/smartmet-webmon` on each backend:
+   ```sh
+   OPTS="--bind=0.0.0.0:8765"
+   # or: OPTS="--bind=10.0.0.42:8765"   (the backend's internal IP)
+   ```
+   Then `systemctl restart smartmet-webmon`. **Restrict access
+   at the firewall** — `smwebmon` is unauthenticated; only the
+   cluster's frontend(s) should reach a backend's port 8765.
+3. Add `webmon-url-pattern` to the cluster's `clusters.conf`
+   section:
+   ```ini
+   [back]
+   frontend-url       = http://smartmet.fmi.fi
+   admin-url-pattern  = http://{prefix}.back.smartmet.fmi.fi:8081/admin
+   webmon-url-pattern = http://{prefix}.back.smartmet.fmi.fi:8765
+   ```
+   Restart the frontend's `smwebmon`. Backends that respond to
+   `/api/health` flip from `webmon_ok=False` to `True` on the next
+   discovery cycle (default 60 s).
+
+The cluster discovery status reflects this in the cluster
+selector dropdown: e.g. `back (5/6 alive, 4 with smwebmon)`.
+
+The Proc panel detects cluster mode via the active cluster
+selector and renders four per-backend overlay cards: **Memory
+(RSS)**, **I/O read rate** + **I/O write rate**, **Threads**,
+**Major page-fault rate**. Each card carries one line per
+Proc-capable backend, color-hashed the same way as every other
+cluster panel — c2 is the same color on the URL chart, the
+topology pill, the Active chart, and now the cluster Memory
+chart. Click a backend's legend entry to hide its line and let
+the others scale up.
+
+Backends that respond on admin but not on `smwebmon` (typical
+when `smwebmon` is not yet enabled across the cluster) are
+listed at the bottom of the panel as
+`unreachable backends: c5 (unreachable: ...)`. They participate
+in every other cluster panel — only the Proc overlay needs
+cross-host kernel access.
 
 **Reading a multi-line chart**
 

@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.5.2
-Release:        12%{?dist}.fmi
+Release:        13%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -151,6 +151,34 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-13.fmi
+- New cluster Proc panel: per-backend memory (RSS), IO read /
+  write rates, thread counts, and major page-fault rates as
+  multi-line overlays — one line per backend, color-hashed the
+  same way as every other cluster panel. The admin plugin does
+  not serve /proc data, so the architecture is to fan out across
+  each backend's *own* smwebmon: when a cluster's clusters.conf
+  has a ``webmon-url-pattern`` set, the cluster discovery loop
+  probes each backend's smwebmon at /api/health on every cycle,
+  and the Proc panel calls the Proc-capable backends'
+  /api/proc/detail in parallel at refresh time.
+- New ``BackendInfo.webmon_ok`` flag tracked per backend; the
+  cluster discovery_status string now reports e.g.
+  ``ok (5/6 alive, 4 with smwebmon)`` so the operator can see
+  at a glance how many backends are wired up for the cluster
+  Proc panel.
+- New cluster-scope endpoint /api/cluster/proc/detail returns
+  ``{configured, backends: {prefix: {latest, series}}, errors}``.
+  Single-host Proc panel unchanged: the panel branches on the
+  active-cluster state, and renders the existing per-PID detail
+  view when no cluster is selected.
+- README "Cluster Proc panel" subsection documents the
+  three-step setup (install smwebmon on each backend, bind to
+  routable address, add webmon-url-pattern), with explicit
+  security note about smwebmon being unauthenticated and the
+  expectation of firewall-level restriction. clusters.conf
+  template gets the optional key alongside admin-url-pattern.
+
 * Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-12.fmi
 - Collapsed cards no longer leave dead space in the grid. The
   click-to-collapse from -10 hid only the card body; the card

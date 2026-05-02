@@ -805,6 +805,102 @@ def cluster_overview_chart(registry, qs):
     }
 
 
+# ---- Cluster Proc detail (per-backend smwebmon fanout) ----------------------
+#
+# The admin plugin does not serve /proc data, so the URL/Plugin/Key
+# fan-out trick (parallel /admin?what=lastrequests) does not work for
+# memory / CPU / IO / threads. The architecture chosen instead: each
+# backend runs its own smwebmon (already shipped, just disabled by
+# default), and the cluster's frontend smwebmon fans out to each
+# backend's /api/proc/detail. ProcSnapshot.detail() is the same call
+# the local Proc panel uses; we just call it cross-host.
+#
+# Discovery: ``ClusterConfig.webmon_url_pattern`` (set per-cluster in
+# clusters.conf) gives the URL pattern; ``BackendInfo.webmon_ok`` is
+# refreshed by the cluster discovery loop on every cycle. Backends
+# whose smwebmon is unreachable are listed in ``errors`` with the
+# probe's reason; backends without webmon configured at all simply
+# don't appear.
+
+_PROC_FETCH_TIMEOUT = 3.0
+
+
+def _fetch_backend_proc(webmon_url: str) -> dict:
+    """Fetch one backend's /api/proc/detail (without a pid arg, so the
+    backend picks its own default PID — typically the lone smartmetd).
+    Raises on HTTP error so the caller's try/except can record it.
+    """
+    full = webmon_url.rstrip("/") + "/api/proc/detail"
+    req = urllib.request.Request(
+        full, headers={"User-Agent": "smartmet-webmon-cluster-proc"},
+    )
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(req, timeout=_PROC_FETCH_TIMEOUT) as resp:
+        body = resp.read()
+    return json.loads(body)
+
+
+def cluster_proc_detail(registry, qs):
+    """Per-backend /proc snapshot, sourced via each backend's own
+    smwebmon. Powers the cluster Proc panel's per-backend overlay
+    cards (memory / IO / threads / page-faults).
+    """
+    ctx, err = _resolve_cluster(registry, qs)
+    if err: return err
+    if not ctx.config.webmon_url_pattern:
+        return 200, {
+            "configured": False,
+            "backends": {},
+            "errors": {},
+            "note": (
+                "cluster Proc panel needs webmon-url-pattern in "
+                "clusters.conf and smwebmon running on each backend"
+            ),
+        }
+    capable = [b for b in ctx.last_backends if b.alive and b.webmon_ok]
+    discovery_errors = {b.prefix: (b.webmon_error or "no health response")
+                         for b in ctx.last_backends
+                         if b.alive and not b.webmon_ok}
+    if not capable:
+        return 200, {
+            "configured": True,
+            "backends": {},
+            "errors": discovery_errors,
+        }
+
+    pattern = ctx.config.webmon_url_pattern
+
+    def fetch_one(backend):
+        prefix = backend.prefix
+        url = pattern.format(prefix=prefix)
+        try:
+            data = _fetch_backend_proc(url)
+            if not data.get("found"):
+                return prefix, None, "no smartmetd PID on backend"
+            return prefix, data, ""
+        except urllib.error.URLError as e:
+            return prefix, None, f"unreachable: {e.reason}"
+        except Exception as e:  # noqa: BLE001
+            return prefix, None, f"{type(e).__name__}: {e}"
+
+    backends: dict = {}
+    errors: dict = dict(discovery_errors)
+    with ThreadPoolExecutor(max_workers=max(1, len(capable))) as ex:
+        futs = [ex.submit(fetch_one, b) for b in capable]
+        for fut in as_completed(futs):
+            prefix, data, err_msg = fut.result()
+            if data is not None:
+                backends[prefix] = data
+            if err_msg:
+                errors[prefix] = err_msg
+
+    return 200, {
+        "configured": True,
+        "backends": backends,
+        "errors": errors,
+    }
+
+
 # ---- routing ----------------------------------------------------------------
 
 # Cluster-scope endpoints — these get the ``ClusterRegistry`` directly
@@ -817,6 +913,7 @@ CLUSTER_ROUTES = {
     "/cluster/plugins/chart": cluster_plugins_chart,
     "/cluster/keys/chart":    cluster_keys_chart,
     "/cluster/overview/chart": cluster_overview_chart,
+    "/cluster/proc/detail":   cluster_proc_detail,
 }
 
 ROUTES = {

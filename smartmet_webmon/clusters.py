@@ -72,10 +72,18 @@ class BackendInfo:
     has any concrete handler entries listed under the backend's
     prefix in the clusterinfo HTML — that's how Sputnik signals
     "this backend is currently routable" (versus "the prefix is
-    registered but the backend is offline / draining / paused")."""
+    registered but the backend is offline / draining / paused").
+
+    ``webmon_ok`` is the cluster Proc-panel flag: True iff the
+    backend's own smwebmon (typically running on the same host) is
+    reachable at the cluster's ``webmon-url-pattern``. Backends with
+    ``webmon_ok=False`` are absent from the cluster-Proc overlays
+    but participate normally in every admin-driven panel."""
     prefix: str
     alive: bool = False
     handlers: List[str] = field(default_factory=list)
+    webmon_ok: bool = False
+    webmon_error: str = ""
 
 
 def parse_clusterinfo(html_text: str) -> List[BackendInfo]:
@@ -127,10 +135,21 @@ def parse_clusterinfo(html_text: str) -> List[BackendInfo]:
 class ClusterConfig:
     """One cluster's static configuration, read from the INI file
     (``[name]`` section). Missing fields raise on load — these
-    are operator-required."""
+    are operator-required.
+
+    ``webmon_url_pattern`` is optional. When set, the discovery loop
+    probes each backend's smwebmon at that URL; backends that respond
+    on ``/api/health`` are flagged as Proc-capable, and the cluster
+    Proc panel renders per-backend RSS / IO / threads / page-fault
+    overlays sourced via the backends' own /api/proc/* endpoints
+    (which the admin plugin does not expose). Backends where smwebmon
+    is not running fall through silently — they don't appear in the
+    cluster Proc view but every other cluster panel keeps working
+    with them."""
     name: str
     frontend_url: str
     admin_url_pattern: str
+    webmon_url_pattern: str = ""
     log_glob: str = ""
     admin_interval: float = 2.0
     discovery_interval: float = 60.0
@@ -165,6 +184,7 @@ def load_clusters_config(path: str) -> List[ClusterConfig]:
         s = cp[name]
         frontend = s.get("frontend-url", "").strip()
         pattern = s.get("admin-url-pattern", "").strip()
+        webmon = s.get("webmon-url-pattern", "").strip()
         if not frontend or not pattern:
             sys.stderr.write(
                 f"smwebmon: cluster '{name}' missing required "
@@ -177,10 +197,18 @@ def load_clusters_config(path: str) -> List[ClusterConfig]:
                 f"{{prefix}} placeholder; skipping\n"
             )
             continue
+        if webmon and "{prefix}" not in webmon:
+            sys.stderr.write(
+                f"smwebmon: cluster '{name}' webmon-url-pattern has no "
+                f"{{prefix}} placeholder; ignoring (cluster Proc panel "
+                f"will be disabled for this cluster)\n"
+            )
+            webmon = ""
         out.append(ClusterConfig(
             name=name,
             frontend_url=frontend.rstrip("/"),
             admin_url_pattern=pattern,
+            webmon_url_pattern=webmon.rstrip("/"),
             log_glob=s.get("log-glob", "").strip(),
             admin_interval=float(s.get("admin-interval", "2.0")),
             discovery_interval=float(s.get("discovery-interval", "60.0")),
@@ -268,6 +296,34 @@ class ClusterRegistry:
         return self.clusters.values()
 
 
+def _probe_webmon(url: str, timeout: float = 1.0) -> str:
+    """Quick health probe for a backend's smwebmon. Returns "" on
+    success and a short error string on failure. Used by the
+    discovery loop to decide whether to enable the cluster Proc
+    overlay for each backend.
+
+    Probe target is ``<url>/api/health`` — bounded payload, served by
+    every smwebmon, returns 200 even when no admin URLs are configured
+    on the backend. The 1 s timeout keeps a stalled backend from
+    holding up the whole discovery sweep.
+    """
+    full = url.rstrip("/") + "/api/health"
+    req = urllib.request.Request(
+        full, headers={"User-Agent": "smartmet-webmon-cluster-discovery"},
+    )
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(req, timeout=timeout) as resp:
+            if resp.status == 200:
+                resp.read(256)        # drain a bit
+                return ""
+            return f"HTTP {resp.status}"
+    except urllib.error.URLError as e:
+        return f"unreachable: {e.reason}"
+    except Exception as e:
+        return f"{type(e).__name__}: {e}"
+
+
 async def discovery_loop(ctx: ClusterContext) -> None:
     """Refetches the cluster's frontend clusterinfo on a loop;
     spawns a ``poll_admin`` task per alive backend; cancels and
@@ -276,6 +332,11 @@ async def discovery_loop(ctx: ClusterContext) -> None:
     Empty backend list (e.g. discovery error) leaves existing
     polling tasks alone — better to keep the last good polling
     set than to teardown on a transient frontend hiccup.
+
+    When ``ctx.config.webmon_url_pattern`` is non-empty, each alive
+    backend also gets a quick smwebmon health probe in the same
+    sweep; the result lives on ``BackendInfo.webmon_ok`` and powers
+    the cluster Proc panel.
     """
     loop = asyncio.get_event_loop()
     while True:
@@ -294,8 +355,32 @@ async def discovery_loop(ctx: ClusterContext) -> None:
 
         ctx.last_backends = backends
         alive = {b.prefix for b in backends if b.alive}
+
+        # Webmon health sweep for this cycle's alive backends. Run
+        # in the executor so the probes don't block the asyncio loop;
+        # gather across all backends so the probes happen in parallel.
+        if ctx.config.webmon_url_pattern and alive:
+            from concurrent.futures import ThreadPoolExecutor
+
+            def _probe_for(b: BackendInfo):
+                url = ctx.config.webmon_url_pattern.format(prefix=b.prefix)
+                err = _probe_webmon(url)
+                b.webmon_ok = (err == "")
+                b.webmon_error = err
+
+            with ThreadPoolExecutor(max_workers=max(1, len(alive))) as ex:
+                await loop.run_in_executor(
+                    None,
+                    lambda: list(ex.map(_probe_for,
+                                         [b for b in backends if b.alive])),
+                )
+
+        webmon_n = sum(1 for b in backends if b.alive and b.webmon_ok)
         ctx.discovery_status = (
-            f"ok ({len(alive)}/{len(backends)} alive)"
+            f"ok ({len(alive)}/{len(backends)} alive"
+            + (f", {webmon_n} with smwebmon" if ctx.config.webmon_url_pattern
+               else "")
+            + ")"
             if backends else "ok (no backends listed)"
         )
 

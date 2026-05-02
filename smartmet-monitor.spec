@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.5.2
-Release:        12%{?dist}.fmi
+Release:        13%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -120,6 +120,12 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-13.fmi
+- Co-bumped with smartmet-webmon for the cluster Proc panel
+  (per-backend memory / IO / threads / page-fault overlays
+  sourced via each backend's own smwebmon — admin plugin does
+  not serve /proc data). See smartmet-webmon changelog.
+
 * Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-12.fmi
 - Co-bumped with smartmet-webmon for the collapsed-card grid
   reflow fix (collapsed cards now hide entirely; a hidden-cards
