@@ -309,9 +309,13 @@ class App:
         if key == ord("E"):
             self._export("json"); return
 
-        # Panel mnemonics — single letter per panel, taken from each
-        # panel's `hotkey` attribute. Case-insensitive.
-        if 32 <= key < 127:
+        # Panel mnemonics — single uppercase letter per panel, taken
+        # from each panel's `hotkey` attribute (stored lowercase).
+        # **Uppercase = switch panel, lowercase = within-panel
+        # navigation.** Splitting the case lets each panel bind
+        # lowercase letters freely (e.g. `n` for next-PID on Proc)
+        # without shadowing a global panel-switch (`N` for Network).
+        if 65 <= key <= 90:                  # ASCII A-Z
             ch = chr(key).lower()
             for i, panel in enumerate(self.panels):
                 if panel.hotkey == ch:

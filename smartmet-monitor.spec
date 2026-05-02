@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.5.2
-Release:        1%{?dist}.fmi
+Release:        2%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -120,6 +120,22 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-2.fmi
+- Smtop hotkey case convention enforced: **uppercase letters switch
+  panels, lowercase letters are within-panel navigation.** Previously
+  the panel-hotkey dispatcher in app.py was case-insensitive, so a
+  panel that bound lowercase ``n`` (e.g. Proc panel's "next PID")
+  shadowed the global ``N`` (→ Network panel) and the operator could
+  not jump to Network from Proc. Fix: the dispatcher now matches
+  only ASCII A-Z (uppercase). Each panel is free to use lowercase
+  letters for per-panel commands without worrying about collisions.
+- Proc panel restored: lowercase ``n`` cycles the selected smartmetd
+  PID (the canonical "next" within-panel binding); uppercase ``N``
+  now reliably switches to the Network panel; 1-9 still jump to a
+  PID by its red ``[N]`` mnemonic. Help text, bottom-of-panel
+  legend, and the file-level docstring updated to reflect the
+  convention so the next reader does not re-discover it.
+
 * Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-1.fmi
 - Default --journal-unit changed from "smartmet-server" to
   "smartmet-backend,smartmet-frontend". The previous default was
