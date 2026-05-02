@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.5.2
-Release:        7%{?dist}.fmi
+Release:        8%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -151,6 +151,12 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-8.fmi
+- Co-bumped with smartmet-monitor for the smtop hotkey case
+  convention (uppercase = panel switch, lowercase = within-panel)
+  + Proc panel ``n``-cycle restoration. See smartmet-monitor
+  changelog.
+
 * Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-7.fmi
 - Co-bumped with smartmet-monitor for the smtop Proc panel n/N
   fix (n now correctly switches to the Network panel; PID picker

@@ -1,8 +1,11 @@
 """Process-level panel — memory + IO + (optional) perf for smartmetd PIDs.
 
-Targets only `smartmetd` processes. If multiple are running (commonly one
-frontend + one backend on the same host) the user cycles between them
-with `n`/`N`. Memory data comes from cheap, O(1) /proc counters; the
+Targets only `smartmetd` processes. If multiple are running (commonly
+one backend + one frontend on the same host) the user cycles between
+them with `n` (lowercase = within-panel; uppercase `N` is reserved
+for switching to the Network panel) or jumps to a specific PID by
+its per-row `[1]` / `[2]` / ... red mnemonic. Memory data comes from
+cheap, O(1) /proc counters; the
 expensive `smaps_rollup` is gated behind `r` so the operator never pays
 for it without asking. The perf section is shown only when smtop was
 launched with `--perf` and the operator opts in to the sampling load.
@@ -259,7 +262,7 @@ class ProcPanel(Panel):
     help_text = (
         "Per-process memory + I/O + host-wide reclaim, network and "
         "scheduler metrics (with --perf, also live perf-top + "
-        "flamegraph). 1-9 select PID by index, r smaps_rollup, "
+        "flamegraph). n cycle PID (or 1-9 by index), r smaps_rollup, "
         "f flamegraph toggle, +/- adjust sparkline height."
     )
     panel_help = """\
@@ -325,8 +328,9 @@ Perf top / Flamegraph (with --perf):
   Flame view (mnemonic f at panel level) is a fuller renderer.
 
 Keys:
-  n / N      next / prev smartmetd PID
-  1 - 9      jump to PID by index in the selector
+  n          cycle selected smartmetd PID (next in the list)
+  1 - 9      jump to PID by index (red [N] mnemonic per row)
+  N          switch to Network panel (uppercase = panel switch)
   r          read /proc/PID/smaps_rollup (expensive — runs
              only when pressed)
   f          toggle inline flame ↔ perf-top
@@ -361,14 +365,16 @@ Keys:
             selected = store.proc_default_pid() or pids[0]
             store.proc_select(selected)
 
-        # Note: ``n`` / ``N`` deliberately not consumed here — the
-        # process row's ``[1]`` / ``[2]`` red-mnemonic labels (drawn
-        # alongside each smartmetd) already give a per-process pick,
-        # and intercepting ``n`` here would block the global panel
-        # hotkey ``n`` from switching to the Network panel. The 1-9
-        # digits cover up to nine smartmetd processes, which is more
-        # than any deployment runs in practice.
-        if ord("1") <= key <= ord("9"):
+        # Hotkey case convention: lowercase = within-panel,
+        # uppercase = switch-panel. Lowercase ``n`` cycles the
+        # selected smartmetd PID; uppercase ``N`` is *not* consumed
+        # here so the App-level dispatcher can switch to Network.
+        # Same for ``p`` / ``P`` (uppercase falls through to switch
+        # to Proc — a no-op when we are already on Proc).
+        if key == ord("n"):
+            i = pids.index(selected)
+            store.proc_select(pids[(i + 1) % len(pids)])
+        elif ord("1") <= key <= ord("9"):
             idx = key - ord("1")
             if idx < len(pids):
                 store.proc_select(pids[idx])
@@ -1024,10 +1030,12 @@ Keys:
         base = theme.attr(theme.P_TITLE)
         x = 0
         safe_addstr(win, h - 1, 0, " ", base); x += 1
-        # PID picker uses the per-row [1]/[2]/... red mnemonics (drawn
-        # against each process); no separate next/prev legend needed
-        # here, and reusing ``n`` for next-PID would shadow the global
-        # Network-panel hotkey.
+        # Lowercase ``n`` cycles the selected PID; uppercase ``N``
+        # falls through to the global panel-switch dispatcher
+        # (→ Network). 1-9 jump to a PID by its red [N] mnemonic.
+        if n_procs > 1:
+            x = write_label(win, h - 1, x, "n", 0, base, hot)
+            x = write_label(win, h - 1, x, "ext PID   ", 0, base, base)
         x = write_label(win, h - 1, x, "r", 0, base, hot)
         x = write_label(win, h - 1, x, "ollup   ", 0, base, base)
         if perf_enabled:
