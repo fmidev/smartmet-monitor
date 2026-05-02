@@ -42,7 +42,8 @@ class App:
                  perf_interval: float = 10.0,
                  perf_record_seconds: int = 3,
                  malloc_flame_min_bytes: Optional[int] = None,
-                 journal_unit: str = "smartmet-server") -> None:
+                 journal_unit: str = "smartmet-backend,smartmet-frontend"
+                 ) -> None:
         self.store = Store()
         for host, _ in admin_urls:
             self.store.register_admin_host(host)
@@ -411,7 +412,8 @@ def run_app(log_paths: List[str], admin_urls: List[tuple],
             enable_perf: bool = False, perf_interval: float = 10.0,
             perf_record_seconds: int = 3,
             malloc_flame_min_bytes: Optional[int] = None,
-            journal_unit: str = "smartmet-server") -> None:
+            journal_unit: str = "smartmet-backend,smartmet-frontend"
+            ) -> None:
     app = App(log_paths, admin_urls, admin_interval, replay,
               replay_bytes=replay_bytes,
               include_rotated=include_rotated,

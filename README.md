@@ -1044,7 +1044,7 @@ smartmet-webmon` to apply.
 | `-n, --admin-interval SEC`    | `2.0`                  | Same cadence as `smtop`.                            |
 | `--replay`, `--include-rotated` | off                  | Populate the URLs panel from log history at start.  |
 | `--history-minutes N`         | `1440` (24 h)          | Memory-bounded; see `smtop` README for sizing.      |
-| `--journal-unit UNIT`         | `smartmet-server`      | Empty string disables.                              |
+| `--journal-unit UNIT[,UNIT...]` | `smartmet-backend,smartmet-frontend` | Comma-separated; lines merge into one timestamp-ordered stream. Covers a host running either or both daemons. Empty string disables. |
 
 The port `8765` is **only the default** — change it via `--bind` or
 the sysconfig file. `smwebmon` deliberately does not enable `--perf`;

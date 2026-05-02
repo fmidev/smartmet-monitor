@@ -117,11 +117,17 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
              "the duty cycle is ~30%%.",
     )
     p.add_argument(
-        "--journal-unit", type=str, default="smartmet-server",
-        metavar="UNIT",
-        help="systemd unit name to tail in the Logs panel as a "
-             "[journal] source. Default: smartmet-server. Pass an "
-             "empty string (--journal-unit '') to disable.",
+        "--journal-unit", type=str,
+        default="smartmet-backend,smartmet-frontend",
+        metavar="UNIT[,UNIT...]",
+        help="systemd unit(s) to tail in the Logs panel as a "
+             "[journal] source. Comma-separated for multiple units; "
+             "lines from all of them are merged into one timestamp-"
+             "ordered stream. Default: "
+             "smartmet-backend,smartmet-frontend (covers a SmartMet "
+             "host running the backend daemon, the frontend daemon, "
+             "or both). Pass an empty string (--journal-unit '') to "
+             "disable.",
     )
     p.add_argument(
         "--malloc-flame", nargs="?", type=int, const=4096, default=None,

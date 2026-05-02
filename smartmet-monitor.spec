@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.5.2
-Release:        5%{?dist}.fmi
+Release:        6%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -120,6 +120,16 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-6.fmi
+- Default --journal-unit changed from "smartmet-server" to
+  "smartmet-backend,smartmet-frontend". The previous default was
+  factually wrong: SmartMet's systemd units are named smartmet-backend
+  (data daemon) and smartmet-frontend (Sputnik routing daemon), and
+  both may coexist on the same physical host. journal_loop now
+  accepts a comma-separated list and spawns a single journalctl with
+  multiple -u flags so all listed units' lines stream in one
+  timestamp-merged feed.
+
 * Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-5.fmi
 - Bump smartmet_top.__version__ to 26.5.2 (was lagging at 26.4.30
   through the Phase 2/3 spec bumps). Also fixes make-rpms which

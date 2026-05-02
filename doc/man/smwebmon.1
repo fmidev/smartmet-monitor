@@ -1,4 +1,4 @@
-.TH SMWEBMON 1 "2026-05-02" "smartmet-webmon-26.5.2-5" "SmartMet Server"
+.TH SMWEBMON 1 "2026-05-02" "smartmet-webmon-26.5.2-6" "SmartMet Server"
 .SH NAME
 smwebmon \- browser dashboard for SmartMet Server
 .SH SYNOPSIS
@@ -90,9 +90,13 @@ also read each log\(aqs rotated siblings (e.g.
 .BR \-\-history\-minutes " " \fIN\fR
 Per-minute history retention. Default 1440 (24 h).
 .TP
-.BR \-\-journal\-unit " " \fIUNIT\fR
-systemd unit to follow as a [journal] source. Default
-.BR smartmet-server .
+.BR \-\-journal\-unit " " \fIUNIT\fR[\fB,\fIUNIT\fR...]
+systemd unit(s) to follow as a [journal] source. Comma-separated
+for multiple units; lines from all of them are merged into one
+timestamp-ordered stream. Default
+.BR smartmet-backend,smartmet-frontend
+\(em the two SmartMet daemons that may coexist on the same host
+(the data-serving backend and the Sputnik routing frontend).
 Pass an empty string to disable.
 .TP
 .BR \-\-asset\-root " " \fIPATH\fR

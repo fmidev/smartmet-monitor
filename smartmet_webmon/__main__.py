@@ -15,16 +15,11 @@ from smartmet_top.state.store import Store, set_history_minutes
 from smartmet_top.__main__ import _parse_admin_urls
 
 from . import assets
-from .clusters import (
-    ClusterRegistry, autodetect_cluster, load_clusters_config,
-    start_cluster, stop_cluster,
-)
 from .server import WebServer
 
 
 DEFAULT_LOG_GLOB = "/var/log/smartmet/*-access-log"
 DEFAULT_BIND = "127.0.0.1:8765"
-DEFAULT_CLUSTERS_CONFIG = "/etc/smartmet-webmon/clusters.conf"
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
@@ -120,34 +115,21 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         help="Per-minute history retention (default: 1440 = 24h).",
     )
     p.add_argument(
-        "--journal-unit", type=str, default="smartmet-server",
-        metavar="UNIT",
-        help="systemd unit to follow as a [journal] source. Pass an "
-             "empty string to disable.",
+        "--journal-unit", type=str,
+        default="smartmet-backend,smartmet-frontend",
+        metavar="UNIT[,UNIT...]",
+        help="systemd unit(s) to follow as a [journal] source. "
+             "Comma-separated for multiple units; lines from all of "
+             "them are merged into one timestamp-ordered stream. "
+             "Default: smartmet-backend,smartmet-frontend (covers a "
+             "host running either or both daemons). Pass an empty "
+             "string to disable.",
     )
     p.add_argument(
         "--asset-root", default=None, metavar="PATH",
         help="Override the static-asset directory. Default: search "
              "$SMARTMET_WEBMON_ASSETS, then sibling share/smartmet/"
              "webmon/, then /usr/share/smartmet/webmon/.",
-    )
-    p.add_argument(
-        "--clusters-config", default=DEFAULT_CLUSTERS_CONFIG,
-        metavar="PATH",
-        help=f"INI-style clusters config (default: "
-             f"{DEFAULT_CLUSTERS_CONFIG}). When the file is missing or "
-             f"empty, smwebmon falls back to auto-detection (probe "
-             f"localhost for a SmartMet frontend, derive a cluster "
-             f"definition from its clusterinfo + the local FQDN's "
-             f"domain). Explicit clusters in the file override "
-             f"auto-detection.",
-    )
-    p.add_argument(
-        "--no-cluster-autodetect", action="store_true",
-        help="Skip the auto-detection that probes localhost for a "
-             "frontend. Useful on hosts that don't fit the FMI "
-             "<prefix>.<cluster>.<rest> FQDN convention, or where "
-             "the operator wants single-host mode regardless.",
     )
     return p.parse_args(argv)
 
@@ -190,40 +172,6 @@ async def _run(args: argparse.Namespace) -> int:
         return 2
 
     set_history_minutes(args.history_minutes)
-
-    # Load clusters config first; it's authoritative when present.
-    # Single-host mode runs alongside (when args.admin_url / auto-probe
-    # have something to work with) so an operator can install
-    # smartmet-webmon on a single backend, point at one or more
-    # remote clusters, AND see the local backend's data — all
-    # selectable from the dashboard.
-    cluster_configs = load_clusters_config(args.clusters_config)
-    if cluster_configs:
-        sys.stderr.write(
-            f"smwebmon: loaded {len(cluster_configs)} cluster(s) from "
-            f"{args.clusters_config}: "
-            f"{', '.join(c.name for c in cluster_configs)}\n"
-        )
-    elif not args.no_cluster_autodetect:
-        # No explicit config — try auto-detect. On a host that runs a
-        # SmartMet frontend (and matches the <prefix>.<cluster>.<rest>
-        # FQDN convention), this gives the operator a working cluster
-        # view with zero configuration. Sites that don't fit the
-        # convention can write clusters.conf, or pass
-        # --no-cluster-autodetect to silence the probe.
-        auto = autodetect_cluster()
-        if auto is not None:
-            sys.stderr.write(
-                f"smwebmon: auto-detected cluster '{auto.name}' "
-                f"(frontend={auto.frontend_url}, pattern="
-                f"{auto.admin_url_pattern})\n"
-            )
-            cluster_configs = [auto]
-
-    registry = ClusterRegistry()
-    for cfg in cluster_configs:
-        registry.add(cfg)
-
     store = Store()
     log_paths = _expand_logs(args)
     admin_urls = _parse_admin_urls(args.admin_url)
@@ -237,8 +185,7 @@ async def _run(args: argparse.Namespace) -> int:
             )
 
     bind = _split_bind(args.bind)
-    server = WebServer(store, bind=bind, asset_root=asset_root,
-                        registry=registry)
+    server = WebServer(store, bind=bind, asset_root=asset_root)
     server.start()
     sys.stderr.write(
         f"smwebmon: listening on http://{bind[0]}:{server.port}/  "
@@ -271,17 +218,6 @@ async def _run(args: argparse.Namespace) -> int:
         f"smwebmon: scheduled {len(tasks)} source task(s) "
         f"(perf={'on' if args.perf else 'off'})\n"
     )
-
-    # Spin up each cluster's discovery loop. Per-backend admin polling
-    # tasks are spawned by the loop on first successful fetch and as
-    # backends come/go.
-    for ctx in registry.all():
-        start_cluster(ctx, args.history_minutes)
-    if registry:
-        sys.stderr.write(
-            f"smwebmon: started discovery for {len(registry.names())} "
-            f"cluster(s)\n"
-        )
 
     if args.replay:
         sys.stderr.write(
@@ -317,8 +253,6 @@ async def _run(args: argparse.Namespace) -> int:
     try:
         await stop.wait()
     finally:
-        for ctx in registry.all():
-            stop_cluster(ctx)
         for t in tasks:
             t.cancel()
         # Let cancellations propagate.
