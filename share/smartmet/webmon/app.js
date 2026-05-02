@@ -565,9 +565,11 @@
           // Draw after a microtask so the canvas has a measured layout.
           requestAnimationFrame(() => {
             smChart.drawSparkline(lat, m.mean_ms || [],
-                                  { color: smChart.PALETTE.line });
+                                  { color: smChart.PALETTE.line,
+                                    fmtY: fmtMs });
             smChart.drawSparkline(sz, m.bytes_mean || [],
-                                  { color: smChart.PALETTE.accent2 });
+                                  { color: smChart.PALETTE.accent2,
+                                    fmtY: fmtBytes });
           });
         },
       });
@@ -840,7 +842,8 @@
           afterRow(tr, r) {
             const c = tr.querySelector('canvas[data-role="trend"]');
             const series = tBy.get(`${r.host}::${r.cache_name}`) || [];
-            requestAnimationFrame(() => smChart.drawSparkline(c, series));
+            requestAnimationFrame(() => smChart.drawSparkline(c, series,
+              { fmtY: v => v.toFixed(1) }));
           },
         });
       },
@@ -990,7 +993,8 @@
           afterRow(tr, r) {
             const c = tr.querySelector('canvas[data-role="trend"]');
             const series = tBy.get(`${r.host}::${r.handler}`) || [];
-            requestAnimationFrame(() => smChart.drawSparkline(c, series));
+            requestAnimationFrame(() => smChart.drawSparkline(c, series,
+              { fmtY: v => v.toFixed(0) }));
           },
         });
       },
@@ -1495,7 +1499,8 @@
         for (const s of d.states) {
           const c = body.querySelector(
             `canvas[data-state="${cssEsc(s.state)}"]`);
-          if (c) smChart.drawSparkline(c, s.trend || []);
+          if (c) smChart.drawSparkline(c, s.trend || [],
+                                        { fmtY: v => Math.round(v) });
         }
         for (const f of d.ifaces) {
           const rx = body.querySelector(

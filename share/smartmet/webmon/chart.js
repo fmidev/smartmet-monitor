@@ -372,14 +372,15 @@
     }
     tooltip.innerHTML = html;
     tooltip.classList.remove("hidden");
+    _positionTooltip(tooltip, e, rect);
+  }
 
-    // Position. The X tracks the cursor (with edge-flip when there's
-    // no room on the right). The Y is **pinned to the canvas's top
-    // edge** — never anchored to e.clientY or to the data point —
-    // so the tooltip does not bounce up and down as the cursor
-    // crosses peaks and valleys in the line. (Operators specifically
-    // dislike the bouncing-box behavior; following the cursor in X
-    // is fine.)
+  // Shared tooltip placement. X tracks the cursor (with edge-flip when
+  // there is no room on the right); Y is **pinned to the canvas's top
+  // edge** — never anchored to e.clientY or to the data point — so
+  // the tooltip does not bounce as the cursor crosses peaks and
+  // valleys. Operators specifically dislike the bouncing behavior.
+  function _positionTooltip(tooltip, e, rect) {
     const tipW = tooltip.offsetWidth || 120;
     const margin = 14;
     let left = e.clientX + margin;
@@ -401,6 +402,41 @@
       if (s.multi) drawLineMulti(canvas, s.series, s.opts);
       else drawLine(canvas, s.values, s.opts);
     }
+    _chartTooltipEl().classList.add("hidden");
+  }
+
+  // Hover handler for chromeless sparklines. Same pinned-Y tooltip
+  // rule as drawLine, but no vertical guide line and no dot redraw —
+  // sparklines live in tight per-row table cells where a redraw of
+  // the chart on every mousemove would visually thrash neighbouring
+  // cells. The tooltip is the only feedback.
+  function _sparkHover(e) {
+    const canvas = this;
+    const s = canvas._sparkState;
+    if (!s) return;
+    const rect = canvas.getBoundingClientRect();
+    const cssX = e.clientX - rect.left;
+    const idx = s.stepX > 0
+        ? Math.max(0, Math.min(s.values.length - 1,
+                                Math.round(cssX / s.stepX)))
+        : 0;
+    const v = s.values[idx];
+    if (!Number.isFinite(v)) return;
+    const fmtY = s.opts.fmtY || formatMs;
+    const valueStr = fmtY(v);
+    const timeStr = s.ts ? formatTimeFull(s.ts[idx]) : "";
+    const tooltip = _chartTooltipEl();
+    let html = "";
+    if (timeStr) {
+      html += `<div class="ct-time">${_esc(timeStr)}</div>`;
+    }
+    html += `<div class="ct-row"><span class="ct-value">${_esc(valueStr)}</span></div>`;
+    tooltip.innerHTML = html;
+    tooltip.classList.remove("hidden");
+    _positionTooltip(tooltip, e, rect);
+  }
+
+  function _sparkLeave() {
     _chartTooltipEl().classList.add("hidden");
   }
 
@@ -614,30 +650,63 @@
 
   // Sparkline — chromeless line, fills its container. Auto-scales
   // per call so each row can show its own shape regardless of others.
+  // Wires a pinned-Y hover tooltip (no chart redraw, no guide line —
+  // sparklines are too small for that chrome) so per-row charts in
+  // Plugins / Services / Caches and Network "Connection states"
+  // mini-charts surface exact values on hover, like the bigger
+  // drawLine charts.
   function drawSparkline(canvas, values, opts = {}) {
     const { ctx, w, h } = setupHiDPI(canvas);
     ctx.fillStyle = "transparent";
     ctx.clearRect(0, 0, w, h);
 
-    if (!values || !values.length) return;
+    if (!values || !values.length) {
+      canvas._sparkState = null;
+      return;
+    }
     const valid = values.filter(v => Number.isFinite(v));
     const vmax = valid.length ? Math.max(...valid) : 0;
-    if (vmax <= 0) return;
-
     const stepX = values.length > 1 ? w / (values.length - 1) : 0;
-    ctx.strokeStyle = opts.color || PALETTE.line;
-    ctx.lineWidth = 1.25;
-    ctx.beginPath();
-    let started = false;
-    for (let i = 0; i < values.length; i++) {
-      const v = values[i];
-      if (!Number.isFinite(v)) { started = false; continue; }
-      const x = i * stepX;
-      const y = h - (v / vmax) * (h - 2) - 1;
-      if (!started) { ctx.moveTo(x, y); started = true; }
-      else { ctx.lineTo(x, y); }
+    if (vmax > 0) {
+      ctx.strokeStyle = opts.color || PALETTE.line;
+      ctx.lineWidth = 1.25;
+      ctx.beginPath();
+      let started = false;
+      for (let i = 0; i < values.length; i++) {
+        const v = values[i];
+        if (!Number.isFinite(v)) { started = false; continue; }
+        const x = i * stepX;
+        const y = h - (v / vmax) * (h - 2) - 1;
+        if (!started) { ctx.moveTo(x, y); started = true; }
+        else { ctx.lineTo(x, y); }
+      }
+      ctx.stroke();
     }
-    ctx.stroke();
+    // Even when vmax == 0 (all-zero series), wire hover so the
+    // operator can confirm the values are in fact zero rather than
+    // missing data — without this the cell would have no hover
+    // affordance at all and look "broken".
+    _stashSparkState(canvas, values, opts, stepX);
+  }
+
+  function _stashSparkState(canvas, values, opts, stepX) {
+    // Per-point timestamps if the caller supplied last_ts +
+    // step_seconds (or an opts.ts array). Without them the tooltip
+    // falls back to value-only.
+    let ts = null;
+    if (opts.ts && opts.ts.length === values.length) {
+      ts = opts.ts;
+    } else if (opts.last_ts != null && opts.step_seconds) {
+      const lt = +opts.last_ts;
+      const st = +opts.step_seconds;
+      ts = values.map((_, i) => lt - (values.length - 1 - i) * st);
+    }
+    canvas._sparkState = { values, ts, opts, stepX };
+    if (!canvas._sparkWired) {
+      canvas.addEventListener("mousemove", _sparkHover);
+      canvas.addEventListener("mouseleave", _sparkLeave);
+      canvas._sparkWired = true;
+    }
   }
 
   // Histogram for exponential-bucket data: [{lo_ms, hi_ms, count}].

@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.5.2
-Release:        8%{?dist}.fmi
+Release:        9%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -151,6 +151,24 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-9.fmi
+- Hover tooltip now works on every chart in the dashboard, not
+  only the chrome-equipped drawLine/drawLineMulti charts.
+  ``drawSparkline`` was previously chromeless on purpose (no axis
+  ticks, no padding — it lives in tight per-row table cells), and
+  in service of that purity it had no hover handler. Operators
+  reported tooltips missing on Plugins / Services / Caches per-row
+  trend sparklines and on the Network Connection-states per-state
+  mini-charts. Now those sparklines wire the same pinned-Y tooltip
+  the line charts use, with no chart redraw and no vertical guide
+  (the cell is too small for that chrome) — just a value-and-time
+  readout on hover. The tooltip's Y stays anchored to the canvas
+  top edge, same anti-bounce rule as before.
+- Per-row call sites pass the right ``fmtY`` so the tooltip renders
+  values in their natural unit (latency in ms via formatMs, bytes
+  via formatBytes, request rates as integers, hits/min with one
+  decimal, connection counts as integers).
+
 * Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-8.fmi
 - Co-bumped with smartmet-monitor for the smtop hotkey case
   convention (uppercase = panel switch, lowercase = within-panel)
