@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.5.2
-Release:        6%{?dist}.fmi
+Release:        7%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -120,6 +120,17 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-7.fmi
+- Proc panel: ``n`` and ``N`` no longer intercept "next/prev PID".
+  Each smartmetd row already carries a red ``[1]`` / ``[2]`` /
+  ... mnemonic that picks that PID directly — the n/N intercept
+  was redundant and, worse, shadowed the global Network-panel
+  hotkey ``n`` so pressing ``n`` while on Proc selected the next
+  PID instead of jumping to Network. The 1-9 digit shortcut covers
+  every realistic deployment (no SmartMet host runs more than nine
+  smartmetd processes). Help text and the bottom-of-panel legend
+  updated to match.
+
 * Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-6.fmi
 - Default --journal-unit changed from "smartmet-server" to
   "smartmet-backend,smartmet-frontend". The previous default was

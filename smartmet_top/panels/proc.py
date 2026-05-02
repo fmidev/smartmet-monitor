@@ -259,7 +259,7 @@ class ProcPanel(Panel):
     help_text = (
         "Per-process memory + I/O + host-wide reclaim, network and "
         "scheduler metrics (with --perf, also live perf-top + "
-        "flamegraph). n/N next/prev PID, r smaps_rollup, "
+        "flamegraph). 1-9 select PID by index, r smaps_rollup, "
         "f flamegraph toggle, +/- adjust sparkline height."
     )
     panel_help = """\
@@ -361,13 +361,14 @@ Keys:
             selected = store.proc_default_pid() or pids[0]
             store.proc_select(selected)
 
-        if key == ord("n"):
-            i = pids.index(selected)
-            store.proc_select(pids[(i + 1) % len(pids)])
-        elif key in (ord("N"), ord("P")):
-            i = pids.index(selected)
-            store.proc_select(pids[(i - 1) % len(pids)])
-        elif ord("1") <= key <= ord("9"):
+        # Note: ``n`` / ``N`` deliberately not consumed here — the
+        # process row's ``[1]`` / ``[2]`` red-mnemonic labels (drawn
+        # alongside each smartmetd) already give a per-process pick,
+        # and intercepting ``n`` here would block the global panel
+        # hotkey ``n`` from switching to the Network panel. The 1-9
+        # digits cover up to nine smartmetd processes, which is more
+        # than any deployment runs in practice.
+        if ord("1") <= key <= ord("9"):
             idx = key - ord("1")
             if idx < len(pids):
                 store.proc_select(pids[idx])
@@ -1023,11 +1024,10 @@ Keys:
         base = theme.attr(theme.P_TITLE)
         x = 0
         safe_addstr(win, h - 1, 0, " ", base); x += 1
-        if n_procs > 1:
-            x = write_label(win, h - 1, x, "n", 0, base, hot)
-            x = write_label(win, h - 1, x, "ext / ", 0, base, base)
-            x = write_label(win, h - 1, x, "N", 0, base, hot)
-            x = write_label(win, h - 1, x, " prev   ", 0, base, base)
+        # PID picker uses the per-row [1]/[2]/... red mnemonics (drawn
+        # against each process); no separate next/prev legend needed
+        # here, and reusing ``n`` for next-PID would shadow the global
+        # Network-panel hotkey.
         x = write_label(win, h - 1, x, "r", 0, base, hot)
         x = write_label(win, h - 1, x, "ollup   ", 0, base, base)
         if perf_enabled:
