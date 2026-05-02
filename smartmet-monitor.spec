@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.5.2
-Release:        2%{?dist}.fmi
+Release:        8%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -120,32 +120,96 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
-* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-2.fmi
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-8.fmi
 - Smtop hotkey case convention enforced: **uppercase letters switch
   panels, lowercase letters are within-panel navigation.** Previously
   the panel-hotkey dispatcher in app.py was case-insensitive, so a
-  panel that bound lowercase ``n`` (e.g. Proc panel's "next PID")
-  shadowed the global ``N`` (→ Network panel) and the operator could
-  not jump to Network from Proc. Fix: the dispatcher now matches
-  only ASCII A-Z (uppercase). Each panel is free to use lowercase
-  letters for per-panel commands without worrying about collisions.
+  panel binding lowercase ``n`` (Proc's "next PID") shadowed the
+  global ``N`` (→ Network panel). Fix: dispatcher now matches only
+  ASCII A-Z. Each panel is free to use lowercase letters for
+  per-panel commands without collisions.
 - Proc panel restored: lowercase ``n`` cycles the selected smartmetd
   PID (the canonical "next" within-panel binding); uppercase ``N``
-  now reliably switches to the Network panel; 1-9 still jump to a
-  PID by its red ``[N]`` mnemonic. Help text, bottom-of-panel
-  legend, and the file-level docstring updated to reflect the
-  convention so the next reader does not re-discover it.
+  reliably switches to the Network panel; 1-9 still jump to a PID
+  by its red ``[N]`` mnemonic. Supersedes the partial fix in -7
+  which had removed the ``n``-cycle binding entirely. Help text,
+  bottom-of-panel legend, and the file-level docstring updated.
 
-* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-1.fmi
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-7.fmi
+- Proc panel: ``n`` and ``N`` no longer intercept "next/prev PID".
+  Each smartmetd row already carries a red ``[1]`` / ``[2]`` /
+  ... mnemonic that picks that PID directly — the n/N intercept
+  was redundant and, worse, shadowed the global Network-panel
+  hotkey ``n`` so pressing ``n`` while on Proc selected the next
+  PID instead of jumping to Network. The 1-9 digit shortcut covers
+  every realistic deployment (no SmartMet host runs more than nine
+  smartmetd processes). Help text and the bottom-of-panel legend
+  updated to match.
+
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-6.fmi
 - Default --journal-unit changed from "smartmet-server" to
   "smartmet-backend,smartmet-frontend". The previous default was
   factually wrong: SmartMet's systemd units are named smartmet-backend
   (data daemon) and smartmet-frontend (Sputnik routing daemon), and
-  both can coexist on the same physical host. journal_loop now
+  both may coexist on the same physical host. journal_loop now
   accepts a comma-separated list and spawns a single journalctl with
-  multiple -u flags so all the listed units' lines stream in one
-  timestamp-merged feed. The "smartmet-server" string was a stale
-  reference to a unit name that never matched FMI's deployment.
+  multiple -u flags so all listed units' lines stream in one
+  timestamp-merged feed.
+
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-5.fmi
+- Bump smartmet_top.__version__ to 26.5.2 (was lagging at 26.4.30
+  through the Phase 2/3 spec bumps). Also fixes make-rpms which
+  reads VERSION from __init__.py to name the source tarball.
+
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-4.fmi
+- Co-bumped with smartmet-webmon for the 10 s cluster lastrequests
+  cache (cuts backend admin-plugin load by ~5×). See smartmet-webmon
+  changelog.
+
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-3.fmi
+- _build_cluster_chart now omits errored backends from the chart
+  series (the legend still surfaces them with a warning marker).
+  Backing the cluster multi-line chart UX fix in smartmet-webmon.
+
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-2.fmi
+- Co-bumped with smartmet-webmon for the cluster-view Phase 3
+  topology strip and README cluster-mode documentation. See
+  smartmet-webmon changelog.
+
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-1.fmi
+- Co-bumped with smartmet-webmon for the cluster-view Phase 2 wrap-up
+  (Plugins / Keys / Overview multi-line per-backend charts). See
+  smartmet-webmon changelog.
+
+* Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-17.fmi
+- New CachesSnapshot.cluster_chart_per_host /
+  ServicesSnapshot.cluster_chart_per_host snapshot methods backing
+  the cluster-mode multi-line trend charts in smwebmon (Phase 2b).
+- Co-bumped with smartmet-webmon. See smartmet-webmon changelog.
+
+* Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-16.fmi
+- Co-bumped with smartmet-webmon for the chart hover tooltip fix
+  (no more vertical bouncing; multi-row layout). See smartmet-webmon
+  changelog.
+
+* Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-15.fmi
+- Co-bumped with smartmet-webmon for the cluster-mode multi-line
+  URLs drill-down chart (Phase 2c). See smartmet-webmon changelog.
+
+* Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-14.fmi
+- Co-bumped with smartmet-webmon for the cluster-mode multi-line
+  Active panel (Phase 2a). See smartmet-webmon changelog.
+
+* Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-13.fmi
+- Co-bumped with smartmet-webmon for the cluster auto-detect fix
+  (FQDN-based naming was wrong for the FMI deployment because the
+  back and internal clusters share the back.smartmet.fmi.fi
+  domain). See smartmet-webmon changelog.
+
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-12.fmi
+- Co-bumped with smartmet-webmon for the cluster-view groundwork.
+  See smartmet-webmon changelog for the multi-cluster discovery,
+  registry, selector UI, and auto-detection from the local FQDN.
 
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-11.fmi
 - Co-bumped with smartmet-webmon for the chart Y-axis nice-tick

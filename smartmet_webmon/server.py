@@ -32,8 +32,13 @@ _STATIC_MIME = {
 }
 
 
-def _make_handler_class(store, asset_root: str):
-    """Build a request-handler class closed over (store, asset_root).
+def _make_handler_class(store, asset_root: str, registry=None):
+    """Build a request-handler class closed over the dispatch context.
+
+    ``store`` is the single-host store (used when no ``?cluster=``
+    arrives, or when no clusters are configured at all). ``registry``
+    is the ``ClusterRegistry`` of configured clusters; ``?cluster=NAME``
+    in any /api/* request switches the resolved store to that cluster's.
 
     BaseHTTPRequestHandler doesn't accept extra constructor args, so
     we generate a subclass per server instance.
@@ -96,13 +101,49 @@ def _make_handler_class(store, asset_root: str):
                 return
             if path.startswith("/api"):
                 api_path = path[len("/api"):] or "/"
+                # Cluster-scope endpoints take the registry directly
+                # (not a store) — they enumerate / introspect across
+                # all configured clusters.
+                cluster_handler = handlers.CLUSTER_ROUTES.get(api_path)
+                if cluster_handler is not None:
+                    try:
+                        status, payload = cluster_handler(registry, qs)
+                    except Exception as e:
+                        self._write_json(500, {"error": str(e),
+                                               "type": type(e).__name__})
+                        return
+                    self._write_json(status, payload)
+                    return
                 handler = handlers.ROUTES.get(api_path)
                 if handler is None:
                     self._write_json(404, {"error": "no such endpoint",
                                            "path": api_path})
                     return
+                # Resolve which store this request targets:
+                #   ?cluster=NAME → that cluster's store (404 if name
+                #     isn't a configured cluster)
+                #   no ?cluster=  → single-host store (the one passed
+                #     to the WebServer constructor)
+                target_store = store
+                cluster_name = qs.get("cluster", "")
+                if cluster_name:
+                    if registry is None:
+                        self._write_json(400, {
+                            "error": "cluster mode not configured",
+                            "cluster": cluster_name,
+                        })
+                        return
+                    ctx = registry.get(cluster_name)
+                    if ctx is None:
+                        self._write_json(404, {
+                            "error": "no such cluster",
+                            "cluster": cluster_name,
+                            "configured": registry.names(),
+                        })
+                        return
+                    target_store = ctx.store
                 try:
-                    status, payload = handler(store, qs)
+                    status, payload = handler(target_store, qs)
                 except Exception as e:
                     self._write_json(500, {"error": str(e),
                                            "type": type(e).__name__})
@@ -124,10 +165,11 @@ class WebServer:
     """
 
     def __init__(self, store, *, bind: Tuple[str, int],
-                 asset_root: str) -> None:
+                 asset_root: str, registry=None) -> None:
         self.store = store
         self.bind = bind
         self.asset_root = asset_root
+        self.registry = registry
         self._httpd: Optional[http.server.ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
 
@@ -140,7 +182,8 @@ class WebServer:
     def start(self) -> None:
         if self._httpd is not None:
             return
-        handler_cls = _make_handler_class(self.store, self.asset_root)
+        handler_cls = _make_handler_class(
+            self.store, self.asset_root, registry=self.registry)
         # Allow rapid restart during development without TIME_WAIT
         # blocking the bind.
         http.server.ThreadingHTTPServer.allow_reuse_address = True

@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.5.2
-Release:        2%{?dist}.fmi
+Release:        8%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -143,19 +143,27 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_datadir}/smartmet/webmon/
 %{_unitdir}/smartmet-webmon.service
 %config(noreplace) %{_sysconfdir}/sysconfig/smartmet-webmon
+%dir %{_sysconfdir}/smartmet-webmon
+%config(noreplace) %{_sysconfdir}/smartmet-webmon/clusters.conf
 %{_prefix}/lib/sysctl.d/99-smartmet-perf.conf
 %{_prefix}/lib/modules-load.d/smartmet-perf.conf
 %{_python3_sitelib}/smartmet_webmon/
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
-* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-2.fmi
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-8.fmi
+- Co-bumped with smartmet-monitor for the smtop hotkey case
+  convention (uppercase = panel switch, lowercase = within-panel)
+  + Proc panel ``n``-cycle restoration. See smartmet-monitor
+  changelog.
+
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-7.fmi
 - Co-bumped with smartmet-monitor for the smtop Proc panel n/N
   fix (n now correctly switches to the Network panel; PID picker
   uses the per-row [1]/[2]/... red mnemonics instead). See
   smartmet-monitor changelog.
 
-* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-1.fmi
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-6.fmi
 - Default --journal-unit changed from "smartmet-server" to
   "smartmet-backend,smartmet-frontend". The previous default was
   factually wrong: SmartMet's systemd units are named smartmet-backend
@@ -168,6 +176,275 @@ modprobe kheaders >/dev/null 2>&1 || :
   intervention. Pass an empty string to disable; pass any single
   unit name to opt back into the old single-unit behavior.
 - Co-bumped with smartmet-monitor.
+
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-5.fmi
+- Bump smartmet_top.__version__ and smartmet_webmon.__version__ to
+  26.5.2 (the spec versions had been bumped over the cluster-view
+  Phase 2/3 work, but the Python package metadata still reported
+  26.4.30 at runtime). The Makefile's source-tarball name is
+  derived from __version__, so this also fixes the make-rpms
+  failure where rpmbuild looked for smartmet-monitor-26.5.2.tar.gz
+  while git archive was producing smartmet-monitor-26.4.30.tar.gz.
+
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-4.fmi
+- Cluster on-demand lastrequests fetches now share a 10 s server-side
+  cache keyed on (cluster, minutes). Without it, the URL drill-down
+  modal's 2 s panel refresh fired N parallel admin-plugin fetches at
+  minutes=60 every refresh — for a 6-backend cluster that was 180
+  large lastrequests calls per minute per cluster. With the cache,
+  the first chart refresh after a TTL window does the parallel fetch
+  and everything within the window (the modal's 2 s tick, multiple
+  chart endpoints serving the same panel — URLs / Plugins / Keys /
+  Overview all default to minutes=60 so they share one fetch) reuses
+  the result. Backend admin-plugin load drops by ~5×; the chart
+  still feels live with ~10 s update granularity. The TTL is short
+  enough that a backend coming back online appears in the chart
+  within one cycle without operator intervention.
+
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-3.fmi
+- Cluster multi-line charts no longer draw a misleading flat-zero
+  line for backends whose lastrequests fetch failed. The errored
+  backends are now omitted from the chart series; they appear in
+  the legend with a ⚠ marker, color-hashed to their normal color
+  but drawn at 40 % opacity, with the failure reason as a tooltip.
+  Previously a "fetch failed" backend was indistinguishable from
+  a "no traffic for this URL/plugin/key" backend on the chart —
+  both rendered as a flat line at zero. Now the legend tells the
+  operator the truth.
+- Refactored the four panel legend builders (URLs / Plugins /
+  Keys / Active) to share a single _buildClusterLegend helper.
+  Cuts ~80 lines of duplicated DOM-building. The errored-prefix
+  pass at the end ensures the legend lists every prefix the
+  cluster polled, not only the ones the chart shows.
+
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-2.fmi
+- Cluster-view Phase 3: backend-pill topology strip below the top
+  bar (cluster mode only). One pill per backend prefix; the dot
+  inside each pill is the same color the chart legends use, so
+  identifying which backend a line belongs to is a single glance.
+  Hover surfaces the backend's handler list (truncated at 40
+  entries with a "…and N more" marker for grid-content-heavy
+  prefixes like q3 satellites). A backend that is registered
+  but has no handlers in clusterinfo (offline / draining /
+  paused) renders muted with a strikethrough.
+- Topology refreshes every 30 s (same cadence as the cluster
+  selector dropdown) but is debounced on a content hash, so the
+  operator's mid-hover position is not lost on idle refreshes.
+- README documents cluster mode end-to-end: topology strip
+  reading guide (healthy shape / trouble pattern / typical root
+  cause / where to look next), per-panel data-path table
+  (which panels reuse the 2 s polling vs which fire on-demand
+  parallel lastrequests fetches at chart-refresh time), and
+  the multi-line chart reading guide.
+
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-1.fmi
+- Cluster-view Phase 2c (Plugins / Keys) and Phase 2d (Overview): the
+  remaining cluster-mode multi-line trend charts. With this commit
+  every panel that produces a time-series chart in single-host mode
+  now has a per-backend overlay equivalent in cluster mode.
+- Plugins panel: a "per-backend plugin trend" card on top of the
+  table. Pick a plugin (the leading URL path segment, derived from
+  the most recent admin lastrequests fetch) and metric, see one line
+  per backend. Same color hashing and clickable-legend pattern as
+  the URLs/Active/Caches/Services panels.
+- Keys panel: same shape, picker is the apikey (excluding the dash
+  placeholder). Hover tooltip lists every backend's value at the
+  cursor, sorted descending, just like the other multi-line charts.
+- Overview panel: each of the five mini-charts (req/min, mean ms,
+  p95 ms, bytes/min, err %) becomes a multi-line per-backend overlay
+  in cluster mode, with one parallel HTTP fetch producing all five
+  metrics — N backend admin calls per panel refresh, not 5N. The
+  ``metrics=`` query of /api/cluster/overview/chart accepts a
+  comma-separated list and returns ``charts: {metric: ...}``.
+  bytes/err_pct fall back to the existing single-line endpoint
+  because lastrequests rows do not retain bytes/status — a future
+  refactor of _aggregate_minute could lift this if operators ask
+  for per-backend bytes specifically.
+- handlers.py refactor: extracted _resolve_cluster,
+  _fetch_cluster_lastreqs and _build_cluster_chart so the four
+  on-demand cluster chart endpoints (URLs, Plugins, Keys, Overview)
+  share one parallel-fetch + bucket-and-aggregate pipeline. Each
+  endpoint is now a thin wrapper specifying its own row_matches
+  filter.
+- Day rolled past midnight → Version bump from 26.4.30-N to
+  26.5.2-1 per the YY.M.D scheme.
+
+* Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-17.fmi
+- Cluster-view Phase 2b: Caches and Services panels add a per-backend
+  trend chart in cluster mode. Pick a cache (or service handler) from
+  the dropdown and the multi-line chart shows that entity's metric
+  over time, one line per backend, same color hashing as the URLs
+  and Active panels. Metric pickers cover hits/min, inserts/min,
+  hit %, size for caches; req/min, req/hour, req/day, avg ms,
+  avg cpu ms for services. Clickable legend toggles per-backend
+  visibility.
+- Data path is zero extra HTTP: cachestats and servicestats are
+  already polled per-host on the 2 s admin cadence (one task per
+  backend, asyncio.gather in adminapi.poll_all), and the per-host
+  results land in store.cache_history and store.service_history.
+  The new cluster_chart_per_host snapshot methods just rearrange
+  the existing per-host series into the {label, values} shape that
+  drawLineMulti consumes. Cluster size scales linearly in storage
+  cost only (no extra requests per panel refresh).
+- New endpoints /api/caches/cluster_chart and
+  /api/services/cluster_chart. Both return the per-host series
+  plus the union of available entity names so the UI's dropdown
+  stays current as new backends come online (the cluster's
+  discovery loop catches added prefixes within ~60 s).
+- Single-host mode unchanged: the trend card stays hidden and the
+  per-row sparkline-trend column continues to be the operator's
+  view. Cluster mode shows the chart card above the table; the
+  per-row trends remain so the table is still useful for
+  cross-backend at-a-glance scanning.
+
+* Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-16.fmi
+- Chart hover tooltip no longer bounces vertically. The tooltip box
+  is now pinned to the canvas's top edge in viewport coordinates and
+  only its X tracks the cursor (with edge-flip when there is no room
+  on the right). Earlier the box followed e.clientY, so as the
+  operator's cursor naturally tracked peaks and valleys in a busy
+  latency chart the tooltip jittered up and down — distracting and
+  hard to read. The vertical guide line and per-series dots still
+  appear AT the cursor's data points; only the value-readout box
+  is anchored.
+- The tooltip is now multi-row for drawLineMulti charts: one row
+  per backend with a color swatch, label, and value, sorted
+  descending so the busiest backend is at the top. (Previously
+  even cluster-mode charts showed only a single value.)
+
+* Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-15.fmi
+- Cluster-view Phase 2c: URLs panel drill-down chart shows one line
+  per backend in cluster mode. Click a row in the URLs table; the
+  modal's "Per-backend latency, last 60 min" chart renders an
+  overlay with one line per alive backend (same color hashing as
+  the Active panel, so c2 matches across panels). A metric picker
+  in the chart header switches between p95 / p50 / mean / max /
+  count. Clicking a legend entry hides that backend's line.
+- Data path is on-demand parallel: when the chart refreshes, the
+  cluster-scope handler fires one HTTP request per backend (a
+  cluster has ≤10 backends in practice) to /admin?what=lastrequests
+  &minutes=60. ThreadPoolExecutor with one worker per backend means
+  wall time ≈ slowest backend, not sum. The rows are bucketed by
+  minute on the operator-clicked URL and the chosen metric is
+  computed per minute. No changes to the existing 2 s admin
+  polling — the per-cluster store still gets fed by it for the
+  URL table; the chart just reaches around the store to get
+  per-host attribution that the store does not retain.
+- New endpoint /api/cluster/urls/chart (cluster-scope) that
+  returns {series: [{label: prefix, values: [...]}], errors:
+  {prefix: msg}}. Errors per backend are surfaced inline in the
+  legend (a ⚠ next to the backend name with the error reason as
+  a tooltip) so a single misbehaving backend doesn't fail the
+  whole chart. Single-host mode keeps using /api/urls/chart as
+  before; the modal picks endpoint based on cluster mode.
+
+* Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-14.fmi
+- Cluster-view Phase 2a: Active panel reshaped for cluster mode.
+  When a cluster is selected, the in-flight count chart shows one
+  line per backend instead of the aggregated cluster-total. Each
+  line gets a stable color (Tableau-categorical 10-slot palette
+  hashed by backend prefix, so c2 is the same color across every
+  panel and every refresh). Clickable legend below the chart
+  toggles per-backend visibility. Single-host mode (no cluster
+  selected) keeps the existing aggregated single-line shape
+  unchanged.
+- New chart helper drawLineMulti in chart.js — accepts
+  [{label, color, values}, ...] and renders all overlaid with
+  shared Y-axis nice-ticks (Heckbert), shared X-axis time labels,
+  and a hover crosshair that draws a dot per series at the
+  cursor's index plus a vertical guide line. Existing drawLine
+  unchanged; the multi variant is a peer.
+- New ActiveSnapshot.chart_per_host returning per-backend
+  in-flight count series. Existing chart() (aggregated total)
+  unchanged; the per-host variant is what the cluster-mode UI
+  fetches via ?multi=1 on the existing /api/active/chart endpoint.
+  Backwards-compatible: old clients without ?multi=1 still get
+  the aggregated form.
+- Color assignment is deterministic (hash of label → palette slot)
+  so operators learn one mapping cluster-wide instead of having
+  to re-orient on every panel.
+
+  Phase 2 still has: URLs / Plugins / Caches / Services / Keys
+  to reshape (separate commits — Caches and Services already have
+  per-host data in Store and are next; URLs / Plugins / Keys need
+  per-host accumulation in Store first because their stats are
+  currently global tail-derived).
+
+* Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-13.fmi
+- Auto-detect cluster naming changed from FQDN-based to prefix-
+  family-based. The FQDN approach (split <prefix>.<cluster>.<rest>
+  and use <cluster> as the name) misidentified two of the three FMI
+  clusters: `in1.back.smartmet.fmi.fi` and `c3.back.smartmet.fmi.fi`
+  share the `back.smartmet.fmi.fi` domain, so the FQDN-derived
+  name collided. `open1.smartmet.fmi.fi` had no `back` segment at
+  all, so the FQDN-derived name landed on `smartmet`. The
+  cluster identity is actually in the *prefix family* the local
+  frontend routes to:
+    * c1..c6 → cluster name "c" (FMI calls it back)
+    * in1..in4 → cluster name "in" (FMI calls it internal)
+    * open1..open3 → cluster name "open" (FMI calls it opendata)
+  Auto-detect now derives the name by stripping trailing digits
+  from each backend prefix and picking the most common stem.
+  Specialised dotted prefixes (e.g. v1.q3, v2.q3 q3-engine
+  pseudo-backends on the back cluster) are skipped during naming —
+  they're satellites, not what defines the cluster identity. The
+  `admin-url-pattern` still uses the local FQDN's tail as the
+  cluster's DNS domain, so all backends in the cluster are
+  reached as <other-prefix>.<this-domain>:8081 — that part of the
+  heuristic was correct in -12 and stays.
+- Operators who want friendlier names (`back` instead of `c`,
+  `internal` instead of `in`, `opendata` instead of `open`)
+  override via `/etc/smartmet-webmon/clusters.conf`. The
+  auto-detect output is "honest about what's observable" rather
+  than embedding FMI-specific naming knowledge in the package.
+
+* Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-12.fmi
+- Cluster-view groundwork (Phase 1 of 3). The dashboard can now
+  monitor multiple SmartMet clusters from a single smwebmon
+  instance: cluster discovery via the frontend's clusterinfo HTML,
+  per-backend admin polling through cluster-specific URL patterns,
+  cluster selector dropdown in the top bar, ?cluster=NAME on every
+  /api/* endpoint to route to the right per-cluster Store.
+- Auto-detection: when no clusters.conf is present (or empty),
+  smwebmon probes localhost for a SmartMet daemon, parses its
+  clusterinfo to identify role (FRONTEND vs BACKEND), and on a
+  frontend host derives a cluster definition from the local FQDN
+  (`<prefix>.<cluster>.<domain>` → cluster name = `<cluster>`,
+  admin-url-pattern = `http://{prefix}.<cluster>.<domain>:8081/admin`).
+  On a backend host or any FQDN that doesn't match the convention,
+  auto-detect quietly returns and single-host mode (existing 26.4
+  behaviour) takes over. --no-cluster-autodetect opts out.
+- /etc/smartmet-webmon/clusters.conf — INI-style file with one
+  section per cluster (frontend-url, admin-url-pattern, optional
+  log-glob / admin-interval / discovery-interval). Shipped with all
+  cluster sections commented out, so a fresh install lands in
+  auto-detect mode. Operators with non-FMI naming conventions
+  uncomment + adjust. %config(noreplace), so site edits survive
+  upgrades.
+- Two new endpoints exposed for the dashboard:
+    /api/clusters             — list configured clusters with
+                                discovery status (alive/total
+                                backend counts).
+    /api/cluster/topology     — per-cluster backend list with
+                                handler service mix; powers the
+                                planned topology card.
+- The same smartmet-webmon RPM works on backend and frontend
+  hosts. Behaviour is configuration-driven: backend host =
+  single-host mode (existing perf samplers + admin polling
+  localhost); frontend host = cluster mode (admin polling N
+  backends through the frontend's local clusterinfo). Both modes
+  can co-exist when frontend is colocated with a backend's
+  smartmetd.
+- Existing single-host functionality unchanged. With no
+  clusters.conf and auto-detect off, smwebmon behaves exactly as
+  in -11.
+
+  Phase 2 (multi-line cluster panels — overlay one line per
+  backend per panel) and Phase 3 (cluster topology card +
+  aggregates) are queued; this release is the wiring layer.
+  Existing per-host panels keep rendering all backends as separate
+  rows when ?cluster= is in scope, which is functional but not
+  the eventual cluster-friendly shape.
 
 * Thu Apr 30 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-11.fmi
 - Chart Y-axis nice-tick algorithm switched from qdstat-style

@@ -9,6 +9,8 @@
 
   const state = {
     active: null,              // current panel id
+    activeCluster: null,       // current cluster name (null = single-host)
+    clusters: [],              // list of configured clusters (from /api/clusters)
     panels: {},                // per-panel local state
     poll: null,                // setInterval handle
   };
@@ -132,10 +134,60 @@
     return b;
   }
 
+  // Build legend items for cluster multi-line charts. Combines the
+  // chart's actual series (successful backends) with the cc.errors
+  // map (failed-fetch backends) — failed backends are omitted from
+  // the chart so a flat-zero line doesn't lie about traffic, but
+  // they appear in the legend with a ⚠ marker and tooltip so the
+  // operator sees the failure. ``hidden`` is the per-panel Set of
+  // user-toggled-off labels; ``onToggle(label)`` updates it and
+  // triggers a redraw.
+  function _buildClusterLegend(cc, series, hidden, onToggle) {
+    const items = [];
+    const labelsInChart = new Set(series.map(s => s.label));
+    for (const s of series) {
+      const errMsg = cc.errors && cc.errors[s.label];
+      const item = el("span",
+        { class: "lg-item"
+                 + (hidden.has(s.label) ? " disabled" : "")
+                 + (errMsg ? " error" : ""),
+          title: errMsg || "" },
+        el("span", { class: "lg-swatch",
+                      style: `background:${s.color}` }),
+        s.label + (errMsg ? " ⚠" : ""));
+      item.addEventListener("click", () => onToggle(s.label));
+      items.push(item);
+    }
+    // Errored backends — sorted, color-hashed for consistency, but
+    // not toggleable (clicking a not-in-chart legend entry would do
+    // nothing visible).
+    const erroredLabels = Object.keys(cc.errors || {})
+      .filter(l => !labelsInChart.has(l)).sort();
+    for (const label of erroredLabels) {
+      const errMsg = cc.errors[label];
+      const item = el("span",
+        { class: "lg-item error disabled", title: errMsg || "" },
+        el("span", { class: "lg-swatch",
+                      style: `background:${smChart.colorFor(label)};opacity:0.4` }),
+        label + " ⚠");
+      items.push(item);
+    }
+    return items;
+  }
+
   // ---- HTTP -------------------------------------------------------
 
   async function getJSON(path, params) {
-    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+    // Auto-attach the active cluster to every request so panels never
+    // have to know about clustering. Endpoints that don't care about
+    // ?cluster= ignore it; endpoints that do (every store-bound /api/*)
+    // resolve to the right cluster's store.
+    const merged = Object.assign({}, params || {});
+    if (state.activeCluster && !("cluster" in merged)) {
+      merged.cluster = state.activeCluster;
+    }
+    const qs = Object.keys(merged).length
+      ? "?" + new URLSearchParams(merged).toString() : "";
     const r = await fetch(path + qs, { cache: "no-store" });
     if (!r.ok) throw new Error(`HTTP ${r.status} for ${path}`);
     return r.json();
@@ -253,8 +305,30 @@
     }
     async function openUrlDetail(url) {
       ps.selected = url;
+      ps.detailHidden = ps.detailHidden || new Set();
       modal.open(url);
       const body = modal.body();
+      // Cluster mode: swap chart heading + add a metric picker and a
+      // legend container alongside the canvas. The store-derived
+      // single-line "/api/urls/chart" lives in the cluster's per-cluster
+      // store too (since lastrequests still feeds it), but only as an
+      // aggregate — the per-backend overlay needs the dedicated
+      // endpoint.
+      const isCluster = !!state.activeCluster;
+      const chartHeading = isCluster
+        ? `<div class="panel-controls">
+             <h3 style="margin:0;flex:1">Per-backend latency, last 60 min</h3>
+             <label>metric
+               <select id="d-metric">
+                 <option value="p95_ms">p95</option>
+                 <option value="p50_ms">p50</option>
+                 <option value="mean_ms">mean</option>
+                 <option value="max_ms">max</option>
+                 <option value="count">count</option>
+               </select>
+             </label>
+           </div>`
+        : `<h3>Mean latency, last 60 min</h3>`;
       body.innerHTML = `
         <h3>Windowed stats</h3>
         <table class="data-table"><thead><tr>
@@ -264,8 +338,9 @@
           <th class="num">avg sz</th><th class="num">total</th>
           <th class="num">err%</th>
         </tr></thead><tbody></tbody></table>
-        <h3>Mean latency, last 60 min</h3>
+        ${chartHeading}
         <canvas class="chart" data-role="line" height="160"></canvas>
+        <div class="chart-legend" id="d-legend"></div>
         <h3>Latency distribution</h3>
         <canvas class="chart" data-role="hist" height="200"></canvas>
         <h3>Status codes</h3>
@@ -277,10 +352,26 @@
           <th>apikey</th><th class="num">requests</th>
         </tr></thead><tbody></tbody></table>
       `;
+      ps.detailMetric = ps.detailMetric || "p95_ms";
+      const metricSel = body.querySelector("#d-metric");
+      if (metricSel) {
+        metricSel.value = ps.detailMetric;
+        metricSel.addEventListener("change", () => {
+          ps.detailMetric = metricSel.value;
+          if (state.modalRefresh) state.modalRefresh().catch(() => {});
+        });
+      }
       const refreshDetail = async () => {
+        // Only /api/urls/detail uses the per-cluster store path.
+        // The chart switches between the multi-line cluster endpoint
+        // and the single-line store endpoint based on cluster mode.
+        const chartReq = isCluster
+          ? getJSON("/api/cluster/urls/chart",
+                    { url, minutes: 60, metric: ps.detailMetric })
+          : getJSON("/api/urls/chart",  { url, window: 60 });
         const [d, c] = await Promise.all([
           getJSON("/api/urls/detail", { url, window: ps.window }),
-          getJSON("/api/urls/chart",  { url, window: 60 }),
+          chartReq,
         ]);
         const tb = body.querySelector("table tbody");
         const winCols = [
@@ -298,10 +389,33 @@
         ];
         renderTable(tb, winCols, (d.windows || []));
         const cs = body.querySelectorAll("canvas");
-        smChart.drawLine(cs[0], (c.values || []).map(Number),
-                          { xLabels: ["-60m", "now"],
-                            last_ts: c.last_ts,
-                            step_seconds: c.step_seconds });
+        const legend = body.querySelector("#d-legend");
+        if (isCluster && Array.isArray(c.series)) {
+          const series = c.series.map(s => Object.assign({}, s, {
+            color: smChart.colorFor(s.label),
+          }));
+          const visible = series.filter(s => !ps.detailHidden.has(s.label));
+          smChart.drawLineMulti(cs[0], visible,
+            { last_ts: c.last_ts, step_seconds: c.step_seconds,
+              fmtY: ps.detailMetric === "count"
+                    ? v => Math.round(v) : fmtMs });
+          // Legend = successful series + any errored prefixes (which
+          // the server omits from `series` so the chart doesn't show
+          // a misleading flat-zero line for a failed backend).
+          legend.replaceChildren(..._buildClusterLegend(c, series,
+            ps.detailHidden,
+            label => {
+              if (ps.detailHidden.has(label)) ps.detailHidden.delete(label);
+              else ps.detailHidden.add(label);
+              if (state.modalRefresh) state.modalRefresh().catch(() => {});
+            }));
+        } else {
+          legend.replaceChildren();
+          smChart.drawLine(cs[0], (c.values || []).map(Number),
+                            { xLabels: ["-60m", "now"],
+                              last_ts: c.last_ts,
+                              step_seconds: c.step_seconds });
+        }
         smChart.drawHistogram(cs[1], d.histogram ? d.histogram.buckets : []);
         renderTable(body.querySelector("#d-status tbody"), [
           { key: "status",
@@ -327,12 +441,52 @@
     const ps = state.panels.plugins = {
       window: "60s", sort: "rps", reverse: true, filter: "",
       hide_idle: true,
+      // Cluster-mode chart state.
+      cPlugin: "", cMetric: "p95_ms", cMinutes: 60, cHidden: new Set(),
     };
-    let tbody;
+    let tbody, chartCard, chartCanvas, legendEl, namePicker, metricPicker;
+    const C_METRICS = [
+      ["p95_ms",  "p95"],
+      ["p50_ms",  "p50"],
+      ["mean_ms", "mean"],
+      ["max_ms",  "max"],
+      ["count",   "count"],
+    ];
     return {
       title: "Plugins",
       init(host) {
         host.replaceChildren();
+        // Cluster-mode chart card on top. Hidden in single-host mode.
+        chartCard = el("div", { class: "section-card", id: "plugins-chart-card" });
+        const cCtrls = el("div", { class: "panel-controls" },
+          el("span", { class: "panel-title" }, "Per-backend plugin trend"),
+          el("label", null, "plugin",
+            (namePicker = el("select", { id: "plugins-name" }))),
+          el("label", null, "metric",
+            (metricPicker = el("select", { id: "plugins-metric" },
+              ...C_METRICS.map(([v, l]) => {
+                const o = el("option", { value: v }, l);
+                if (v === ps.cMetric) o.setAttribute("selected", "");
+                return o;
+              })))),
+        );
+        chartCard.appendChild(cCtrls);
+        chartCanvas = el("canvas", { class: "chart", height: "180" });
+        chartCard.appendChild(chartCanvas);
+        legendEl = el("div", { class: "chart-legend" });
+        chartCard.appendChild(legendEl);
+        chartCard.style.display = "none";
+        host.appendChild(chartCard);
+
+        namePicker.addEventListener("change", () => {
+          ps.cPlugin = namePicker.value;
+          PANELS.plugins.refresh().catch(() => {});
+        });
+        metricPicker.addEventListener("change", () => {
+          ps.cMetric = metricPicker.value;
+          PANELS.plugins.refresh().catch(() => {});
+        });
+
         const panel = el("section", { class: "panel" });
         const ctrls = el("div", { class: "panel-controls" },
           el("span", { class: "panel-title" }, "Plugins"),
@@ -368,6 +522,9 @@
       async refresh() { await refresh(); },
     };
     async function refresh() {
+      const isCluster = !!state.activeCluster;
+      chartCard.style.display = isCluster ? "" : "none";
+      if (isCluster) await refreshClusterChart();
       const [data, trends] = await Promise.all([
         getJSON("/api/plugins", {
           window: ps.window, sort: ps.sort,
@@ -415,6 +572,48 @@
         },
       });
     }
+    async function refreshClusterChart() {
+      // First call may have no plugin chosen — endpoint then returns
+      // the plugin_names list so we can populate the picker. Once the
+      // picker has a selection we issue a second call to fetch the
+      // chart for that plugin. (Could be folded into one call with
+      // a default-pick rule on the server, but keeping the two-step
+      // shape mirrors the URLs panel and keeps the picker logic
+      // server-driven.)
+      let cc = await getJSON("/api/cluster/plugins/chart", {
+        plugin: ps.cPlugin, metric: ps.cMetric, minutes: ps.cMinutes,
+      });
+      const names = cc.plugin_names || [];
+      if (!ps.cPlugin && names.length) ps.cPlugin = names[0];
+      const current = ps.cPlugin;
+      namePicker.replaceChildren(...names.map(n => {
+        const o = el("option", { value: n }, n);
+        if (n === current) o.setAttribute("selected", "");
+        return o;
+      }));
+      if (current && namePicker.value !== current) {
+        namePicker.value = current;
+      }
+      if (current && cc.plugin !== current) {
+        cc = await getJSON("/api/cluster/plugins/chart", {
+          plugin: current, metric: ps.cMetric, minutes: ps.cMinutes,
+        });
+      }
+      const series = (cc.series || []).map(s => Object.assign({}, s, {
+        color: smChart.colorFor(s.label),
+      }));
+      const visible = series.filter(s => !ps.cHidden.has(s.label));
+      const fmtY = ps.cMetric === "count" ? v => Math.round(v) : fmtMs;
+      smChart.drawLineMulti(chartCanvas, visible,
+        { fmtY, last_ts: cc.last_ts, step_seconds: cc.step_seconds });
+      legendEl.replaceChildren(..._buildClusterLegend(cc, series,
+        ps.cHidden,
+        label => {
+          if (ps.cHidden.has(label)) ps.cHidden.delete(label);
+          else ps.cHidden.add(label);
+          PANELS.plugins.refresh().catch(() => {});
+        }));
+    }
   })();
 
   // -- Overview -----------------------------------------------------
@@ -455,6 +654,7 @@
         host.appendChild(wrap);
       },
       async refresh() {
+        const isCluster = !!state.activeCluster;
         const data = await getJSON("/api/overview");
         renderTable(tbody, [
           { key: "window_min", class: "num", fmt: v => v + "m" },
@@ -468,15 +668,49 @@
             fmt: v => v.toFixed(1), color: errColor },
         ], data.rows || []);
 
-        for (const m of Object.keys(charts)) {
-          const c = await getJSON("/api/overview/chart", { metric: m });
-          const fmtY = (m === "bytes") ? fmtBytes
-                      : (m === "count" || m === "err_pct")
-                        ? v => Math.round(v) : fmtMs;
-          smChart.drawLine(charts[m], (c.values || []).map(Number),
-                            { fmtY,
-                              last_ts: c.last_ts,
-                              step_seconds: c.step_seconds });
+        if (isCluster) {
+          // One parallel fetch produces all five mini-chart series
+          // — N backend HTTP calls total, not 5N.
+          const metrics = Object.keys(charts);
+          const cc = await getJSON("/api/cluster/overview/chart", {
+            metrics: metrics.join(","), minutes: 60,
+          });
+          // The bytes and err_pct metrics aren't carried in the row
+          // duration field, so cluster_overview_chart returns 0 for
+          // them — fall back to drawLine on those with global_series
+          // values from the per-cluster store. Acceptable since
+          // bytes/err_pct global aggregates are still meaningful.
+          for (const m of metrics) {
+            const fmtY = (m === "bytes") ? fmtBytes
+                        : (m === "count" || m === "err_pct")
+                          ? v => Math.round(v) : fmtMs;
+            const onePerHost = cc.charts && cc.charts[m];
+            if (m === "bytes" || m === "err_pct" || !onePerHost
+                || !onePerHost.series || !onePerHost.series.length) {
+              const c = await getJSON("/api/overview/chart", { metric: m });
+              smChart.drawLine(charts[m], (c.values || []).map(Number),
+                                { fmtY,
+                                  last_ts: c.last_ts,
+                                  step_seconds: c.step_seconds });
+            } else {
+              const series = onePerHost.series.map(s =>
+                Object.assign({}, s, { color: smChart.colorFor(s.label) }));
+              smChart.drawLineMulti(charts[m], series,
+                { fmtY, last_ts: onePerHost.last_ts,
+                  step_seconds: onePerHost.step_seconds });
+            }
+          }
+        } else {
+          for (const m of Object.keys(charts)) {
+            const c = await getJSON("/api/overview/chart", { metric: m });
+            const fmtY = (m === "bytes") ? fmtBytes
+                        : (m === "count" || m === "err_pct")
+                          ? v => Math.round(v) : fmtMs;
+            smChart.drawLine(charts[m], (c.values || []).map(Number),
+                              { fmtY,
+                                last_ts: c.last_ts,
+                                step_seconds: c.step_seconds });
+          }
         }
       },
     };
@@ -485,11 +719,53 @@
   // -- Caches -------------------------------------------------------
 
   PANELS.caches = (function () {
-    let tbody;
+    const ps = state.panels.caches = {
+      cacheName: "", metric: "hits_per_min", hidden: new Set(),
+    };
+    let tbody, chartCard, chartCanvas, legendEl, namePicker, metricPicker;
+    const METRICS = [
+      ["hits_per_min",    "hits/min"],
+      ["inserts_per_min", "inserts/min"],
+      ["hitrate",         "hit %"],
+      ["size",            "size"],
+    ];
     return {
       title: "Caches",
       init(host) {
         host.replaceChildren();
+        // Cluster-mode chart card. Hidden by default; shown when a
+        // cluster is selected. Single-host mode keeps using the
+        // per-row sparkline and ignores this card.
+        chartCard = el("div", { class: "section-card", id: "caches-chart-card" });
+        const ctrls = el("div", { class: "panel-controls" },
+          el("span", { class: "panel-title" }, "Per-backend cache trend"),
+          el("label", null, "cache",
+            (namePicker = el("select", { id: "caches-name" }))),
+          el("label", null, "metric",
+            (metricPicker = el("select", { id: "caches-metric" },
+              ...METRICS.map(([v, l]) => {
+                const o = el("option", { value: v }, l);
+                if (v === ps.metric) o.setAttribute("selected", "");
+                return o;
+              })))),
+        );
+        chartCard.appendChild(ctrls);
+        chartCanvas = el("canvas", { class: "chart", height: "180" });
+        chartCard.appendChild(chartCanvas);
+        legendEl = el("div", { class: "chart-legend" });
+        chartCard.appendChild(legendEl);
+        chartCard.style.display = "none";
+        host.appendChild(chartCard);
+
+        namePicker.addEventListener("change", () => {
+          ps.cacheName = namePicker.value;
+          PANELS.caches.refresh().catch(() => {});
+        });
+        metricPicker.addEventListener("change", () => {
+          ps.metric = metricPicker.value;
+          PANELS.caches.refresh().catch(() => {});
+        });
+
         const panel = el("section", { class: "panel" },
           el("div", { class: "panel-controls" },
             el("span", { class: "panel-title" }, "Caches")),
@@ -506,6 +782,36 @@
         host.appendChild(panel);
       },
       async refresh() {
+        const isCluster = !!state.activeCluster;
+        chartCard.style.display = isCluster ? "" : "none";
+        if (isCluster) {
+          const cc = await getJSON("/api/caches/cluster_chart", {
+            cache_name: ps.cacheName, metric: ps.metric,
+          });
+          // Refresh cache picker options from server-discovered names.
+          const names = cc.cache_names || [];
+          if (!ps.cacheName && names.length) ps.cacheName = names[0];
+          const current = ps.cacheName;
+          namePicker.replaceChildren(
+            ...names.map(n => {
+              const o = el("option", { value: n }, n);
+              if (n === current) o.setAttribute("selected", "");
+              return o;
+            }));
+          if (current && namePicker.value !== current) {
+            namePicker.value = current;
+          }
+          // If picker changed (was empty), refetch chart for the new
+          // cache name on next tick. Otherwise render now.
+          if (current && cc.cache_name !== current) {
+            const cc2 = await getJSON("/api/caches/cluster_chart", {
+              cache_name: current, metric: ps.metric,
+            });
+            _renderCachesChart(cc2);
+          } else {
+            _renderCachesChart(cc);
+          }
+        }
         const [data, trends] = await Promise.all([
           getJSON("/api/caches"),
           getJSON("/api/caches/trends"),
@@ -539,16 +845,82 @@
         });
       },
     };
+    function _renderCachesChart(cc) {
+      const series = (cc.series || []).map(s => Object.assign({}, s, {
+        color: smChart.colorFor(s.label),
+      }));
+      const visible = series.filter(s => !ps.hidden.has(s.label));
+      const fmtY = ps.metric === "hitrate"
+                   ? v => v.toFixed(0) + "%"
+                   : ps.metric === "size"
+                     ? fmtCount
+                     : v => v.toFixed(1);
+      smChart.drawLineMulti(chartCanvas, visible,
+        { fmtY, last_ts: cc.last_ts, step_seconds: cc.step_seconds });
+      legendEl.replaceChildren(...series.map(s => {
+        const item = el("span",
+          { class: "lg-item" + (ps.hidden.has(s.label) ? " disabled" : "") },
+          el("span", { class: "lg-swatch",
+                        style: `background:${s.color}` }),
+          s.label);
+        item.addEventListener("click", () => {
+          if (ps.hidden.has(s.label)) ps.hidden.delete(s.label);
+          else ps.hidden.add(s.label);
+          PANELS.caches.refresh().catch(() => {});
+        });
+        return item;
+      }));
+    }
   })();
 
   // -- Services -----------------------------------------------------
 
   PANELS.services = (function () {
-    let tbody;
+    const ps = state.panels.services = {
+      handler: "", metric: "req_per_min", hidden: new Set(),
+    };
+    let tbody, chartCard, chartCanvas, legendEl, namePicker, metricPicker;
+    const METRICS = [
+      ["req_per_min",  "req/min"],
+      ["req_per_hour", "req/hour"],
+      ["req_per_day",  "req/day"],
+      ["avg_ms",       "avg ms"],
+      ["avg_cpu_ms",   "avg cpu ms"],
+    ];
     return {
       title: "Services",
       init(host) {
         host.replaceChildren();
+        chartCard = el("div", { class: "section-card", id: "services-chart-card" });
+        const ctrls = el("div", { class: "panel-controls" },
+          el("span", { class: "panel-title" }, "Per-backend handler trend"),
+          el("label", null, "handler",
+            (namePicker = el("select", { id: "services-name" }))),
+          el("label", null, "metric",
+            (metricPicker = el("select", { id: "services-metric" },
+              ...METRICS.map(([v, l]) => {
+                const o = el("option", { value: v }, l);
+                if (v === ps.metric) o.setAttribute("selected", "");
+                return o;
+              })))),
+        );
+        chartCard.appendChild(ctrls);
+        chartCanvas = el("canvas", { class: "chart", height: "180" });
+        chartCard.appendChild(chartCanvas);
+        legendEl = el("div", { class: "chart-legend" });
+        chartCard.appendChild(legendEl);
+        chartCard.style.display = "none";
+        host.appendChild(chartCard);
+
+        namePicker.addEventListener("change", () => {
+          ps.handler = namePicker.value;
+          PANELS.services.refresh().catch(() => {});
+        });
+        metricPicker.addEventListener("change", () => {
+          ps.metric = metricPicker.value;
+          PANELS.services.refresh().catch(() => {});
+        });
+
         const panel = el("section", { class: "panel" },
           el("div", { class: "panel-controls" },
             el("span", { class: "panel-title" }, "Services")),
@@ -564,6 +936,33 @@
         host.appendChild(panel);
       },
       async refresh() {
+        const isCluster = !!state.activeCluster;
+        chartCard.style.display = isCluster ? "" : "none";
+        if (isCluster) {
+          const cc = await getJSON("/api/services/cluster_chart", {
+            handler: ps.handler, metric: ps.metric,
+          });
+          const handlers = cc.handlers || [];
+          if (!ps.handler && handlers.length) ps.handler = handlers[0];
+          const current = ps.handler;
+          namePicker.replaceChildren(
+            ...handlers.map(n => {
+              const o = el("option", { value: n }, n);
+              if (n === current) o.setAttribute("selected", "");
+              return o;
+            }));
+          if (current && namePicker.value !== current) {
+            namePicker.value = current;
+          }
+          if (current && cc.handler !== current) {
+            const cc2 = await getJSON("/api/services/cluster_chart", {
+              handler: current, metric: ps.metric,
+            });
+            _renderServicesChart(cc2);
+          } else {
+            _renderServicesChart(cc);
+          }
+        }
         const [data, trends] = await Promise.all([
           getJSON("/api/services"),
           getJSON("/api/services/trends"),
@@ -596,12 +995,36 @@
         });
       },
     };
+    function _renderServicesChart(cc) {
+      const series = (cc.series || []).map(s => Object.assign({}, s, {
+        color: smChart.colorFor(s.label),
+      }));
+      const visible = series.filter(s => !ps.hidden.has(s.label));
+      const fmtY = (ps.metric === "avg_ms" || ps.metric === "avg_cpu_ms")
+                   ? fmtMs : v => v.toFixed(0);
+      smChart.drawLineMulti(chartCanvas, visible,
+        { fmtY, last_ts: cc.last_ts, step_seconds: cc.step_seconds });
+      legendEl.replaceChildren(...series.map(s => {
+        const item = el("span",
+          { class: "lg-item" + (ps.hidden.has(s.label) ? " disabled" : "") },
+          el("span", { class: "lg-swatch",
+                        style: `background:${s.color}` }),
+          s.label);
+        item.addEventListener("click", () => {
+          if (ps.hidden.has(s.label)) ps.hidden.delete(s.label);
+          else ps.hidden.add(s.label);
+          PANELS.services.refresh().catch(() => {});
+        });
+        return item;
+      }));
+    }
   })();
 
   // -- Active -------------------------------------------------------
 
   PANELS.active = (function () {
-    let chartCanvas, tbody, headEl;
+    const ps = state.panels.active = { hidden: new Set() };
+    let chartCanvas, tbody, headEl, legendEl;
     return {
       title: "Active",
       init(host) {
@@ -612,8 +1035,10 @@
           el("span", { class: "muted", id: "active-summary" }));
         const chartCard = el("div", { class: "section-card" },
           el("h4", null, "in-flight count"),
-          el("canvas", { class: "chart", height: "120" }));
+          el("canvas", { class: "chart", height: "160" }));
         chartCanvas = chartCard.querySelector("canvas");
+        legendEl = el("div", { class: "chart-legend" });
+        chartCard.appendChild(legendEl);
         const grid = el("div", { class: "section-grid" }, chartCard);
         const table = el("table", { class: "data-table" },
           el("thead", null, el("tr", null,
@@ -629,16 +1054,64 @@
         host.appendChild(panel);
       },
       async refresh() {
+        // In cluster mode, request the per-host series for line
+        // overlays. Otherwise fall back to the aggregated single line.
+        const isCluster = !!state.activeCluster;
         const [tab, ch] = await Promise.all([
           getJSON("/api/active"),
-          getJSON("/api/active/chart"),
+          getJSON("/api/active/chart",
+            isCluster ? { multi: 1 } : null),
         ]);
-        document.getElementById("active-summary").textContent =
-          `current ${ch.current}, peak ${ch.peak}`;
-        smChart.drawLine(chartCanvas, ch.values || [],
-                          { fmtY: v => Math.round(v),
-                            last_ts: ch.last_ts,
-                            step_seconds: ch.step_seconds });
+
+        if (isCluster && Array.isArray(ch.series)) {
+          // Multi-line cluster mode: one line per backend, colored by
+          // stable hash, clickable legend.
+          const series = ch.series.map(s => Object.assign({}, s, {
+            color: smChart.colorFor(s.label),
+          }));
+          // Apply user's hide-toggles (legend clicks).
+          const visible = series.filter(s => !ps.hidden.has(s.label));
+          smChart.drawLineMulti(chartCanvas, visible,
+            { fmtY: v => Math.round(v),
+              last_ts: ch.last_ts,
+              step_seconds: ch.step_seconds });
+          // Render legend: every backend's swatch + label, with
+          // visibility toggled on click.
+          legendEl.replaceChildren(...series.map(s => {
+            const item = el("span",
+              { class: "lg-item" + (ps.hidden.has(s.label) ? " disabled" : "") },
+              el("span", { class: "lg-swatch",
+                            style: `background:${s.color}` }),
+              s.label);
+            item.addEventListener("click", () => {
+              if (ps.hidden.has(s.label)) ps.hidden.delete(s.label);
+              else ps.hidden.add(s.label);
+              // Force re-render on next tick (or immediately).
+              PANELS.active.refresh().catch(() => {});
+            });
+            return item;
+          }));
+          // Summary: total across visible lines, peak across all.
+          const lastValues = visible
+            .map(s => s.values[s.values.length - 1])
+            .filter(v => Number.isFinite(v));
+          const total = lastValues.reduce((a, b) => a + b, 0);
+          const peakAll = series.reduce((m, s) =>
+            Math.max(m, ...(s.values.length ? s.values : [0])), 0);
+          document.getElementById("active-summary").textContent =
+            `cluster total ${total}, per-backend peak ${peakAll}` +
+            (ps.hidden.size ? ` (${ps.hidden.size} hidden)` : "");
+        } else {
+          // Single-host / single-line mode: existing behavior.
+          legendEl.replaceChildren();
+          smChart.drawLine(chartCanvas, ch.values || [],
+            { fmtY: v => Math.round(v),
+              last_ts: ch.last_ts,
+              step_seconds: ch.step_seconds });
+          document.getElementById("active-summary").textContent =
+            `current ${ch.current}, peak ${ch.peak}`;
+        }
+
         renderTable(tbody, [
           { key: "host" },
           { key: "id",          class: "num" },
@@ -658,12 +1131,50 @@
   PANELS.keys = (function () {
     const ps = state.panels.keys = {
       window: 60, sort: "count", reverse: true, filter: "",
+      cKey: "", cMetric: "p95_ms", cMinutes: 60, cHidden: new Set(),
     };
-    let tbody;
+    let tbody, chartCard, chartCanvas, legendEl, namePicker, metricPicker;
+    const C_METRICS = [
+      ["p95_ms",  "p95"],
+      ["p50_ms",  "p50"],
+      ["mean_ms", "mean"],
+      ["max_ms",  "max"],
+      ["count",   "count"],
+    ];
     return {
       title: "API Keys",
       init(host) {
         host.replaceChildren();
+        chartCard = el("div", { class: "section-card", id: "keys-chart-card" });
+        const cCtrls = el("div", { class: "panel-controls" },
+          el("span", { class: "panel-title" }, "Per-backend apikey trend"),
+          el("label", null, "apikey",
+            (namePicker = el("select", { id: "keys-name" }))),
+          el("label", null, "metric",
+            (metricPicker = el("select", { id: "keys-metric" },
+              ...C_METRICS.map(([v, l]) => {
+                const o = el("option", { value: v }, l);
+                if (v === ps.cMetric) o.setAttribute("selected", "");
+                return o;
+              })))),
+        );
+        chartCard.appendChild(cCtrls);
+        chartCanvas = el("canvas", { class: "chart", height: "180" });
+        chartCard.appendChild(chartCanvas);
+        legendEl = el("div", { class: "chart-legend" });
+        chartCard.appendChild(legendEl);
+        chartCard.style.display = "none";
+        host.appendChild(chartCard);
+
+        namePicker.addEventListener("change", () => {
+          ps.cKey = namePicker.value;
+          PANELS.keys.refresh().catch(() => {});
+        });
+        metricPicker.addEventListener("change", () => {
+          ps.cMetric = metricPicker.value;
+          PANELS.keys.refresh().catch(() => {});
+        });
+
         const panel = el("section", { class: "panel" });
         const ctrls = el("div", { class: "panel-controls" },
           el("span", { class: "panel-title" }, "API Keys"),
@@ -695,6 +1206,9 @@
       async refresh() { await refresh(); },
     };
     async function refresh() {
+      const isCluster = !!state.activeCluster;
+      chartCard.style.display = isCluster ? "" : "none";
+      if (isCluster) await refreshClusterChart();
       const data = await getJSON("/api/keys", {
         window: ps.window, sort: ps.sort,
         reverse: ps.reverse ? 1 : 0, filter: ps.filter,
@@ -753,6 +1267,41 @@
       };
       state.modalRefresh = refreshDetail;
       await refreshDetail();
+    }
+    async function refreshClusterChart() {
+      let cc = await getJSON("/api/cluster/keys/chart", {
+        apikey: ps.cKey, metric: ps.cMetric, minutes: ps.cMinutes,
+      });
+      const keys = cc.apikeys || [];
+      if (!ps.cKey && keys.length) ps.cKey = keys[0];
+      const current = ps.cKey;
+      namePicker.replaceChildren(...keys.map(n => {
+        const o = el("option", { value: n }, n);
+        if (n === current) o.setAttribute("selected", "");
+        return o;
+      }));
+      if (current && namePicker.value !== current) {
+        namePicker.value = current;
+      }
+      if (current && cc.apikey !== current) {
+        cc = await getJSON("/api/cluster/keys/chart", {
+          apikey: current, metric: ps.cMetric, minutes: ps.cMinutes,
+        });
+      }
+      const series = (cc.series || []).map(s => Object.assign({}, s, {
+        color: smChart.colorFor(s.label),
+      }));
+      const visible = series.filter(s => !ps.cHidden.has(s.label));
+      const fmtY = ps.cMetric === "count" ? v => Math.round(v) : fmtMs;
+      smChart.drawLineMulti(chartCanvas, visible,
+        { fmtY, last_ts: cc.last_ts, step_seconds: cc.step_seconds });
+      legendEl.replaceChildren(..._buildClusterLegend(cc, series,
+        ps.cHidden,
+        label => {
+          if (ps.cHidden.has(label)) ps.cHidden.delete(label);
+          else ps.cHidden.add(label);
+          PANELS.keys.refresh().catch(() => {});
+        }));
     }
   })();
 
@@ -1235,10 +1784,40 @@
   // boot, tab strip, polling
   // =================================================================
 
+  function _writeHash() {
+    const cluster = state.activeCluster
+      ? `cluster=${encodeURIComponent(state.activeCluster)}/` : "";
+    location.hash = `#/${cluster}${state.active || ""}`;
+  }
+
+  function _parseHash() {
+    // #/cluster=NAME/panel — cluster part optional.
+    const h = (location.hash || "").replace(/^#\//, "");
+    const m = h.match(/^cluster=([^/]+)\/(.*)$/);
+    if (m) return { cluster: decodeURIComponent(m[1]), panel: m[2] || null };
+    return { cluster: null, panel: h || null };
+  }
+
+  function activateCluster(name) {
+    if (state.activeCluster === name) return;
+    state.activeCluster = name;
+    const sel = document.getElementById("cluster-select");
+    if (sel) sel.value = name == null ? "" : name;
+    _writeHash();
+    _topologyCache = null;          // force a redraw under the new name
+    _refreshTopology().catch(() => {});
+    // Re-render the current panel against the new cluster's store.
+    if (state.active) {
+      const id = state.active;
+      state.active = null;          // force re-init in activatePanel
+      activatePanel(id);
+    }
+  }
+
   function activatePanel(id) {
     if (state.active === id) return;
     state.active = id;
-    location.hash = "#/" + id;
+    _writeHash();
     document.querySelectorAll("#tabs .tab").forEach(t =>
       t.classList.toggle("active", t.dataset.id === id));
     const host = document.getElementById("panel-host");
@@ -1274,8 +1853,119 @@
     console.error(e);
   }
 
+  async function _loadClusters() {
+    // /api/clusters always returns 200 — empty list means single-host
+    // mode (no clusters.conf, or empty config), populated list means
+    // cluster mode is active and the dashboard should show the
+    // selector.
+    try {
+      const r = await fetch("/api/clusters", { cache: "no-store" });
+      if (!r.ok) return [];
+      return (await r.json()).clusters || [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function _renderClusterSelector(clusters) {
+    const sel = document.getElementById("cluster-select");
+    if (!sel) return;
+    sel.innerHTML = "";
+    if (!clusters.length) {
+      sel.classList.add("hidden");
+      return;
+    }
+    sel.classList.remove("hidden");
+    for (const c of clusters) {
+      const opt = el("option", { value: c.name },
+        `${c.name} (${c.alive_count}/${c.backend_count})`);
+      if (c.alive_count === 0 && c.backend_count > 0) {
+        opt.classList.add("cluster-down");
+      }
+      sel.appendChild(opt);
+    }
+    sel.addEventListener("change", () => activateCluster(sel.value));
+  }
+
+  // ---- Cluster topology strip ------------------------------------
+  //
+  // Renders one pill per backend below the topbar in cluster mode.
+  // Shape: [● c1] [● c2] [✗ c3] [● v1.q3] — color-hashed dot ties
+  // each backend's identity across every chart (a backend in the
+  // chart legend has the same color as its topology pill). A down
+  // backend (registered prefix, no body in clusterinfo) renders as
+  // muted with a strikethrough; hovering any pill surfaces the
+  // backend's handler list so the operator can answer "which
+  // services does v1.q3 actually run?" without leaving the view.
+
+  let _topologyCache = null;
+
+  async function _refreshTopology() {
+    const strip = document.getElementById("cluster-topology");
+    if (!strip) return;
+    if (!state.activeCluster) {
+      strip.classList.add("hidden");
+      strip.replaceChildren();
+      _topologyCache = null;
+      return;
+    }
+    let topo;
+    try {
+      topo = await getJSON("/api/cluster/topology",
+        { cluster: state.activeCluster });
+    } catch (e) {
+      strip.classList.add("hidden");
+      return;
+    }
+    // Avoid re-rendering identical state — pill hovers and the
+    // operator's right-click position would be lost on every 30 s
+    // refresh otherwise.
+    const sig = JSON.stringify({
+      n: topo.name, s: topo.discovery_status,
+      b: (topo.backends || []).map(b => [b.prefix, b.alive,
+                                          (b.handlers || []).length]),
+    });
+    if (sig === _topologyCache) return;
+    _topologyCache = sig;
+
+    strip.classList.remove("hidden");
+    strip.replaceChildren();
+
+    const head = el("span", { class: "topo-head" },
+      el("span", { class: "topo-cluster" }, topo.name),
+      el("span", { class: "topo-status muted" }, topo.discovery_status));
+    strip.appendChild(head);
+
+    const pillBox = el("span", { class: "topo-pills" });
+    for (const b of (topo.backends || [])) {
+      const handlers = b.handlers || [];
+      const handlerCount = handlers.length;
+      const tooltip = handlers.length
+            ? `${b.prefix}: ${handlerCount} handler${handlerCount === 1 ? "" : "s"}\n` +
+              handlers.slice(0, 40).join("\n") +
+              (handlers.length > 40 ? `\n…and ${handlers.length - 40} more` : "")
+            : `${b.prefix}: no handlers (down or draining)`;
+      const pill = el("span",
+        { class: "topo-pill" + (b.alive ? "" : " down"),
+          title: tooltip });
+      pill.appendChild(el("span", { class: "topo-dot",
+        style: `background:${b.alive ? smChart.colorFor(b.prefix) : "transparent"}` }));
+      pill.appendChild(document.createTextNode(b.prefix));
+      pill.appendChild(el("span", { class: "topo-count muted" },
+        b.alive ? String(handlerCount) : "—"));
+      pillBox.appendChild(pill);
+    }
+    strip.appendChild(pillBox);
+  }
+
   async function boot() {
     setIndicator("…");
+
+    // Discover clusters first so the URL-hash routing (which can
+    // include a cluster=NAME) matches what the server knows.
+    state.clusters = await _loadClusters();
+    _renderClusterSelector(state.clusters);
+
     let panels;
     try {
       panels = (await getJSON("/api/panels")).panels;
@@ -1290,7 +1980,22 @@
       tabHost.appendChild(b);
     }
 
-    fetch("/api/health", { cache: "no-store" })
+    // Pick initial cluster + panel from URL hash. Fallbacks: first
+    // cluster (or single-host), URLs panel.
+    const parsed = _parseHash();
+    const validCluster =
+      parsed.cluster && state.clusters.some(c => c.name === parsed.cluster)
+        ? parsed.cluster
+        : (state.clusters[0] ? state.clusters[0].name : null);
+    state.activeCluster = validCluster;
+    if (validCluster) {
+      const sel = document.getElementById("cluster-select");
+      if (sel) sel.value = validCluster;
+    }
+
+    fetch("/api/health" + (validCluster
+        ? "?cluster=" + encodeURIComponent(validCluster) : ""),
+        { cache: "no-store" })
       .then(r => r.json())
       .then(h => {
         document.getElementById("status").textContent =
@@ -1300,9 +2005,27 @@
       })
       .catch(() => {});
 
-    // Pick initial panel from location hash, fall back to URLs.
-    const hash = (location.hash || "").replace(/^#\//, "");
-    activatePanel(panels.some(p => p.id === hash) ? hash : "urls");
+    const initialPanel =
+      panels.some(p => p.id === parsed.panel) ? parsed.panel : "urls";
+    activatePanel(initialPanel);
+    _refreshTopology().catch(() => {});
+
+    // Periodically refresh the cluster list (alive counts in the
+    // dropdown drift as backends come/go) without thrashing.
+    setInterval(async () => {
+      const fresh = await _loadClusters();
+      // Only re-render if the set / counts changed, to avoid
+      // dropping the user's mid-selection focus.
+      if (JSON.stringify(fresh) !== JSON.stringify(state.clusters)) {
+        state.clusters = fresh;
+        _renderClusterSelector(fresh);
+        if (state.activeCluster) {
+          const sel = document.getElementById("cluster-select");
+          if (sel) sel.value = state.activeCluster;
+        }
+      }
+      _refreshTopology().catch(() => {});
+    }, 30 * 1000);
 
     state.poll = setInterval(tickActive, REFRESH_MS);
   }

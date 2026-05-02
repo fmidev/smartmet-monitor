@@ -87,8 +87,15 @@ install-webmon:
 	install -d $(BINDIR) $(SITEDIR_WEBMON) $(WEBMON_ASSET_DIR) $(MANDIR)
 	install -d $(DESTDIR)$(UNITDIR) $(DESTDIR)$(SYSCONFDIR)/sysconfig
 	install -d $(DESTDIR)$(SYSCTLDIR) $(DESTDIR)$(MODLOADDIR)
+	install -d $(DESTDIR)$(SYSCONFDIR)/smartmet-webmon
 	install -m 0755 smwebmon $(BINDIR)/smwebmon
 	install -m 0644 smartmet_webmon/*.py $(SITEDIR_WEBMON)/
+	# Cluster definitions — empty by default (single-host mode).
+	# Operators uncomment the relevant cluster section for their
+	# deployment. %config(noreplace) in the spec so site edits
+	# survive upgrades.
+	install -m 0644 share/smartmet-webmon/clusters.conf \
+	    $(DESTDIR)$(SYSCONFDIR)/smartmet-webmon/clusters.conf
 	# Browser assets — auto-discovered so adding a new file (e.g.
 	# flame.js was missed in 26.4.30-3 because it wasn't in a
 	# hand-maintained WEBMON_ASSETS list) doesn't silently produce
@@ -121,6 +128,7 @@ uninstall-webmon:
 	rm -rf $(SITEDIR_WEBMON) $(WEBMON_ASSET_DIR)
 	rm -f $(DESTDIR)$(UNITDIR)/smartmet-webmon.service
 	rm -f $(DESTDIR)$(SYSCONFDIR)/sysconfig/smartmet-webmon
+	rm -rf $(DESTDIR)$(SYSCONFDIR)/smartmet-webmon
 	rm -f $(DESTDIR)$(SYSCTLDIR)/99-smartmet-perf.conf
 	rm -f $(DESTDIR)$(MODLOADDIR)/smartmet-perf.conf
 	rm -f $(MANDIR)/smwebmon.1
@@ -316,7 +324,46 @@ check:
 	    _resp = _np.open(f"http://127.0.0.1:{_wserv.port}/api/panels", timeout=2).read(); \
 	    _panels = _json.loads(_resp).get("panels"); \
 	    assert isinstance(_panels, list) and len(_panels) >= 10, _panels; \
-	    _wserv.stop()'
+	    _wserv.stop(); \
+	    from smartmet_webmon.clusters import parse_clusterinfo, _derive_cluster_domain, _cluster_name_from_prefixes; \
+	    _ci_lines = ["    URI /", "        c2/", "    URI /c1/", "    URI /c1/timeseries", "    URI /c2/", "        c2/", "        c2/timeseries", "    URI /c2/timeseries", "        c2/timeseries", "    URI /v1.q3/", "        v1.q3/"]; \
+	    _bs = parse_clusterinfo(chr(10).join(_ci_lines)); \
+	    _by = {b.prefix: b for b in _bs}; \
+	    assert set(_by) == {"c1", "c2", "v1.q3"}, list(_by); \
+	    assert _by["c1"].alive is False and _by["c2"].alive and _by["v1.q3"].alive, _by; \
+	    assert _derive_cluster_domain("c3.back.smartmet.fmi.fi") == "back.smartmet.fmi.fi"; \
+	    assert _derive_cluster_domain("in1.back.smartmet.fmi.fi") == "back.smartmet.fmi.fi"; \
+	    assert _derive_cluster_domain("open1.smartmet.fmi.fi") == "smartmet.fmi.fi"; \
+	    assert _derive_cluster_domain("localhost") is None; \
+	    assert _cluster_name_from_prefixes(["c1","c2","c3","c4","c5","c6","v1.q3","v2.q3"]) == "c", "back cluster"; \
+	    assert _cluster_name_from_prefixes(["in1","in2","in3","in4"]) == "in", "internal cluster"; \
+	    assert _cluster_name_from_prefixes(["open1","open2","open3"]) == "open", "opendata cluster"; \
+	    assert _cluster_name_from_prefixes([]) is None; \
+	    assert _cluster_name_from_prefixes(["v1.q3","v2.q3"]) is None, "all dotted prefixes"; \
+	    from smartmet_webmon.clusters import ClusterRegistry, ClusterConfig; \
+	    _reg = ClusterRegistry(); \
+	    _reg.add(ClusterConfig(name="back", frontend_url="http://x/", admin_url_pattern="http://{prefix}.x:8081/admin")); \
+	    assert _reg.names() == ["back"] and _reg.get("back") is not None and _reg.get("nope") is None; \
+	    from smartmet_webmon.handlers import cluster_urls_chart, cluster_plugins_chart, cluster_keys_chart, cluster_overview_chart, CLUSTER_ROUTES, ROUTES, caches_cluster_chart, services_cluster_chart, _plugin_label; \
+	    [(_r in CLUSTER_ROUTES) or (_ for _ in ()).throw(SystemExit(f"missing route {_r}")) for _r in ("/cluster/urls/chart", "/cluster/plugins/chart", "/cluster/keys/chart", "/cluster/overview/chart")]; \
+	    assert "/caches/cluster_chart" in ROUTES and "/services/cluster_chart" in ROUTES; \
+	    _st, _b = cluster_urls_chart(_reg, {"cluster": "back"}); \
+	    assert _st == 400, (_st, _b); \
+	    _st, _b = cluster_urls_chart(_reg, {"cluster": "nope", "url": "/foo"}); \
+	    assert _st == 404, (_st, _b); \
+	    _st, _b = cluster_urls_chart(_reg, {"cluster": "back", "url": "/foo"}); \
+	    assert _st == 200 and _b["series"] == [] and _b["metric"] == "p95_ms", (_st, _b); \
+	    _st, _b = caches_cluster_chart(_wst, {}); \
+	    assert _st == 200 and _b["series"] == [] and "cache_names" in _b, (_st, _b); \
+	    _st, _b = services_cluster_chart(_wst, {}); \
+	    assert _st == 200 and _b["series"] == [] and "handlers" in _b, (_st, _b); \
+	    _st, _b = cluster_plugins_chart(_reg, {"cluster": "back"}); \
+	    assert _st == 200 and _b["series"] == [] and "plugin_names" in _b, (_st, _b); \
+	    _st, _b = cluster_keys_chart(_reg, {"cluster": "back"}); \
+	    assert _st == 200 and _b["series"] == [] and "apikeys" in _b, (_st, _b); \
+	    _st, _b = cluster_overview_chart(_reg, {"cluster": "back", "metrics": "count,mean_ms,p95_ms"}); \
+	    assert _st == 200 and set(_b["charts"]) == {"count","mean_ms","p95_ms"}, (_st, _b); \
+	    assert _plugin_label("/timeseries") == "timeseries" and _plugin_label("/wms/sub") == "wms" and _plugin_label("/") == ""'
 	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
 	$(PYTHON) -m py_compile smartmet_webmon/*.py
 	$(PYTHON) -m py_compile share/smartmet/bperf.py

@@ -1077,6 +1077,124 @@ The reading guide is unchanged from `smtop` — see the smtop section
 above for healthy-shape / trouble-pattern / typical-root-cause /
 where-to-look-next guidance, which applies as-written.
 
+### Cluster mode
+
+`smwebmon` running on a SmartMet **frontend** can monitor every
+backend the frontend routes to in one dashboard, without the operator
+having to SSH-tunnel into each backend separately. Auto-detected on
+startup: if the local SmartMet daemon's `?what=clusterinfo` output
+self-identifies as `FRONTEND`, the cluster is registered with one
+polling task per alive backend (`c1`, `c2`, …, `v1.q3`, …), each
+admin URL constructed as `http://{prefix}.<local-domain>:8081/admin`.
+
+Multi-cluster setups (e.g. an FMI host that fronts both the `back`
+and `internal` clusters via different prefix families) live in
+`/etc/smartmet-webmon/clusters.conf`:
+
+```ini
+[back]
+frontend-url      = http://smartmet.fmi.fi
+admin-url-pattern = http://{prefix}.back.smartmet.fmi.fi:8081/admin
+
+[internal]
+frontend-url      = http://internal.smartmet.fmi.fi
+admin-url-pattern = http://{prefix}.back.smartmet.fmi.fi:8081/admin
+```
+
+A dropdown next to the brand in the top bar switches between
+clusters; the URL hash includes the active cluster
+(`#/cluster=back/urls`) so per-cluster bookmarks survive reloads.
+
+#### Topology strip
+
+Below the top bar, in cluster mode only: one rounded pill per
+backend prefix, with a color-hashed dot identifying that backend
+across every chart legend in the dashboard (so `c2`'s line on the
+URL chart and its dot on the topology strip are the same color).
+The number to the right of each prefix is the backend's handler
+count from the most recent `clusterinfo` snapshot; hover any pill
+to see the full handler list. A backend with no body in
+`clusterinfo` (registered prefix, no handlers) is rendered as
+muted with a strikethrough — that's the frontend's signal that
+the backend is offline / draining / paused.
+
+The discovery loop refreshes the topology every 60 s by default;
+the strip's render is debounced on a content hash so the
+operator's mid-hover position isn't lost on idle refreshes.
+
+**Healthy shape:** every pill colored, handler counts roughly
+equal across backends in the same family (a 6-backend timeseries
+cluster should show ~the same handler list on every member;
+a single backend with markedly fewer handlers is a config drift
+signal).
+
+**Trouble pattern:** one pill greyed-out and struck through →
+that backend dropped out of routing. Two pills greyed within
+seconds of each other → the frontend lost connectivity to a
+sub-rack, not random failure. All pills greyed → the frontend
+itself is failing to reach any backend, check the frontend's
+own logs and Sputnik state.
+
+**Where to look next:** Active panel for in-flight count
+(does the cluster's load shift to surviving backends?), Logs
+panel for the frontend's view of the failure.
+
+#### Per-backend overlays in every chart
+
+In cluster mode, every panel that produces a time-series chart in
+single-host mode renders one line per backend instead of one
+aggregated line. The lines share the color hash with the topology
+strip, so identifying which backend is misbehaving is a glance
+operation.
+
+Where the data comes from is panel-dependent and worth knowing:
+
+| Panel              | Data path                                                                                        | HTTP cost per refresh |
+|--------------------|--------------------------------------------------------------------------------------------------|-----------------------|
+| Active             | per-host buffers in `store.active_count_history` already collected by the 2 s admin polling      | 0 extra fetches       |
+| Caches / Services  | per-host `store.cache_history` / `store.service_history` from the 2 s admin polling              | 0 extra fetches       |
+| URLs / Plugins / Keys / Overview | parallel on-demand `?what=lastrequests&minutes=N` from each backend at chart-refresh time | N (one per alive backend, in parallel) |
+
+The on-demand-parallel pattern is used where per-host attribution
+is not retained in the store: `_ingest_lastrequests` aggregates
+URL / plugin / apikey rows into the cluster store so the table
+views can rank across the whole cluster, but the per-host shape
+needed by the multi-line chart has to be re-derived. Wall time
+for the on-demand fetch is approximately the slowest backend's
+response time (the requests run concurrently in a thread pool),
+typically under 1 s for a six-backend cluster.
+
+**Reading a multi-line chart**
+
+* **Healthy shape:** all visible lines roughly track each other
+  (a frontend-balanced cluster spreads load evenly), and the
+  per-backend tooltip values are within a 2× spread of each
+  other at any given minute.
+* **Trouble pattern:** one line consistently above the others
+  → that backend is slower / hotter than its peers (single-host
+  troubleshooting on that node from there: `top`, perf, qengine).
+  One line at zero with the rest active → that backend isn't
+  receiving traffic (Sputnik routing issue or backend down).
+  All lines spike together → cluster-wide event (upstream issue
+  or shared dependency like the database).
+* **Typical root cause:** a hot backend is usually disk-I/O bound
+  (qengine producer cache miss or stale querydata); a cold
+  backend is usually a routing or health-check issue at the
+  frontend.
+* **Where to look next:** click into the URL / plugin / apikey
+  the chart was filtered to, then check the backend-specific
+  Plugins / Caches / Services panels for per-handler breakdown
+  on the offending backend.
+
+The legend below each multi-line chart is clickable: clicking a
+backend's label hides that line so the rest scale to fill the
+chart. The hover tooltip lists every visible backend's value at
+the cursor's minute, sorted descending so the busiest backend
+is at the top. The tooltip's vertical position is pinned to the
+canvas's top edge — only X tracks the cursor — so the box does
+not bounce as the cursor crosses peaks and valleys in a busy
+chart.
+
 ### Costs and policy
 
 The cost analysis (~80–150 MB RSS, ~5 % of one core, ~43 200 admin
