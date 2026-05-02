@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.5.2
-Release:        3%{?dist}.fmi
+Release:        4%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -151,6 +151,21 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-4.fmi
+- Cluster on-demand lastrequests fetches now share a 10 s server-side
+  cache keyed on (cluster, minutes). Without it, the URL drill-down
+  modal's 2 s panel refresh fired N parallel admin-plugin fetches at
+  minutes=60 every refresh — for a 6-backend cluster that was 180
+  large lastrequests calls per minute per cluster. With the cache,
+  the first chart refresh after a TTL window does the parallel fetch
+  and everything within the window (the modal's 2 s tick, multiple
+  chart endpoints serving the same panel — URLs / Plugins / Keys /
+  Overview all default to minutes=60 so they share one fetch) reuses
+  the result. Backend admin-plugin load drops by ~5×; the chart
+  still feels live with ~10 s update granularity. The TTL is short
+  enough that a backend coming back online appears in the chart
+  within one cycle without operator intervention.
+
 * Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-3.fmi
 - Cluster multi-line charts no longer draw a misleading flat-zero
   line for backends whose lastrequests fetch failed. The errored

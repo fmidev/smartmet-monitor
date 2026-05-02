@@ -432,6 +432,24 @@ def cluster_topology(registry, qs):
 
 _LASTREQ_TIMEOUT = 5.0  # seconds; per-backend HTTP timeout
 
+# Short-TTL cache for cluster-wide lastrequests fetches. Without this,
+# the URL drill-down modal's 2 s refresh tick fires N parallel admin
+# fetches at minutes=60 every refresh — N*30 lastrequests calls per
+# minute per cluster, each returning up to 20 000 rows. The backend's
+# admin plugin can serve this, but it's gratuitous and a real load
+# concern in tight clusters where every CPU cycle matters.
+#
+# With the cache: the first chart refresh after a TTL window does the
+# parallel fetch; everything within the window (the modal's 2 s tick,
+# panels rendered side by side) shares the result. The TTL is short
+# enough that the chart still looks "live" — operators see updates
+# every ~10 s — and key-on (cluster, minutes) so URL / Plugin / Key /
+# Overview chart endpoints (all minutes=60 by default) share one
+# fetch instead of issuing four.
+_LASTREQ_CACHE_TTL = 10.0   # seconds
+_lastreq_cache: dict = {}   # (cluster_name, minutes) -> (ts, prefixes, rows, errors)
+_lastreq_cache_lock = __import__("threading").Lock()
+
 
 def _fetch_lastreq_rows(admin_url: str, minutes: int) -> List[dict]:
     """Synchronous fetch of /admin?what=lastrequests&minutes=N. Returns
@@ -493,9 +511,24 @@ def _fetch_cluster_lastreqs(ctx, minutes: int):
     ``(prefixes, rows_by_prefix, errors)`` — prefixes is the sorted
     list, rows_by_prefix maps prefix → row list (or [] on per-backend
     failure), errors maps the failing prefixes to their reason
-    strings."""
+    strings.
+
+    Result is cached for ``_LASTREQ_CACHE_TTL`` seconds keyed on
+    ``(cluster_name, minutes)``. Within the TTL, repeated calls
+    (e.g. the URL modal's 2 s refresh tick, multiple chart endpoints
+    serving the same panel) share one fetch.
+    """
+    cache_key = (ctx.config.name, int(minutes))
+    now = time.time()
+    with _lastreq_cache_lock:
+        cached = _lastreq_cache.get(cache_key)
+        if cached is not None and (now - cached[0]) < _LASTREQ_CACHE_TTL:
+            return cached[1], cached[2], cached[3]
+
     prefixes = sorted(ctx.tasks.keys())
     if not prefixes:
+        with _lastreq_cache_lock:
+            _lastreq_cache[cache_key] = (now, prefixes, {}, {})
         return prefixes, {}, {}
     pattern = ctx.config.admin_url_pattern
 
@@ -517,6 +550,8 @@ def _fetch_cluster_lastreqs(ctx, minutes: int):
             rows_by_prefix[prefix] = rows
             if err:
                 errors[prefix] = err
+    with _lastreq_cache_lock:
+        _lastreq_cache[cache_key] = (now, prefixes, rows_by_prefix, errors)
     return prefixes, rows_by_prefix, errors
 
 
