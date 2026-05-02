@@ -344,8 +344,8 @@ check:
 	    _reg = ClusterRegistry(); \
 	    _reg.add(ClusterConfig(name="back", frontend_url="http://x/", admin_url_pattern="http://{prefix}.x:8081/admin")); \
 	    assert _reg.names() == ["back"] and _reg.get("back") is not None and _reg.get("nope") is None; \
-	    from smartmet_webmon.handlers import cluster_urls_chart, CLUSTER_ROUTES, ROUTES, caches_cluster_chart, services_cluster_chart; \
-	    assert "/cluster/urls/chart" in CLUSTER_ROUTES; \
+	    from smartmet_webmon.handlers import cluster_urls_chart, cluster_plugins_chart, cluster_keys_chart, cluster_overview_chart, CLUSTER_ROUTES, ROUTES, caches_cluster_chart, services_cluster_chart, _plugin_label; \
+	    [(_r in CLUSTER_ROUTES) or (_ for _ in ()).throw(SystemExit(f"missing route {_r}")) for _r in ("/cluster/urls/chart", "/cluster/plugins/chart", "/cluster/keys/chart", "/cluster/overview/chart")]; \
 	    assert "/caches/cluster_chart" in ROUTES and "/services/cluster_chart" in ROUTES; \
 	    _st, _b = cluster_urls_chart(_reg, {"cluster": "back"}); \
 	    assert _st == 400, (_st, _b); \
@@ -356,7 +356,14 @@ check:
 	    _st, _b = caches_cluster_chart(_wst, {}); \
 	    assert _st == 200 and _b["series"] == [] and "cache_names" in _b, (_st, _b); \
 	    _st, _b = services_cluster_chart(_wst, {}); \
-	    assert _st == 200 and _b["series"] == [] and "handlers" in _b, (_st, _b)'
+	    assert _st == 200 and _b["series"] == [] and "handlers" in _b, (_st, _b); \
+	    _st, _b = cluster_plugins_chart(_reg, {"cluster": "back"}); \
+	    assert _st == 200 and _b["series"] == [] and "plugin_names" in _b, (_st, _b); \
+	    _st, _b = cluster_keys_chart(_reg, {"cluster": "back"}); \
+	    assert _st == 200 and _b["series"] == [] and "apikeys" in _b, (_st, _b); \
+	    _st, _b = cluster_overview_chart(_reg, {"cluster": "back", "metrics": "count,mean_ms,p95_ms"}); \
+	    assert _st == 200 and set(_b["charts"]) == {"count","mean_ms","p95_ms"}, (_st, _b); \
+	    assert _plugin_label("/timeseries") == "timeseries" and _plugin_label("/wms/sub") == "wms" and _plugin_label("/") == ""'
 	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
 	$(PYTHON) -m py_compile smartmet_webmon/*.py
 	$(PYTHON) -m py_compile share/smartmet/bperf.py

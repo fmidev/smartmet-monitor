@@ -407,12 +407,52 @@
     const ps = state.panels.plugins = {
       window: "60s", sort: "rps", reverse: true, filter: "",
       hide_idle: true,
+      // Cluster-mode chart state.
+      cPlugin: "", cMetric: "p95_ms", cMinutes: 60, cHidden: new Set(),
     };
-    let tbody;
+    let tbody, chartCard, chartCanvas, legendEl, namePicker, metricPicker;
+    const C_METRICS = [
+      ["p95_ms",  "p95"],
+      ["p50_ms",  "p50"],
+      ["mean_ms", "mean"],
+      ["max_ms",  "max"],
+      ["count",   "count"],
+    ];
     return {
       title: "Plugins",
       init(host) {
         host.replaceChildren();
+        // Cluster-mode chart card on top. Hidden in single-host mode.
+        chartCard = el("div", { class: "section-card", id: "plugins-chart-card" });
+        const cCtrls = el("div", { class: "panel-controls" },
+          el("span", { class: "panel-title" }, "Per-backend plugin trend"),
+          el("label", null, "plugin",
+            (namePicker = el("select", { id: "plugins-name" }))),
+          el("label", null, "metric",
+            (metricPicker = el("select", { id: "plugins-metric" },
+              ...C_METRICS.map(([v, l]) => {
+                const o = el("option", { value: v }, l);
+                if (v === ps.cMetric) o.setAttribute("selected", "");
+                return o;
+              })))),
+        );
+        chartCard.appendChild(cCtrls);
+        chartCanvas = el("canvas", { class: "chart", height: "180" });
+        chartCard.appendChild(chartCanvas);
+        legendEl = el("div", { class: "chart-legend" });
+        chartCard.appendChild(legendEl);
+        chartCard.style.display = "none";
+        host.appendChild(chartCard);
+
+        namePicker.addEventListener("change", () => {
+          ps.cPlugin = namePicker.value;
+          PANELS.plugins.refresh().catch(() => {});
+        });
+        metricPicker.addEventListener("change", () => {
+          ps.cMetric = metricPicker.value;
+          PANELS.plugins.refresh().catch(() => {});
+        });
+
         const panel = el("section", { class: "panel" });
         const ctrls = el("div", { class: "panel-controls" },
           el("span", { class: "panel-title" }, "Plugins"),
@@ -448,6 +488,9 @@
       async refresh() { await refresh(); },
     };
     async function refresh() {
+      const isCluster = !!state.activeCluster;
+      chartCard.style.display = isCluster ? "" : "none";
+      if (isCluster) await refreshClusterChart();
       const [data, trends] = await Promise.all([
         getJSON("/api/plugins", {
           window: ps.window, sort: ps.sort,
@@ -495,6 +538,58 @@
         },
       });
     }
+    async function refreshClusterChart() {
+      // First call may have no plugin chosen — endpoint then returns
+      // the plugin_names list so we can populate the picker. Once the
+      // picker has a selection we issue a second call to fetch the
+      // chart for that plugin. (Could be folded into one call with
+      // a default-pick rule on the server, but keeping the two-step
+      // shape mirrors the URLs panel and keeps the picker logic
+      // server-driven.)
+      let cc = await getJSON("/api/cluster/plugins/chart", {
+        plugin: ps.cPlugin, metric: ps.cMetric, minutes: ps.cMinutes,
+      });
+      const names = cc.plugin_names || [];
+      if (!ps.cPlugin && names.length) ps.cPlugin = names[0];
+      const current = ps.cPlugin;
+      namePicker.replaceChildren(...names.map(n => {
+        const o = el("option", { value: n }, n);
+        if (n === current) o.setAttribute("selected", "");
+        return o;
+      }));
+      if (current && namePicker.value !== current) {
+        namePicker.value = current;
+      }
+      if (current && cc.plugin !== current) {
+        cc = await getJSON("/api/cluster/plugins/chart", {
+          plugin: current, metric: ps.cMetric, minutes: ps.cMinutes,
+        });
+      }
+      const series = (cc.series || []).map(s => Object.assign({}, s, {
+        color: smChart.colorFor(s.label),
+      }));
+      const visible = series.filter(s => !ps.cHidden.has(s.label));
+      const fmtY = ps.cMetric === "count" ? v => Math.round(v) : fmtMs;
+      smChart.drawLineMulti(chartCanvas, visible,
+        { fmtY, last_ts: cc.last_ts, step_seconds: cc.step_seconds });
+      legendEl.replaceChildren(...series.map(s => {
+        const errMsg = cc.errors && cc.errors[s.label];
+        const item = el("span",
+          { class: "lg-item"
+                   + (ps.cHidden.has(s.label) ? " disabled" : "")
+                   + (errMsg ? " error" : ""),
+            title: errMsg || "" },
+          el("span", { class: "lg-swatch",
+                        style: `background:${s.color}` }),
+          s.label + (errMsg ? " ⚠" : ""));
+        item.addEventListener("click", () => {
+          if (ps.cHidden.has(s.label)) ps.cHidden.delete(s.label);
+          else ps.cHidden.add(s.label);
+          PANELS.plugins.refresh().catch(() => {});
+        });
+        return item;
+      }));
+    }
   })();
 
   // -- Overview -----------------------------------------------------
@@ -535,6 +630,7 @@
         host.appendChild(wrap);
       },
       async refresh() {
+        const isCluster = !!state.activeCluster;
         const data = await getJSON("/api/overview");
         renderTable(tbody, [
           { key: "window_min", class: "num", fmt: v => v + "m" },
@@ -548,15 +644,49 @@
             fmt: v => v.toFixed(1), color: errColor },
         ], data.rows || []);
 
-        for (const m of Object.keys(charts)) {
-          const c = await getJSON("/api/overview/chart", { metric: m });
-          const fmtY = (m === "bytes") ? fmtBytes
-                      : (m === "count" || m === "err_pct")
-                        ? v => Math.round(v) : fmtMs;
-          smChart.drawLine(charts[m], (c.values || []).map(Number),
-                            { fmtY,
-                              last_ts: c.last_ts,
-                              step_seconds: c.step_seconds });
+        if (isCluster) {
+          // One parallel fetch produces all five mini-chart series
+          // — N backend HTTP calls total, not 5N.
+          const metrics = Object.keys(charts);
+          const cc = await getJSON("/api/cluster/overview/chart", {
+            metrics: metrics.join(","), minutes: 60,
+          });
+          // The bytes and err_pct metrics aren't carried in the row
+          // duration field, so cluster_overview_chart returns 0 for
+          // them — fall back to drawLine on those with global_series
+          // values from the per-cluster store. Acceptable since
+          // bytes/err_pct global aggregates are still meaningful.
+          for (const m of metrics) {
+            const fmtY = (m === "bytes") ? fmtBytes
+                        : (m === "count" || m === "err_pct")
+                          ? v => Math.round(v) : fmtMs;
+            const onePerHost = cc.charts && cc.charts[m];
+            if (m === "bytes" || m === "err_pct" || !onePerHost
+                || !onePerHost.series || !onePerHost.series.length) {
+              const c = await getJSON("/api/overview/chart", { metric: m });
+              smChart.drawLine(charts[m], (c.values || []).map(Number),
+                                { fmtY,
+                                  last_ts: c.last_ts,
+                                  step_seconds: c.step_seconds });
+            } else {
+              const series = onePerHost.series.map(s =>
+                Object.assign({}, s, { color: smChart.colorFor(s.label) }));
+              smChart.drawLineMulti(charts[m], series,
+                { fmtY, last_ts: onePerHost.last_ts,
+                  step_seconds: onePerHost.step_seconds });
+            }
+          }
+        } else {
+          for (const m of Object.keys(charts)) {
+            const c = await getJSON("/api/overview/chart", { metric: m });
+            const fmtY = (m === "bytes") ? fmtBytes
+                        : (m === "count" || m === "err_pct")
+                          ? v => Math.round(v) : fmtMs;
+            smChart.drawLine(charts[m], (c.values || []).map(Number),
+                              { fmtY,
+                                last_ts: c.last_ts,
+                                step_seconds: c.step_seconds });
+          }
         }
       },
     };
@@ -977,12 +1107,50 @@
   PANELS.keys = (function () {
     const ps = state.panels.keys = {
       window: 60, sort: "count", reverse: true, filter: "",
+      cKey: "", cMetric: "p95_ms", cMinutes: 60, cHidden: new Set(),
     };
-    let tbody;
+    let tbody, chartCard, chartCanvas, legendEl, namePicker, metricPicker;
+    const C_METRICS = [
+      ["p95_ms",  "p95"],
+      ["p50_ms",  "p50"],
+      ["mean_ms", "mean"],
+      ["max_ms",  "max"],
+      ["count",   "count"],
+    ];
     return {
       title: "API Keys",
       init(host) {
         host.replaceChildren();
+        chartCard = el("div", { class: "section-card", id: "keys-chart-card" });
+        const cCtrls = el("div", { class: "panel-controls" },
+          el("span", { class: "panel-title" }, "Per-backend apikey trend"),
+          el("label", null, "apikey",
+            (namePicker = el("select", { id: "keys-name" }))),
+          el("label", null, "metric",
+            (metricPicker = el("select", { id: "keys-metric" },
+              ...C_METRICS.map(([v, l]) => {
+                const o = el("option", { value: v }, l);
+                if (v === ps.cMetric) o.setAttribute("selected", "");
+                return o;
+              })))),
+        );
+        chartCard.appendChild(cCtrls);
+        chartCanvas = el("canvas", { class: "chart", height: "180" });
+        chartCard.appendChild(chartCanvas);
+        legendEl = el("div", { class: "chart-legend" });
+        chartCard.appendChild(legendEl);
+        chartCard.style.display = "none";
+        host.appendChild(chartCard);
+
+        namePicker.addEventListener("change", () => {
+          ps.cKey = namePicker.value;
+          PANELS.keys.refresh().catch(() => {});
+        });
+        metricPicker.addEventListener("change", () => {
+          ps.cMetric = metricPicker.value;
+          PANELS.keys.refresh().catch(() => {});
+        });
+
         const panel = el("section", { class: "panel" });
         const ctrls = el("div", { class: "panel-controls" },
           el("span", { class: "panel-title" }, "API Keys"),
@@ -1014,6 +1182,9 @@
       async refresh() { await refresh(); },
     };
     async function refresh() {
+      const isCluster = !!state.activeCluster;
+      chartCard.style.display = isCluster ? "" : "none";
+      if (isCluster) await refreshClusterChart();
       const data = await getJSON("/api/keys", {
         window: ps.window, sort: ps.sort,
         reverse: ps.reverse ? 1 : 0, filter: ps.filter,
@@ -1072,6 +1243,51 @@
       };
       state.modalRefresh = refreshDetail;
       await refreshDetail();
+    }
+    async function refreshClusterChart() {
+      let cc = await getJSON("/api/cluster/keys/chart", {
+        apikey: ps.cKey, metric: ps.cMetric, minutes: ps.cMinutes,
+      });
+      const keys = cc.apikeys || [];
+      if (!ps.cKey && keys.length) ps.cKey = keys[0];
+      const current = ps.cKey;
+      namePicker.replaceChildren(...keys.map(n => {
+        const o = el("option", { value: n }, n);
+        if (n === current) o.setAttribute("selected", "");
+        return o;
+      }));
+      if (current && namePicker.value !== current) {
+        namePicker.value = current;
+      }
+      if (current && cc.apikey !== current) {
+        cc = await getJSON("/api/cluster/keys/chart", {
+          apikey: current, metric: ps.cMetric, minutes: ps.cMinutes,
+        });
+      }
+      const series = (cc.series || []).map(s => Object.assign({}, s, {
+        color: smChart.colorFor(s.label),
+      }));
+      const visible = series.filter(s => !ps.cHidden.has(s.label));
+      const fmtY = ps.cMetric === "count" ? v => Math.round(v) : fmtMs;
+      smChart.drawLineMulti(chartCanvas, visible,
+        { fmtY, last_ts: cc.last_ts, step_seconds: cc.step_seconds });
+      legendEl.replaceChildren(...series.map(s => {
+        const errMsg = cc.errors && cc.errors[s.label];
+        const item = el("span",
+          { class: "lg-item"
+                   + (ps.cHidden.has(s.label) ? " disabled" : "")
+                   + (errMsg ? " error" : ""),
+            title: errMsg || "" },
+          el("span", { class: "lg-swatch",
+                        style: `background:${s.color}` }),
+          s.label + (errMsg ? " ⚠" : ""));
+        item.addEventListener("click", () => {
+          if (ps.cHidden.has(s.label)) ps.cHidden.delete(s.label);
+          else ps.cHidden.add(s.label);
+          PANELS.keys.refresh().catch(() => {});
+        });
+        return item;
+      }));
     }
   })();
 

@@ -21,8 +21,8 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-webmon
-Version:        26.4.30
-Release:        17%{?dist}.fmi
+Version:        26.5.2
+Release:        1%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -151,6 +151,38 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-1.fmi
+- Cluster-view Phase 2c (Plugins / Keys) and Phase 2d (Overview): the
+  remaining cluster-mode multi-line trend charts. With this commit
+  every panel that produces a time-series chart in single-host mode
+  now has a per-backend overlay equivalent in cluster mode.
+- Plugins panel: a "per-backend plugin trend" card on top of the
+  table. Pick a plugin (the leading URL path segment, derived from
+  the most recent admin lastrequests fetch) and metric, see one line
+  per backend. Same color hashing and clickable-legend pattern as
+  the URLs/Active/Caches/Services panels.
+- Keys panel: same shape, picker is the apikey (excluding the dash
+  placeholder). Hover tooltip lists every backend's value at the
+  cursor, sorted descending, just like the other multi-line charts.
+- Overview panel: each of the five mini-charts (req/min, mean ms,
+  p95 ms, bytes/min, err %) becomes a multi-line per-backend overlay
+  in cluster mode, with one parallel HTTP fetch producing all five
+  metrics — N backend admin calls per panel refresh, not 5N. The
+  ``metrics=`` query of /api/cluster/overview/chart accepts a
+  comma-separated list and returns ``charts: {metric: ...}``.
+  bytes/err_pct fall back to the existing single-line endpoint
+  because lastrequests rows do not retain bytes/status — a future
+  refactor of _aggregate_minute could lift this if operators ask
+  for per-backend bytes specifically.
+- handlers.py refactor: extracted _resolve_cluster,
+  _fetch_cluster_lastreqs and _build_cluster_chart so the four
+  on-demand cluster chart endpoints (URLs, Plugins, Keys, Overview)
+  share one parallel-fetch + bucket-and-aggregate pipeline. Each
+  endpoint is now a thin wrapper specifying its own row_matches
+  filter.
+- Day rolled past midnight → Version bump from 26.4.30-N to
+  26.5.2-1 per the YY.M.D scheme.
+
 * Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-17.fmi
 - Cluster-view Phase 2b: Caches and Services panels add a per-backend
   trend chart in cluster mode. Pick a cache (or service handler) from

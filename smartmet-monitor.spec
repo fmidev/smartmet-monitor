@@ -14,8 +14,8 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        26.4.30
-Release:        17%{?dist}.fmi
+Version:        26.5.2
+Release:        1%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -120,6 +120,11 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-1.fmi
+- Co-bumped with smartmet-webmon for the cluster-view Phase 2 wrap-up
+  (Plugins / Keys / Overview multi-line per-backend charts). See
+  smartmet-webmon changelog.
+
 * Fri May 01 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.4.30-17.fmi
 - New CachesSnapshot.cluster_chart_per_host /
   ServicesSnapshot.cluster_chart_per_host snapshot methods backing

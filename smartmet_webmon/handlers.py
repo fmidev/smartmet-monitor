@@ -475,35 +475,28 @@ def _aggregate_minute(durs: List[float], metric: str) -> float:
     return 0.0
 
 
-def cluster_urls_chart(registry, qs):
-    """Per-backend per-minute time series for one URL across a cluster.
-
-    Drives the URL drill-down modal's chart in cluster mode (multi-line
-    overlay, one line per backend). Single-host mode keeps using the
-    store-based ``/api/urls/chart`` endpoint.
-    """
-    cluster_name = qs.get("cluster", "")
-    if registry is None or not cluster_name:
-        return 400, {"error": "missing cluster query parameter"}
-    ctx = registry.get(cluster_name)
+def _resolve_cluster(registry, qs):
+    """Common preflight for cluster-scope endpoints. Returns (ctx, error)
+    where error is a (status, body) tuple or None on success."""
+    name = qs.get("cluster", "")
+    if registry is None or not name:
+        return None, (400, {"error": "missing cluster query parameter"})
+    ctx = registry.get(name)
     if ctx is None:
-        return 404, {"error": "no such cluster", "name": cluster_name}
-    target = qs.get("url", "")
-    if not target:
-        return 400, {"error": "missing 'url' query parameter"}
-    minutes = max(1, _int(qs.get("minutes"), 60))
-    metric = qs.get("metric", "p95_ms")
+        return None, (404, {"error": "no such cluster", "name": name})
+    return ctx, None
 
+
+def _fetch_cluster_lastreqs(ctx, minutes: int):
+    """Parallel-fetch /admin?what=lastrequests&minutes=N from every
+    currently-polled backend in a cluster. Returns
+    ``(prefixes, rows_by_prefix, errors)`` — prefixes is the sorted
+    list, rows_by_prefix maps prefix → row list (or [] on per-backend
+    failure), errors maps the failing prefixes to their reason
+    strings."""
     prefixes = sorted(ctx.tasks.keys())
-    now_min = int(time.time() // 60)
     if not prefixes:
-        return 200, {
-            "url": target, "metric": metric, "minutes": minutes,
-            "step_seconds": 60.0,
-            "last_ts": float(now_min * 60),
-            "series": [], "errors": {},
-        }
-
+        return prefixes, {}, {}
     pattern = ctx.config.admin_url_pattern
 
     def fetch_one(prefix: str):
@@ -517,8 +510,6 @@ def cluster_urls_chart(registry, qs):
 
     rows_by_prefix: dict = {}
     errors: dict = {}
-    # max_workers = len(prefixes): cluster size ≤10, so a small bounded
-    # pool is fine and we want full parallelism.
     with ThreadPoolExecutor(max_workers=max(1, len(prefixes))) as ex:
         futs = [ex.submit(fetch_one, p) for p in prefixes]
         for fut in as_completed(futs):
@@ -526,28 +517,63 @@ def cluster_urls_chart(registry, qs):
             rows_by_prefix[prefix] = rows
             if err:
                 errors[prefix] = err
+    return prefixes, rows_by_prefix, errors
 
+
+def _row_url(r):
+    """Extract the (query-stripped) URL path from a lastrequests row."""
+    req_str = r.get("RequestString") or r.get("requeststring") or ""
+    if " " in req_str:
+        req_str = req_str.split(" ", 1)[1]
+    return strip_query(req_str)
+
+
+def _row_ts_dur(r):
+    """(epoch_seconds, dur_ms) or (None, None) if either parse fails."""
+    t_str = r.get("Time") or r.get("time") or ""
+    dur_str = r.get("Duration") or r.get("duration") or "0"
+    if not t_str:
+        return None, None
+    try:
+        ts = parse_iso(t_str)
+        dur = float(dur_str)
+    except (ValueError, TypeError):
+        return None, None
+    return (ts or None), dur
+
+
+def _plugin_label(url_path: str) -> str:
+    """Leading non-empty path segment. ``/timeseries?...`` → "timeseries".
+    Empty / "/" → "". Used as the cluster-mode plugin grouping key
+    (matches what the Plugins panel calls a "plugin")."""
+    if not url_path or url_path == "/":
+        return ""
+    parts = url_path.split("/", 2)
+    # parts[0] is the empty string before the leading slash.
+    if len(parts) >= 2 and parts[1]:
+        return parts[1]
+    return ""
+
+
+def _build_cluster_chart(prefixes, rows_by_prefix, *,
+                         minutes: int, metric: str,
+                         row_matches, errors=None) -> dict:
+    """Bucket each backend's matching rows by minute and reduce to a
+    metric value per minute. ``row_matches(row)`` is the per-row filter
+    (returns True if the row should be counted in the chosen entity's
+    series). Returns the response envelope shared by all four
+    on-demand cluster chart endpoints (URLs / Plugins / Keys /
+    Overview)."""
+    now_min = int(time.time() // 60)
     series = []
     for prefix in prefixes:
         rows = rows_by_prefix.get(prefix, [])
         buckets: dict = {}
         for r in rows:
-            req_str = (r.get("RequestString") or r.get("requeststring") or "")
-            if " " in req_str:
-                req_str = req_str.split(" ", 1)[1]
-            req_path = strip_query(req_str)
-            if req_path != target:
+            if not row_matches(r):
                 continue
-            t_str = r.get("Time") or r.get("time") or ""
-            dur_str = r.get("Duration") or r.get("duration") or "0"
-            if not t_str:
-                continue
-            try:
-                ts = parse_iso(t_str)
-                dur = float(dur_str)
-            except (ValueError, TypeError):
-                continue
-            if not ts:
+            ts, dur = _row_ts_dur(r)
+            if ts is None or dur is None:
                 continue
             mb = int(ts // 60)
             buckets.setdefault(mb, []).append(dur)
@@ -556,15 +582,180 @@ def cluster_urls_chart(registry, qs):
             for m in range(now_min - minutes + 1, now_min + 1)
         ]
         series.append({"label": prefix, "values": values})
-
-    return 200, {
-        "url": target,
+    return {
         "metric": metric,
         "minutes": minutes,
         "step_seconds": 60.0,
         "last_ts": float(now_min * 60),
         "series": series,
-        "errors": errors,
+        "errors": dict(errors or {}),
+    }
+
+
+def cluster_urls_chart(registry, qs):
+    """Per-backend per-minute time series for one URL across a cluster.
+
+    Drives the URL drill-down modal's chart in cluster mode (multi-line
+    overlay, one line per backend). Single-host mode keeps using the
+    store-based ``/api/urls/chart`` endpoint.
+    """
+    ctx, err = _resolve_cluster(registry, qs)
+    if err: return err
+    target = qs.get("url", "")
+    if not target:
+        return 400, {"error": "missing 'url' query parameter"}
+    minutes = max(1, _int(qs.get("minutes"), 60))
+    metric = qs.get("metric", "p95_ms")
+
+    prefixes, rows_by_prefix, errors = _fetch_cluster_lastreqs(ctx, minutes)
+    chart = _build_cluster_chart(
+        prefixes, rows_by_prefix,
+        minutes=minutes, metric=metric, errors=errors,
+        row_matches=lambda r: _row_url(r) == target,
+    )
+    chart["url"] = target
+    return 200, chart
+
+
+def cluster_plugins_chart(registry, qs):
+    """Per-backend trend for one plugin (leading URL path segment).
+
+    Same on-demand parallel data path as cluster_urls_chart. The
+    grouping key is the first non-empty path segment of each row's
+    URL: ``/timeseries?...`` → ``timeseries``, ``/wms?...`` → ``wms``.
+    Without a ``plugin`` query, returns the union of plugin names
+    observed in the most recent admin polls so the UI can populate
+    its picker without a second request.
+    """
+    ctx, err = _resolve_cluster(registry, qs)
+    if err: return err
+    target = qs.get("plugin", "")
+    minutes = max(1, _int(qs.get("minutes"), 60))
+    metric = qs.get("metric", "p95_ms")
+
+    prefixes, rows_by_prefix, errors = _fetch_cluster_lastreqs(ctx, minutes)
+
+    # Always derive the available-plugin list from this fetch so the UI
+    # picker stays accurate even if a backend's plugin set changed.
+    plugin_names: set = set()
+    for rows in rows_by_prefix.values():
+        for r in rows:
+            p = _plugin_label(_row_url(r))
+            if p:
+                plugin_names.add(p)
+
+    if not target:
+        return 200, {
+            "plugin": "",
+            "plugin_names": sorted(plugin_names),
+            "minutes": minutes,
+            "metric": metric,
+            "step_seconds": 60.0,
+            "last_ts": float(int(time.time() // 60) * 60),
+            "series": [],
+            "errors": dict(errors),
+        }
+
+    chart = _build_cluster_chart(
+        prefixes, rows_by_prefix,
+        minutes=minutes, metric=metric, errors=errors,
+        row_matches=lambda r: _plugin_label(_row_url(r)) == target,
+    )
+    chart["plugin"] = target
+    chart["plugin_names"] = sorted(plugin_names)
+    return 200, chart
+
+
+def cluster_keys_chart(registry, qs):
+    """Per-backend trend for one API key.
+
+    Filters lastrequests by the ``Apikey`` field. Without an
+    ``apikey`` query, returns the union of API keys observed
+    (excluding the dash placeholder ``-``) for the picker.
+    """
+    ctx, err = _resolve_cluster(registry, qs)
+    if err: return err
+    target = qs.get("apikey", "")
+    minutes = max(1, _int(qs.get("minutes"), 60))
+    metric = qs.get("metric", "p95_ms")
+
+    prefixes, rows_by_prefix, errors = _fetch_cluster_lastreqs(ctx, minutes)
+
+    keys: set = set()
+    for rows in rows_by_prefix.values():
+        for r in rows:
+            k = (r.get("Apikey") or r.get("apikey") or "").strip()
+            if k and k != "-":
+                keys.add(k)
+
+    if not target:
+        return 200, {
+            "apikey": "",
+            "apikeys": sorted(keys),
+            "minutes": minutes,
+            "metric": metric,
+            "step_seconds": 60.0,
+            "last_ts": float(int(time.time() // 60) * 60),
+            "series": [],
+            "errors": dict(errors),
+        }
+
+    def row_matches(r):
+        k = (r.get("Apikey") or r.get("apikey") or "").strip()
+        return k == target
+
+    chart = _build_cluster_chart(
+        prefixes, rows_by_prefix,
+        minutes=minutes, metric=metric, errors=errors,
+        row_matches=row_matches,
+    )
+    chart["apikey"] = target
+    chart["apikeys"] = sorted(keys)
+    return 200, chart
+
+
+def cluster_overview_chart(registry, qs):
+    """Per-backend trend across the whole cluster — one line per
+    backend, no entity filter. Same parallel-fetch as the URLs chart
+    but the row filter is "everything", and one HTTP fetch produces
+    every requested metric.
+
+    ``metrics`` may be a comma-separated list (e.g.
+    ``count,mean_ms,p95_ms``); the response then carries a
+    ``charts`` map ``{metric: {series, last_ts, ...}}`` so the
+    Overview panel can paint all five mini-charts from a single
+    parallel fetch — N backend HTTP calls, not 5N.
+    """
+    ctx, err = _resolve_cluster(registry, qs)
+    if err: return err
+    minutes = max(1, _int(qs.get("minutes"), 60))
+    metrics_param = qs.get("metrics", "") or qs.get("metric", "count")
+    metrics = [m.strip() for m in metrics_param.split(",") if m.strip()]
+    if not metrics:
+        metrics = ["count"]
+
+    prefixes, rows_by_prefix, errors = _fetch_cluster_lastreqs(ctx, minutes)
+
+    if len(metrics) == 1:
+        return 200, _build_cluster_chart(
+            prefixes, rows_by_prefix,
+            minutes=minutes, metric=metrics[0], errors=errors,
+            row_matches=lambda r: True,
+        )
+
+    charts = {
+        m: _build_cluster_chart(
+            prefixes, rows_by_prefix,
+            minutes=minutes, metric=m, errors=errors,
+            row_matches=lambda r: True,
+        )
+        for m in metrics
+    }
+    return 200, {
+        "minutes": minutes,
+        "step_seconds": 60.0,
+        "charts": charts,
+        "errors": dict(errors),
     }
 
 
@@ -574,9 +765,12 @@ def cluster_urls_chart(registry, qs):
 # (not a per-cluster Store) because they introspect the registry
 # itself.
 CLUSTER_ROUTES = {
-    "/clusters":         clusters_list,
-    "/cluster/topology": cluster_topology,
-    "/cluster/urls/chart": cluster_urls_chart,
+    "/clusters":              clusters_list,
+    "/cluster/topology":      cluster_topology,
+    "/cluster/urls/chart":    cluster_urls_chart,
+    "/cluster/plugins/chart": cluster_plugins_chart,
+    "/cluster/keys/chart":    cluster_keys_chart,
+    "/cluster/overview/chart": cluster_overview_chart,
 }
 
 ROUTES = {
