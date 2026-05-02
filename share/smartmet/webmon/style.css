@@ -49,6 +49,69 @@ html, body {
 .indicator.live  { color: var(--good); }
 .indicator.error { color: var(--bad); }
 
+/* ---- cluster topology strip ---------------------------------------------- */
+
+.cluster-topology {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 1rem;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85em;
+  position: sticky;
+  top: 38px;     /* sit just below the topbar */
+  z-index: 49;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.cluster-topology.hidden { display: none; }
+.topo-head {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+}
+.topo-cluster { color: var(--accent); font-weight: bold; }
+.topo-status  { color: var(--fg-muted); font-size: 0.95em; }
+.topo-pills {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  flex: 1 1 auto;
+}
+.topo-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  cursor: help;
+}
+.topo-pill.down {
+  color: var(--fg-dim);
+  text-decoration: line-through;
+  border-color: rgba(248, 81, 73, 0.3);
+}
+.topo-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex: 0 0 auto;
+}
+.topo-pill.down .topo-dot {
+  background: var(--bad) !important;
+  opacity: 0.6;
+}
+.topo-count {
+  font-size: 0.85em;
+  color: var(--fg-muted);
+  margin-left: 2px;
+}
+
 .cluster-select {
   background: var(--bg);
   color: var(--accent);

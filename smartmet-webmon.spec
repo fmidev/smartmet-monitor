@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.5.2
-Release:        1%{?dist}.fmi
+Release:        2%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -151,6 +151,26 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-2.fmi
+- Cluster-view Phase 3: backend-pill topology strip below the top
+  bar (cluster mode only). One pill per backend prefix; the dot
+  inside each pill is the same color the chart legends use, so
+  identifying which backend a line belongs to is a single glance.
+  Hover surfaces the backend's handler list (truncated at 40
+  entries with a "…and N more" marker for grid-content-heavy
+  prefixes like q3 satellites). A backend that is registered
+  but has no handlers in clusterinfo (offline / draining /
+  paused) renders muted with a strikethrough.
+- Topology refreshes every 30 s (same cadence as the cluster
+  selector dropdown) but is debounced on a content hash, so the
+  operator's mid-hover position is not lost on idle refreshes.
+- README documents cluster mode end-to-end: topology strip
+  reading guide (healthy shape / trouble pattern / typical root
+  cause / where to look next), per-panel data-path table
+  (which panels reuse the 2 s polling vs which fire on-demand
+  parallel lastrequests fetches at chart-refresh time), and
+  the multi-line chart reading guide.
+
 * Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-1.fmi
 - Cluster-view Phase 2c (Plugins / Keys) and Phase 2d (Overview): the
   remaining cluster-mode multi-line trend charts. With this commit

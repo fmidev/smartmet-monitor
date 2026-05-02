@@ -1790,6 +1790,8 @@
     const sel = document.getElementById("cluster-select");
     if (sel) sel.value = name == null ? "" : name;
     _writeHash();
+    _topologyCache = null;          // force a redraw under the new name
+    _refreshTopology().catch(() => {});
     // Re-render the current panel against the new cluster's store.
     if (state.active) {
       const id = state.active;
@@ -1871,6 +1873,77 @@
     sel.addEventListener("change", () => activateCluster(sel.value));
   }
 
+  // ---- Cluster topology strip ------------------------------------
+  //
+  // Renders one pill per backend below the topbar in cluster mode.
+  // Shape: [● c1] [● c2] [✗ c3] [● v1.q3] — color-hashed dot ties
+  // each backend's identity across every chart (a backend in the
+  // chart legend has the same color as its topology pill). A down
+  // backend (registered prefix, no body in clusterinfo) renders as
+  // muted with a strikethrough; hovering any pill surfaces the
+  // backend's handler list so the operator can answer "which
+  // services does v1.q3 actually run?" without leaving the view.
+
+  let _topologyCache = null;
+
+  async function _refreshTopology() {
+    const strip = document.getElementById("cluster-topology");
+    if (!strip) return;
+    if (!state.activeCluster) {
+      strip.classList.add("hidden");
+      strip.replaceChildren();
+      _topologyCache = null;
+      return;
+    }
+    let topo;
+    try {
+      topo = await getJSON("/api/cluster/topology",
+        { cluster: state.activeCluster });
+    } catch (e) {
+      strip.classList.add("hidden");
+      return;
+    }
+    // Avoid re-rendering identical state — pill hovers and the
+    // operator's right-click position would be lost on every 30 s
+    // refresh otherwise.
+    const sig = JSON.stringify({
+      n: topo.name, s: topo.discovery_status,
+      b: (topo.backends || []).map(b => [b.prefix, b.alive,
+                                          (b.handlers || []).length]),
+    });
+    if (sig === _topologyCache) return;
+    _topologyCache = sig;
+
+    strip.classList.remove("hidden");
+    strip.replaceChildren();
+
+    const head = el("span", { class: "topo-head" },
+      el("span", { class: "topo-cluster" }, topo.name),
+      el("span", { class: "topo-status muted" }, topo.discovery_status));
+    strip.appendChild(head);
+
+    const pillBox = el("span", { class: "topo-pills" });
+    for (const b of (topo.backends || [])) {
+      const handlers = b.handlers || [];
+      const handlerCount = handlers.length;
+      const tooltip = handlers.length
+            ? `${b.prefix}: ${handlerCount} handler${handlerCount === 1 ? "" : "s"}\n` +
+              handlers.slice(0, 40).join("\n") +
+              (handlers.length > 40 ? `\n…and ${handlers.length - 40} more` : "")
+            : `${b.prefix}: no handlers (down or draining)`;
+      const pill = el("span",
+        { class: "topo-pill" + (b.alive ? "" : " down"),
+          title: tooltip });
+      pill.appendChild(el("span", { class: "topo-dot",
+        style: `background:${b.alive ? smChart.colorFor(b.prefix) : "transparent"}` }));
+      pill.appendChild(document.createTextNode(b.prefix));
+      pill.appendChild(el("span", { class: "topo-count muted" },
+        b.alive ? String(handlerCount) : "—"));
+      pillBox.appendChild(pill);
+    }
+    strip.appendChild(pillBox);
+  }
+
   async function boot() {
     setIndicator("…");
 
@@ -1921,6 +1994,7 @@
     const initialPanel =
       panels.some(p => p.id === parsed.panel) ? parsed.panel : "urls";
     activatePanel(initialPanel);
+    _refreshTopology().catch(() => {});
 
     // Periodically refresh the cluster list (alive counts in the
     // dropdown drift as backends come/go) without thrashing.
@@ -1936,6 +2010,7 @@
           if (sel) sel.value = state.activeCluster;
         }
       }
+      _refreshTopology().catch(() => {});
     }, 30 * 1000);
 
     state.poll = setInterval(tickActive, REFRESH_MS);
