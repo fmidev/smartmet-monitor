@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.5.2
-Release:        9%{?dist}.fmi
+Release:        10%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -151,6 +151,31 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-10.fmi
+- Click any card heading to collapse / expand it. Every
+  ``.section-card`` in every panel becomes collapsible — the
+  Network panel's TCP / Connection-states / Listen-sockets /
+  Per-NIC bandwidth cards, the Proc panel's Memory / I/O /
+  Threads / Page-fault cards, the Overview panel's history
+  mini-charts, and the cluster-mode trend cards on Caches /
+  Services / Plugins / Keys. A ``▾`` chevron rotates to ``▸``
+  when collapsed; everything except the heading row hides
+  (cluster trend cards keep the picker dropdowns visible too,
+  via ``.panel-controls`` exemption). State persists in
+  localStorage keyed by panel + slugified card title, so the
+  operator's layout survives page reloads, tab switches, and
+  the per-2-s panel refresh that rebuilds DOM in Network /
+  Proc / modal-detail.
+- Per-card vertical resize was deliberately deferred. Native
+  ``resize: vertical`` works in the browser but it fights with
+  the canvas-redraw cycle in panels that rebuild HTML on each
+  refresh, and operators have not asked for height control
+  beyond the existing per-canvas defaults. If they do, a
+  ResizeObserver + targeted-canvas-redraw approach is the
+  natural extension; the localStorage state shape already
+  reserves a per-card ``height`` field so a future commit can
+  add it without a schema bump.
+
 * Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-9.fmi
 - Hover tooltip now works on every chart in the dashboard, not
   only the chrome-equipped drawLine/drawLineMulti charts.

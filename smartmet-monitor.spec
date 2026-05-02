@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.5.2
-Release:        9%{?dist}.fmi
+Release:        10%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -120,6 +120,12 @@ make install \
 %{_python3_sitelib}/smartmet_top/
 
 %changelog
+* Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-10.fmi
+- Co-bumped with smartmet-webmon for click-to-collapse on every
+  ``.section-card`` (Network / Proc / Overview history grid plus the
+  cluster-mode trend cards on Caches / Services / Plugins / Keys).
+  See smartmet-webmon changelog.
+
 * Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-9.fmi
 - Co-bumped with smartmet-webmon for the chart hover-tooltip
   coverage on per-row sparklines (Plugins / Services / Caches

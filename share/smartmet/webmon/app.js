@@ -175,6 +175,98 @@
     return items;
   }
 
+  // ---- Card collapse (click-to-toggle, persisted) ----------------
+  //
+  // Every ``.section-card`` in every panel can be collapsed by clicking
+  // its ``<h4>`` title. The card body hides via a CSS sibling selector
+  // (no DOM-wrapping required), the chevron rotates 90°, and the state
+  // persists in localStorage keyed by panel-id + slugified card title
+  // so reloading the dashboard or switching panels keeps the operator's
+  // layout. Cards in panels that rebuild their DOM on every refresh
+  // (Network, Proc, modal-detail) re-acquire the collapsed class on
+  // each setupCardCollapse() call — the persistence layer handles the
+  // re-decoration.
+  //
+  // Per-card vertical resize is deliberately deferred for now: native
+  // CSS ``resize: vertical`` works, but it fights with the canvas
+  // redraw cycle in panels that rebuild HTML on each refresh. A
+  // ResizeObserver + targeted-canvas-redraw approach is the natural
+  // next step but earns its complexity only once operators show they
+  // need height control beyond the existing per-canvas defaults.
+
+  const _CARD_STATE_KEY = "smwebmon:cardState:v1";
+
+  function _loadCardState() {
+    try { return JSON.parse(localStorage.getItem(_CARD_STATE_KEY) || "{}"); }
+    catch (e) { return {}; }
+  }
+  function _saveCardState(s) {
+    try { localStorage.setItem(_CARD_STATE_KEY, JSON.stringify(s)); }
+    catch (e) { /* private mode / quota — silently skip */ }
+  }
+  function _slugify(s) {
+    return String(s || "").toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  }
+
+  function setupCardCollapse(host) {
+    if (!state.active) return;
+    const panelId = state.active;
+    const allState = _loadCardState();
+    const panelState = allState[panelId] || {};
+    for (const card of host.querySelectorAll(".section-card")) {
+      // Two card-header shapes in this codebase:
+      //   1. <h4>title</h4> ... (Network / Proc / Overview history)
+      //   2. <div class="panel-controls"><span class="panel-title">
+      //        title</span><label>...controls...</label></div> ...
+      //      (cluster-mode trend cards in Caches / Services / Plugins / Keys)
+      // Pattern 2's whole control row stays visible when collapsed
+      // (so the operator can still see / use the dropdowns the picker
+      // exposes) and clicking the title-span toggles. The CSS rule
+      // below keeps both shapes visible:
+      //     .section-card.collapsed > *:not(h4):not(.panel-controls)
+      const titleEl = card.querySelector("h4, .panel-title");
+      if (!titleEl) continue;
+      const cardId = card.dataset.cardId
+                  || _slugify(titleEl.textContent || titleEl.innerText || "");
+      if (!cardId) continue;
+      card.dataset.cardId = cardId;
+
+      if (panelState[cardId] && panelState[cardId].collapsed) {
+        card.classList.add("collapsed");
+      } else {
+        card.classList.remove("collapsed");
+      }
+
+      // Wire the click handler once per title element. Re-rendered
+      // headers (DOM rebuild) get a fresh element so the flag is
+      // naturally undefined and we re-wire.
+      if (!titleEl._collapseWired) {
+        titleEl._collapseWired = true;
+        titleEl.addEventListener("click", (e) => {
+          // Don't toggle when the click landed on an input/select/
+          // button inside the title row (cluster trend cards have a
+          // dropdown picker in the same row as the title).
+          if (e.target !== titleEl
+              && e.target.closest("input, select, button, label")) {
+            return;
+          }
+          card.classList.toggle("collapsed");
+          const cs = _loadCardState();
+          const ps = cs[panelId] || (cs[panelId] = {});
+          if (card.classList.contains("collapsed")) {
+            ps[cardId] = Object.assign({}, ps[cardId] || {}, { collapsed: true });
+          } else if (ps[cardId]) {
+            delete ps[cardId].collapsed;
+            if (!Object.keys(ps[cardId]).length) delete ps[cardId];
+          }
+          if (!Object.keys(cs[panelId] || {}).length) delete cs[panelId];
+          _saveCardState(cs);
+        });
+      }
+    }
+  }
+
   // ---- HTTP -------------------------------------------------------
 
   async function getJSON(path, params) {
@@ -1842,13 +1934,15 @@
       showError(e);
       return;
     }
-    PANELS[id].refresh().catch(showError);
+    setupCardCollapse(host);
+    PANELS[id].refresh().then(() => setupCardCollapse(host)).catch(showError);
   }
 
   function tickActive() {
     if (!state.active) return;
+    const host = document.getElementById("panel-host");
     PANELS[state.active].refresh()
-      .then(() => setIndicator("live", "live"))
+      .then(() => { setupCardCollapse(host); setIndicator("live", "live"); })
       .catch(e => showError(e));
     if (state.modalRefresh) state.modalRefresh().catch(showError);
   }

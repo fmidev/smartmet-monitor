@@ -565,6 +565,50 @@ canvas.chart {
   margin: 0 0 0.4rem 0;
   color: var(--header);
   font-size: 0.95em;
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  cursor: pointer;
+  user-select: none;
+}
+/* Cluster-mode chart cards put the heading inside a panel-controls
+   flex row alongside picker dropdowns. Make the title-span clickable
+   the same way an h4 is, and put the chevron on it. */
+.section-card .panel-title {
+  cursor: pointer;
+  user-select: none;
+}
+/* Chevron prepended to every collapsible card heading via ::before so
+   we don't have to touch the panels' DOM-construction code. Rotates
+   with a short transition when the card is collapsed. Both heading
+   shapes (h4 and the cluster-mode .panel-title span inside
+   .panel-controls) get one. */
+.section-card h4::before,
+.section-card .panel-title::before {
+  content: "▾";
+  display: inline-block;
+  width: 0.9em;
+  color: var(--fg-muted);
+  transition: transform 0.15s ease-out;
+  font-size: 0.85em;
+}
+.section-card.collapsed h4::before,
+.section-card.collapsed .panel-title::before {
+  transform: rotate(-90deg);
+}
+/* Hide everything below the heading row when the card is collapsed.
+   ``.panel-controls`` is the cluster-mode title-and-pickers row;
+   it's the heading for those cards so it must stay visible too. */
+.section-card.collapsed > *:not(h4):not(.panel-controls) {
+  display: none;
+}
+/* The heading is interactive but should NOT inherit text-link styling
+   on panels where the card is inside a clickable parent (e.g. URL
+   drill modal). Keep the cursor obviously clickable but not link blue. */
+.section-card h4:hover,
+.section-card .panel-title:hover {
+  background: var(--bg-row-hover);
+  border-radius: 3px;
 }
 .kv {
   display: grid;
