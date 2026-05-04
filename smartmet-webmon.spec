@@ -21,8 +21,8 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-webmon
-Version:        26.5.2
-Release:        13%{?dist}.fmi
+Version:        26.5.4
+Release:        2%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -150,6 +150,18 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-2.fmi
+- /usr/lib/sysctl.d/99-smartmet-perf.conf moved to smartmet-monitor
+  and is now shipped with kernel.perf_event_paranoid commented out;
+  webmon no longer ships its own copy or runs `sysctl --system` in
+  %post. Lowering paranoid is now an explicit operator action — the
+  setting belongs to the host's hardening baseline owner. webmon
+  still loads the kheaders module so bcc-tools can run as a non-root
+  daemon. %description updated; full reasoning in
+  /usr/share/doc/smartmet-monitor/perf-event-paranoid.md.
+- Co-bumped with smartmet-monitor to 26.5.4-2 to keep the
+  Requires: smartmet-monitor = %{version}-%{release} pin satisfiable.
+
 * Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-13.fmi
 - New cluster Proc panel: per-backend memory (RSS), IO read /
   write rates, thread counts, and major page-fault rates as
