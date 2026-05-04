@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.5.4
-Release:        5%{?dist}.fmi
+Release:        6%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -189,6 +189,15 @@ fi
 %config(noreplace) %{_prefix}/lib/sysctl.d/99-smartmet-perf.conf
 
 %changelog
+* Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-6.fmi
+- /usr/lib/sysctl.d/99-smartmet-perf.conf gains a (commented out)
+  kernel.kptr_restrict = 0 line alongside the existing paranoid
+  line. Surfaced because perf record fails with exit 255 on hosts
+  running kptr_restrict=2 — CAP_SYSLOG (which the smwebmon unit
+  now grants) bypasses level 1 but not 2, and operators on
+  hardened hosts need the sysctl path. File stays fully commented;
+  documents the recommended setting alongside the trade-off.
+
 * Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-5.fmi
 - Co-bumped with smartmet-webmon 26.5.4-5 (CAP_DAC_READ_SEARCH added
   to the smwebmon unit so bcc-tools can traverse /sys/kernel/debug).

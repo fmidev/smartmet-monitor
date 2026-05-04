@@ -1917,28 +1917,40 @@
     // (multi-line, paragraph-shaped) is the most useful payload —
     // shown verbatim in monospace so the operator sees what perf
     // actually said, not the panel-friendly first line.
-    function renderFlameDiagnostics(status, totalSamples) {
+    function renderFlameDiagnostics(status, totalSamples, mode) {
       const issues = [];
       const isFailing = s => s && /\bfail|error|denied|not found|unavailable|paranoid/i.test(s);
-      if (status.perf_last_error) {
-        issues.push({ label: "on-CPU (perf record)",
-                      text: status.perf_last_error });
-      } else if (isFailing(status.perf_status)) {
-        issues.push({ label: "on-CPU (perf record)",
-                      text: status.perf_status });
-      }
-      const others = [
-        ["off-CPU (offcputime-bpfcc)", status.offcpu_status],
-        ["page-fault",                  status.pagefault_status],
-        ["wakeup",                      status.wakeup_status],
-        ["block-I/O (blockflame)",      status.blockflame_status],
-        ["malloc",                      status.malloc_status],
-        ["biolat",                      status.biolat_status],
-        ["runqlat",                     status.runqlat_status],
-        ["perfstat",                    status.perfstat_status],
-      ];
-      for (const [label, s] of others) {
-        if (isFailing(s)) issues.push({ label, text: s });
+      // Show only the current mode's sampler diagnostics. Showing
+      // every sampler's status here put failures from runqlat /
+      // biolat / other-mode samplers under the on-CPU panel and so
+      // on, which made no sense in the panel's own context. biolat
+      // / runqlat / perfstat live in the Proc panel and surface
+      // their failures there.
+      const modeSampler = {
+        "on-cpu":        ["on-CPU (perf record)",     status.perf_status,
+                                                       status.perf_last_error],
+        "off-cpu":       ["off-CPU (offcputime-bpfcc)", status.offcpu_status,
+                                                       status.offcpu_last_error],
+        "off-cpu-locks": ["off-CPU locks (offcputime-bpfcc)",
+                                                       status.offcpu_status,
+                                                       status.offcpu_last_error],
+        "pagefault":     ["page-fault",                status.pagefault_status,
+                                                       status.pagefault_last_error],
+        "wakeup":        ["wakeup",                    status.wakeup_status,
+                                                       status.wakeup_last_error],
+        "blockflame":    ["block-I/O (blockflame)",    status.blockflame_status,
+                                                       status.blockflame_last_error],
+        "malloc":        ["malloc",                    status.malloc_status,
+                                                       status.malloc_last_error],
+      };
+      const entry = modeSampler[mode];
+      if (entry) {
+        const [label, statusText, lastError] = entry;
+        if (lastError) {
+          issues.push({ label, text: lastError });
+        } else if (isFailing(statusText)) {
+          issues.push({ label, text: statusText });
+        }
       }
       if (totalSamples > 0 && issues.length === 0) {
         errorEl.classList.add("hidden");
@@ -1964,6 +1976,16 @@
 
     function renderBreadcrumb(path) {
       breadcrumbEl.innerHTML = "";
+      // Visible "Zoom out" affordance for operators who don't try
+      // right-click. Disabled when already at root so the control
+      // never lies about what it'll do. Right-click on the canvas
+      // pops one level; this button pops one level too.
+      const upBtn = el("button",
+        { class: "btn flame-zoom-up", type: "button",
+          ...(path.length === 0 ? { disabled: "" } : {}),
+          events: { click: () => flame.zoomOut() } },
+        "← Zoom out");
+      breadcrumbEl.appendChild(upBtn);
       const root = el("a",
         { class: "crumb", href: "#",
           events: { click: e => { e.preventDefault(); flame.zoomTo([]); } } },
@@ -2000,7 +2022,7 @@
       statusEl.querySelector(".panel-title").textContent =
         `Flame — ${totalSamples} sampled stacks`
         + (status.perf_status ? ` (${status.perf_status})` : "");
-      renderFlameDiagnostics(status, totalSamples);
+      renderFlameDiagnostics(status, totalSamples, ps.mode);
 
       const args = {
         mode: ps.mode,

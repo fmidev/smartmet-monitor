@@ -37,8 +37,11 @@ MemoryMax=512M
 CPUQuota=200%
 
 # smwebmon must call perf_event_open(2) and use bcc-tools to
-# profile smartmetd. Three kernel checks block this for an
-# unprivileged daemon:
+# profile smartmetd. Five kernel checks block this for an
+# unprivileged daemon, each one fixed by a narrow capability that
+# is strictly less broad than the CAP_SYS_ADMIN we already need —
+# so granting them does not expand the worst-case attack surface
+# beyond what installing this unit already implies:
 #
 #   * smartmetd has NoNewPrivileges=1 (its own systemd unit's
 #     hardening), which makes it non-traceable except by callers
@@ -58,18 +61,29 @@ CPUQuota=200%
 #     /sys/kernel/debug/tracing/kprobe_events. /sys/kernel/debug is
 #     mode 700 root:root by default on RHEL, and CAP_SYS_ADMIN does
 #     NOT bypass DAC checks — so traversing into that directory
-#     requires CAP_DAC_READ_SEARCH. Without it the three bcc modes
-#     fail with "create_probe_event: open(...): Permission denied"
-#     even with paranoid=0 and CAP_SYS_ADMIN already granted.
-#     CAP_DAC_READ_SEARCH is the narrower fit (read+traverse only,
-#     not write); CAP_SYS_ADMIN is broader anyway, so adding the
-#     narrower cap doesn't expand the worst-case attack surface.
+#     requires CAP_DAC_READ_SEARCH (narrower than CAP_DAC_OVERRIDE;
+#     read+traverse only, not write).
+#
+#   * perf_event_open's mmap path mlocks the per-CPU ring buffer.
+#     Without CAP_IPC_LOCK an unprivileged caller is constrained
+#     by RLIMIT_MEMLOCK and kernel.perf_event_mlock_kb (default
+#     516 KB — too small for off-CPU's stack ring), and the call
+#     fails with "mmap: Operation not permitted".
+#
+#   * /proc/kallsyms returns zeros to non-root readers when
+#     kernel.kptr_restrict >= 1 (the RHEL default is 1) and perf
+#     bails out at exit 255 because it can't locate the kernel
+#     reference relocation symbol. CAP_SYSLOG bypasses
+#     kptr_restrict=1 (but not =2 — that one needs the sysctl
+#     lowered host-wide). On hardened hosts running kptr_restrict=2
+#     the operator additionally uncomments the kptr_restrict line
+#     in /usr/lib/sysctl.d/99-smartmet-perf.conf.
 #
 # AmbientCapabilities only takes effect when NoNewPrivileges is
 # unset, so we drop it from this unit deliberately. The remaining
 # hardening (ProtectSystem, ProtectHome, PrivateTmp) still applies.
-AmbientCapabilities=CAP_SYS_PTRACE CAP_SYS_ADMIN CAP_DAC_READ_SEARCH
-CapabilityBoundingSet=CAP_SYS_PTRACE CAP_SYS_ADMIN CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_SYS_PTRACE CAP_SYS_ADMIN CAP_DAC_READ_SEARCH CAP_IPC_LOCK CAP_SYSLOG
+CapabilityBoundingSet=CAP_SYS_PTRACE CAP_SYS_ADMIN CAP_DAC_READ_SEARCH CAP_IPC_LOCK CAP_SYSLOG
 NoNewPrivileges=no
 ProtectSystem=strict
 ProtectHome=yes

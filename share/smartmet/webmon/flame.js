@@ -89,6 +89,14 @@
       this.unit = "samples";
 
       this.canvas.addEventListener("click", e => this._onClick(e));
+      // Right-click pops one level up — matches flamegraph.com /
+      // Speedscope convention. preventDefault() suppresses the
+      // browser's context menu so the right-click feels like a
+      // first-class navigation control.
+      this.canvas.addEventListener("contextmenu", e => {
+        e.preventDefault();
+        this.zoomOut();
+      });
       this.canvas.addEventListener("mousemove", e => this._onMove(e));
       this.canvas.addEventListener("mouseleave", () => this._hideTip());
 

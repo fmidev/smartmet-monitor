@@ -429,18 +429,31 @@ canvas.chart {
 #flame-breadcrumb {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 4px;
-  padding: 0.4rem 0.75rem;
-  font-size: 0.9em;
-  color: var(--fg-muted);
+  align-items: center;
+  gap: 6px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.95em;
+  color: var(--fg);
+  background: var(--bg-row-alt, transparent);
+  border-radius: 4px;
 }
 #flame-breadcrumb .crumb {
   cursor: pointer;
   color: var(--accent);
   text-decoration: none;
+  font-weight: 500;
 }
 #flame-breadcrumb .crumb:hover { text-decoration: underline; }
 #flame-breadcrumb .sep { color: var(--fg-dim); }
+#flame-breadcrumb .flame-zoom-up {
+  margin-right: 6px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.85em;
+}
+#flame-breadcrumb .flame-zoom-up[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 .flame-tooltip {
   position: fixed;
   pointer-events: none;

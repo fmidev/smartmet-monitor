@@ -83,6 +83,15 @@ def _make_handler_class(store, asset_root: str, registry=None):
             self.send_response(200)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
+            # No-store on the operator's HTML/JS/CSS: an RPM upgrade
+            # changes the asset on disk and a daemon reload picks it up
+            # from the next request, but without Cache-Control the
+            # browser keeps serving the previous version under
+            # heuristic caching — even Ctrl+Shift+R doesn't always
+            # defeat that. Cost is negligible (small files, loopback)
+            # versus "operator thinks the upgrade didn't apply" wasted
+            # debugging.
+            self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
 

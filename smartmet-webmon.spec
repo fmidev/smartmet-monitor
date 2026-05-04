@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.5.4
-Release:        5%{?dist}.fmi
+Release:        6%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -150,6 +150,46 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-6.fmi
+- Cache-Control: no-store on the static asset responses
+  (server.py). The handler previously sent no Cache-Control on
+  HTML/JS/CSS, so browsers used heuristic caching and kept
+  serving the previous flame.js / app.js / style.css after an
+  RPM upgrade — turning every "bug fix shipped" into "but the
+  user thinks it didn't". no-store on small files served over
+  loopback has negligible cost; closes a class of stale-asset
+  confusion permanently.
+- smwebmon unit gains CAP_IPC_LOCK and CAP_SYSLOG. CAP_IPC_LOCK
+  fixes off-CPU's "mmap: Operation not permitted" — perf_event_open's
+  mmap path mlocks the per-CPU ring buffer beyond
+  perf_event_mlock_kb's default 516 KB, which an unprivileged
+  daemon can't do without it. CAP_SYSLOG bypasses
+  kernel.kptr_restrict=1 (the RHEL default) so /proc/kallsyms
+  resolves and perf doesn't bail at exit 255. Both are strictly
+  narrower than the CAP_SYS_ADMIN already in the unit; same
+  justification chain as CAP_DAC_READ_SEARCH from 26.5.4-5.
+- Flame panel diagnostics block now scoped to the currently-
+  selected mode. Previously every sampler's failure surfaced
+  in every flame mode's diagnostics — runqlat / biolat /
+  perfstat (which aren't even flame modes) appeared under
+  on-CPU, which made no sense in that context. Each mode now
+  shows only its own sampler; biolat / runqlat / perfstat
+  failures continue to surface in the Proc panel where they
+  belong.
+- Flame zoom-out is now discoverable. Three new affordances:
+  right-click anywhere on the canvas pops one level up
+  (matches flamegraph.com / Speedscope convention); a visible
+  "← Zoom out" button next to the breadcrumb does the same;
+  the breadcrumb itself got bolder styling — slightly larger,
+  full-color text instead of muted, and a subtle background
+  strip — so operators stop missing it. The breadcrumb's root
+  link still does "all the way out".
+- Existing webmon installs picking this up need a
+  `systemctl daemon-reload && systemctl restart smartmet-webmon`
+  for the new caps to apply, and a force-reload of the
+  dashboard (Ctrl+Shift+R) once for the browser to drop its
+  pre-no-store cache of flame.js / app.js / style.css.
+
 * Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-5.fmi
 - Add CAP_DAC_READ_SEARCH to the smwebmon unit's AmbientCapabilities
   / CapabilityBoundingSet. /sys/kernel/debug is mode 700 root:root
