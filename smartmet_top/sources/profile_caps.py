@@ -120,6 +120,62 @@ def perf_event_paranoid() -> int:
         return 2
 
 
+@lru_cache(maxsize=1)
+def kernel_build_dir() -> Tuple[bool, str]:
+    """Probe /lib/modules/$(uname -r)/build, the directory bcc-tools
+    needs to compile their BPF C source at runtime via libclang.
+
+    Returns (ok, detail). The interesting case is the *dangling
+    symlink*: kernel-devel was installed but for the wrong kernel,
+    so /lib/modules/$KERNEL/build exists as a symlink whose target
+    `/usr/src/kernels/$KERNEL` does not. `os.path.isdir` follows the
+    symlink and returns False; `os.path.islink` says yes. That tells
+    us the operator did `dnf install kernel-devel` but dnf picked a
+    version newer than what's running.
+
+    The kheaders module is an alternative — when loaded, bcc-tools
+    use /sys/kernel/kheaders.tar.xz instead. Treat that as success
+    independently of the build directory.
+    """
+    if os.path.exists("/sys/kernel/kheaders.tar.xz"):
+        return True, "kheaders module loaded (/sys/kernel/kheaders.tar.xz)"
+    rel = platform.release()
+    path = f"/lib/modules/{rel}/build"
+    if os.path.isdir(path):
+        return True, path
+    if os.path.islink(path):
+        target = os.readlink(path)
+        return False, (f"{path} is a dangling symlink to {target} — installed "
+                       f"kernel-devel does not match the running kernel "
+                       f"({rel})")
+    return False, (f"{path} missing — kernel-devel not installed for the "
+                   f"running kernel ({rel})")
+
+
+def bcc_kernel_headers_blocks() -> Optional[str]:
+    """Return a human-readable warning if bcc-tools cannot compile
+    BPF programs against the running kernel, else None.
+
+    The first sentence is a title-shaped one-liner the panel renders
+    in bold; the rest is the explanation, naming the running kernel
+    and the exact dnf command needed to fix it plus the kheaders
+    modprobe fallback for operators who can't reboot or install
+    packages right now.
+    """
+    ok, detail = kernel_build_dir()
+    if ok:
+        return None
+    rel = platform.release()
+    return (f"Missing kernel-devel for the running kernel ({rel}). "
+            f"{detail}. Install matching headers with "
+            f"`sudo dnf install kernel-devel-{rel}`, or for an "
+            f"immediate workaround `sudo modprobe kheaders` (writes "
+            f"/sys/kernel/kheaders.tar.xz which bcc-tools also accept). "
+            f"After a kernel update a reboot is the cleanest fix — "
+            f"the new running kernel will match the kernel-devel that "
+            f"got pulled in alongside it.")
+
+
 def perf_paranoid_blocks(required_max: int) -> Optional[str]:
     """Return a human warning string if perf_event_paranoid is higher
     than `required_max`, else None.
@@ -136,9 +192,9 @@ def perf_paranoid_blocks(required_max: int) -> Optional[str]:
     cur = perf_event_paranoid()
     if cur <= required_max:
         return None
-    return (f"kernel.perf_event_paranoid={cur}, this panel needs <={required_max}; "
-            f"uncomment the line in /usr/lib/sysctl.d/99-smartmet-perf.conf "
-            f"(or set in /etc/sysctl.d/) and run `sudo sysctl --system`")
+    return (f"kernel.perf_event_paranoid={cur}; this panel needs <={required_max}. "
+            f"Uncomment the line in /usr/lib/sysctl.d/99-smartmet-perf.conf "
+            f"(or set in /etc/sysctl.d/) and run `sudo sysctl --system`.")
 
 
 @lru_cache(maxsize=1)

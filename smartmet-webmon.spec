@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.5.4
-Release:        2%{?dist}.fmi
+Release:        3%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -150,6 +150,12 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-3.fmi
+- Co-bumped with smartmet-monitor 26.5.4-3 to keep the
+  Requires: smartmet-monitor = %{version}-%{release} pin
+  satisfiable. No webmon-specific changes; the kernel-devel
+  detection logic and %post warning live in smartmet-monitor.
+
 * Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-2.fmi
 - /usr/lib/sysctl.d/99-smartmet-perf.conf moved to smartmet-monitor
   and is now shipped with kernel.perf_event_paranoid commented out;

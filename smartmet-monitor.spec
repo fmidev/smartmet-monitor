@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.5.4
-Release:        2%{?dist}.fmi
+Release:        3%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -46,16 +46,26 @@ Recommends:     bcc-tools
 Recommends:     bpftrace
 # bcc-tools (offcputime-bpfcc, biolat-bpfcc, runqlat-bpfcc) compile
 # their BPF C source at runtime via libclang against the in-tree
-# kernel headers at /lib/modules/$(uname -r)/build. Without
-# kernel-devel installed they fail the moment they are launched
-# with `chdir(.../build): No such file or directory`. We Require
-# rather than Recommend because the Flame panel's analyse overlay
-# treats the bcc-backed detectors as table stakes, not optional.
-# Note: the running kernel must match an installed kernel-devel;
-# `dnf install kernel-devel-$(uname -r)` is the operator's job
-# after a kernel update, since a noarch package cannot pin to the
-# currently-running kernel version.
-Requires:       kernel-devel
+# kernel headers at /lib/modules/$(uname -r)/build. They need
+# kernel-devel matching the *running* kernel — not just any
+# kernel-devel. A noarch RPM has no way to express that constraint:
+# `Requires: kernel-devel` resolves at install time on the latest
+# version dnf can find, which is routinely newer than what's running
+# (especially on hosts that haven't rebooted since their last kernel
+# update). The earlier 26.5.4-2 build did Require kernel-devel and
+# the resulting silent mismatch was worse than no Requires at all —
+# the operator saw "kernel-devel installed" yet bcc-tools still
+# failed with `chdir(.../build): No such file or directory`.
+#
+# kernel-devel-uname-r is a virtual provide each kernel-devel package
+# carries; the Recommends keeps it on the operator's radar without
+# claiming a guarantee we can't deliver. Runtime detection in
+# profile_caps.kernel_build_dir() distinguishes "missing", "dangling
+# symlink (wrong version installed)", and "valid", and the Flame
+# panel's off-CPU mode surfaces a clean install hint with the exact
+# `dnf install kernel-devel-$(uname -r)` command and the
+# `modprobe kheaders` fallback.
+Recommends:     kernel-devel-uname-r
 
 %description
 Two companion tools for operating a SmartMet Server:
@@ -92,6 +102,43 @@ make install \
     DESTDIR=%{buildroot} \
     PREFIX=%{_prefix} \
     PYSITELIB=%{_python3_sitelib}
+
+%post
+# bcc-tools (offcputime-bpfcc, biolat-bpfcc, runqlat-bpfcc) need
+# either /lib/modules/$(uname -r)/build to be a valid directory or
+# /sys/kernel/kheaders.tar.xz to exist. A noarch RPM cannot Require
+# kernel-devel for the running kernel — `Requires: kernel-devel`
+# resolves at install time on whatever's newest in the repo, which
+# is routinely newer than the running kernel on hosts that haven't
+# rebooted since their last update. Surface the mismatch here
+# instead of letting the operator discover it later via the panel's
+# install hint. -d follows symlinks, so the check catches both
+# "missing" and "dangling symlink (wrong version installed)".
+# May fire spuriously during a combined `dnf install
+# smartmet-webmon` since smartmet-webmon's %post (which runs after
+# this one) modprobes kheaders; the warning is informational and
+# the operator can verify post-transaction with `ls
+# /sys/kernel/kheaders.tar.xz`.
+KREL=$(uname -r)
+if [ ! -e "/sys/kernel/kheaders.tar.xz" ] && [ ! -d "/lib/modules/$KREL/build/" ]; then
+    cat <<EOF
+
+NOTE: smartmet-monitor's bcc-backed flame modes (off-CPU, biolat,
+runqlat) will fail until kernel headers are available for the
+running kernel ($KREL). Either:
+
+    sudo dnf install kernel-devel-$KREL    (matching headers)
+    OR
+    sudo modprobe kheaders                  (immediate workaround;
+                                             writes /sys/kernel/kheaders.tar.xz
+                                             which bcc-tools also accept)
+
+Other smtop features (URLs, log analysis, Proc memory/IO, on-CPU
+flame) work without this. See
+/usr/share/doc/smartmet-monitor/perf-event-paranoid.md.
+
+EOF
+fi
 
 %files
 %{_bindir}/smtop
@@ -142,6 +189,29 @@ make install \
 %config(noreplace) %{_prefix}/lib/sysctl.d/99-smartmet-perf.conf
 
 %changelog
+* Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-3.fmi
+- Drop the `Requires: kernel-devel` introduced in 26.5.4-2; restore
+  `Recommends: kernel-devel-uname-r`. A noarch package cannot pin
+  Requires to the running kernel, so dnf installed whatever
+  kernel-devel was newest in the repo (typically newer than the
+  running kernel on hosts that haven't rebooted post-update). The
+  Requires looked like a guarantee that wasn't there, and operators
+  ended up seeing "kernel-devel installed" yet bcc-tools still
+  failing with `chdir(.../build): No such file or directory`.
+- Flame panel's off-CPU mode now detects the actual condition:
+  /lib/modules/$(uname -r)/build missing, dangling (wrong version
+  installed), or valid (incl. /sys/kernel/kheaders.tar.xz fallback).
+  Surfaces a clean warning naming the running kernel and the exact
+  `sudo dnf install kernel-devel-$(uname -r)` command, plus the
+  `sudo modprobe kheaders` fallback for operators who can't install
+  or reboot right now. Replaces bcc's cryptic chdir error with
+  something actionable.
+- New %post scriptlet runs the same check at install/upgrade time
+  and prints the same install hint as the panel — so an operator
+  who hits the kernel-devel mismatch sees it during `dnf install`,
+  not later when they open the Flame panel for the first time and
+  wonder why nothing renders.
+
 * Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-2.fmi
 - Require kernel-devel so bcc-tools (offcputime-bpfcc, biolat-bpfcc,
   runqlat-bpfcc) find the in-tree kernel headers at runtime instead

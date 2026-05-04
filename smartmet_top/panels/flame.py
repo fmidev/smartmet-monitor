@@ -30,7 +30,9 @@ from typing import Dict, List, Optional, Tuple
 
 from .. import theme
 from ..sources.analyze import Finding, SEV_HIGH, SEV_MED, analyze
-from ..sources.profile_caps import perf_paranoid_blocks
+from ..sources.profile_caps import (
+    bcc_kernel_headers_blocks, perf_paranoid_blocks,
+)
 from ..sources.smartmet_filter import (
     THREAD_CLASS_ALL,
     THREAD_CLASS_BACKGROUND,
@@ -846,6 +848,16 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
         and what message we show when there is no data yet.
         """
         h, w = win.getmaxyx()
+        # Two install-time conditions can stop offcputime-bpfcc before
+        # it ever produces a sample. Surface them up-front instead of
+        # relaying bcc's native error (a chdir(.../build) line for the
+        # kernel-headers case, or a perf_event_open EPERM for the
+        # paranoid case) — the operator needs to know what to do.
+        warn = bcc_kernel_headers_blocks()
+        if warn:
+            self._last_frames = []
+            self._last_root = {}
+            return self._draw_paranoid_warning(win, top, h - 2, warn)
         warn = perf_paranoid_blocks(1)
         if warn:
             self._last_frames = []
@@ -1393,20 +1405,34 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
 
     def _draw_paranoid_warning(self, win, top: int, max_y: int,
                                msg: str) -> int:
-        """Replace the panel body with a clean paranoid-too-high
+        """Replace the panel body with a clean install-time-condition
         warning. Used for modes whose recorder cannot start at all
-        until kernel.perf_event_paranoid is lowered — the perf
-        binary's native error there is "event syntax error: ..."
-        which doesn't tell the operator what to do. Returns the
-        bottom row written so the caller can place the rest of the
-        panel below it (or skip the body entirely)."""
+        until something on the host is fixed (paranoid lowered,
+        kernel-devel installed for the running kernel, kheaders
+        loaded). The native error from perf or bcc in those cases is
+        cryptic — "event syntax error: ..." or "chdir(.../build): No
+        such file or directory" — and doesn't tell the operator what
+        to do. Returns the bottom row written so the caller can place
+        the rest of the panel below it (or skip the body entirely).
+
+        The leading line is derived from the first sentence of the
+        message so the title matches the cause (paranoid vs. kernel
+        headers vs. ...). Helper name kept for compatibility with the
+        first caller; no longer paranoid-specific.
+        """
         h, w = win.getmaxyx()
-        safe_addstr(win, top, 2,
-                    "this panel needs a lower perf_event_paranoid",
+        # Title = first sentence (up to the first period followed by
+        # a space, or the whole message if there is no such break).
+        title, sep, rest = msg.partition(". ")
+        title = (title + sep.rstrip()).rstrip(".") + "."
+        body = rest if rest else ""
+        safe_addstr(win, top, 2, title[:max(0, w - 4)],
                     theme.attr(theme.P_BAD, curses.A_BOLD))
-        # Word-wrap the explanation so the file path and the
-        # `sysctl --system` invocation aren't truncated.
-        words = msg.split()
+        if not body:
+            return min(top + 2, max_y)
+        # Word-wrap the explanation so the file paths and command
+        # examples aren't truncated.
+        words = body.split()
         lines: List[str] = []
         cur = ""
         max_w = max(20, w - 6)
