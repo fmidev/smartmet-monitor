@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.5.4
-Release:        9%{?dist}.fmi
+Release:        10%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -197,6 +197,23 @@ fi
 %config(noreplace) %{_prefix}/lib/sysctl.d/99-smartmet-perf.conf
 
 %changelog
+* Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-10.fmi
+- Plugins panel: drop the "1m" entry from the window selector. It
+  shared the visual meaning of the existing "60s" entry but mapped
+  to minute_window(1), which returns only the *current* incomplete
+  minute bucket — empty 0-60 s after a minute boundary regardless of
+  traffic, indistinguishable from "60s" by label, and confusing in
+  every way. Operators wanting a 1-minute view continue to use "60s",
+  which merges 60 finalised per-second buckets and is the right
+  implementation for that visual meaning.
+- PluginsSnapshot.trends() now emits step_seconds + last_ts alongside
+  the per-source rows. Mirrors what CachesSnapshot.trends() and
+  ServicesSnapshot.trends() already returned. The browser threads
+  these through to drawSparkline so the per-row hover tooltip shows
+  the time at the cursor — previously the Plugins / Caches / Services
+  per-row sparks rendered value-only on hover, with no time, which
+  was disorienting whenever the time axis was coarse.
+
 * Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-9.fmi
 - New Heap section in the Proc panel surfaces the SmartMet
   process's allocator stats (jemalloc only — mimalloc text is

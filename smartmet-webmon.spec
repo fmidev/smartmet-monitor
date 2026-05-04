@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.5.4
-Release:        9%{?dist}.fmi
+Release:        10%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -150,6 +150,18 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-10.fmi
+- Per-row sparklines in the Plugins, Caches, and Services tables
+  now show the time-at-cursor in their hover tooltip, threaded
+  via the existing last_ts / step_seconds plumbing in chart.js.
+  Previously they rendered value-only, which was disorienting
+  with coarse time axes. The cluster-mode multi-line charts on
+  top of those panels already had time-on-hover; this brings the
+  per-row sparks to parity.
+- Plugins panel window selector loses the "1m" entry (see
+  smartmet-monitor 26.5.4-10 changelog for the why).
+- Co-bumped with smartmet-monitor 26.5.4-10.
+
 * Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-9.fmi
 - New Heap tab in the dashboard surfaces the same allocator
   stats the smtop Proc panel renders. Per host: allocated /

@@ -635,7 +635,7 @@
           el("span", { class: "panel-title" }, "Plugins"),
           el("label", null, "window",
             selectInput("p-window", ps.window,
-              [["60s","60s"],["1m","1m"],["5m","5m"],["15m","15m"],["60m","60m"]]
+              [["60s","60s"],["5m","5m"],["15m","15m"],["60m","60m"]]
                 .map(([v,l]) => ({value:v,label:l})),
               v => { ps.window = v; refresh(); })),
           el("label", null, "sort",
@@ -706,13 +706,19 @@
           const lat = tr.querySelector('canvas[data-role="lat-spark"]');
           const sz  = tr.querySelector('canvas[data-role="size-spark"]');
           // Draw after a microtask so the canvas has a measured layout.
+          // Pull last_ts / step_seconds from the trends payload so the
+          // sparkline tooltip can show the time at the cursor (without
+          // them the tooltip would display value-only — no time).
+          const ltOpts = trends.last_ts != null && trends.step_seconds
+            ? { last_ts: trends.last_ts, step_seconds: trends.step_seconds }
+            : {};
           requestAnimationFrame(() => {
             smChart.drawSparkline(lat, m.mean_ms || [],
                                   { color: smChart.PALETTE.line,
-                                    fmtY: fmtMs });
+                                    fmtY: fmtMs, ...ltOpts });
             smChart.drawSparkline(sz, m.bytes_mean || [],
                                   { color: smChart.PALETTE.accent2,
-                                    fmtY: fmtBytes });
+                                    fmtY: fmtBytes, ...ltOpts });
           });
         },
       });
@@ -985,8 +991,15 @@
           afterRow(tr, r) {
             const c = tr.querySelector('canvas[data-role="trend"]');
             const series = tBy.get(`${r.host}::${r.cache_name}`) || [];
+            // step_seconds + last_ts come from the /caches/trends
+            // response — same plumbing the cluster chart already uses,
+            // here threaded into the per-row spark so the tooltip
+            // shows the time at the cursor, not just the value.
+            const tsOpts = trends.last_ts != null && trends.step_seconds
+              ? { last_ts: trends.last_ts, step_seconds: trends.step_seconds }
+              : {};
             requestAnimationFrame(() => smChart.drawSparkline(c, series,
-              { fmtY: v => v.toFixed(1) }));
+              { fmtY: v => v.toFixed(1), ...tsOpts }));
           },
         });
       },
@@ -1136,8 +1149,13 @@
           afterRow(tr, r) {
             const c = tr.querySelector('canvas[data-role="trend"]');
             const series = tBy.get(`${r.host}::${r.handler}`) || [];
+            // step_seconds + last_ts from /services/trends so the spark
+            // tooltip shows time-at-cursor, not just the value.
+            const tsOpts = trends.last_ts != null && trends.step_seconds
+              ? { last_ts: trends.last_ts, step_seconds: trends.step_seconds }
+              : {};
             requestAnimationFrame(() => smChart.drawSparkline(c, series,
-              { fmtY: v => v.toFixed(0) }));
+              { fmtY: v => v.toFixed(0), ...tsOpts }));
           },
         });
       },

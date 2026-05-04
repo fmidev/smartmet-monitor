@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import time
 from typing import List, Tuple
 
 # (display label, span, resolution)
+#
+# An earlier "1m" entry that mapped to ``minute_window(1)`` was removed:
+# it shared the visual meaning of the existing "60s" entry but was
+# implemented as "merge only the *current* minute bucket", which is
+# the in-progress incomplete bucket of length 0..60 s depending on
+# wall-clock alignment. On low-rate panels it appeared permanently
+# empty, and operators couldn't tell it apart from "60s" by label.
+# The "60s" entry is the right way to ask for the last minute's
+# traffic — it merges 60 per-second buckets, finalised.
 WINDOWS = (
     ("60s", 60, "second"),
-    ("1m",  1,  "minute"),
     ("5m",  5,  "minute"),
     ("15m", 15, "minute"),
     ("60m", 60, "minute"),
@@ -163,8 +172,20 @@ class PluginsSnapshot:
                                      for vs in metric_data.values()):
                 continue
             out.append({"label": src.label, "metrics": metric_data})
+        # Series step + last-timestamp so the JS chart can render
+        # per-point timestamps in its hover tooltip. step is 1 s for
+        # second-resolution windows, 60 s for minute-resolution; last_ts
+        # is "now" for second windows (the last value covers the most
+        # recent finalised second) and the start of the current minute
+        # for minute windows.
+        now = int(time.time())
+        step_seconds = 1.0 if resolution == "second" else 60.0
+        last_ts = float(now if resolution == "second"
+                        else (now // 60) * 60)
         return {
             "window_label": window_label,
             "metrics": list(metrics),
+            "step_seconds": step_seconds,
+            "last_ts": last_ts,
             "rows": out,
         }
