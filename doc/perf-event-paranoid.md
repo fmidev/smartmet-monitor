@@ -17,14 +17,16 @@ value their host should run with and why.
 A typical SmartMet backend that wants the full diagnostic kit
 (on-CPU + off-CPU + page-fault + wakeup + block-I/O flames, IPC/cache
 stats, latency histograms) needs `paranoid = 0` plus the `kheaders`
-kernel module pre-loaded for `bcc-tools`. **Installing
-`smartmet-webmon` (>= 26.4.30-7) does both automatically** —
-`/usr/lib/sysctl.d/99-smartmet-perf.conf` sets paranoid to 0,
-`/usr/lib/modules-load.d/smartmet-perf.conf` pre-loads kheaders, and
-the package's `%post` applies both immediately so no reboot is
-needed. Sites that can't accept these defaults should use the CLI
-tools (`smtop`, `bstat`, `bperf`) from `smartmet-monitor` instead
-and not install `smartmet-webmon`.
+kernel module pre-loaded for `bcc-tools`. The `smartmet-monitor`
+package ships `/usr/lib/sysctl.d/99-smartmet-perf.conf` with the
+recommended setting **commented out** — installing the RPM does not
+silently relax host security. The operator uncomments the line (or
+copies it to `/etc/sysctl.d/99-smartmet-perf.conf`) once the change
+is approved by whoever owns the host's hardening baseline, then runs
+`sudo sysctl --system` to apply. The companion `smartmet-webmon`
+package ships `/usr/lib/modules-load.d/smartmet-perf.conf` and runs
+`modprobe kheaders` from `%post` so the daemon use case has the
+module available without a reboot.
 
 The rest of this document covers the per-feature compatibility table,
 the alternatives for hosts that need a more surgical setup, and the
@@ -159,16 +161,25 @@ sudo -u nobody perf record -F 99 --call-graph=dwarf,32768 \
 echo "exit=$?"
 ```
 
-### Override the smartmet-webmon defaults
+### Override the vendor stub
 
-If you need a different value than the package ships:
+The smartmet-monitor RPM ships `/usr/lib/sysctl.d/99-smartmet-perf.conf`
+with every line commented out, so by default the file applies
+nothing. Two ways to activate the recommended `paranoid = 0`:
 
 ```sh
-# Override smartmet-webmon's 99-smartmet-perf.conf with a higher-
-# numbered file in /etc/ (which beats /usr/lib/) — RPM upgrades
-# won't touch your override.
-echo 'kernel.perf_event_paranoid = 2' | \
-    sudo tee /etc/sysctl.d/99-site-paranoid.conf
+# Edit the vendor file directly — uncomment the kernel.perf_event_paranoid
+# line. RPM upgrades treat it as %config(noreplace) so your edit
+# survives.
+sudoedit /usr/lib/sysctl.d/99-smartmet-perf.conf
+sudo sysctl --system
+```
+
+```sh
+# Or override via /etc/sysctl.d/, which beats /usr/lib/ — keeps the
+# vendor file untouched.
+echo 'kernel.perf_event_paranoid = 0' | \
+    sudo tee /etc/sysctl.d/99-smartmet-perf.conf
 sudo sysctl --system
 ```
 

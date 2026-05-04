@@ -103,6 +103,45 @@ def _tracepoint_exists(name: str) -> bool:
 
 
 @lru_cache(maxsize=1)
+def perf_event_paranoid() -> int:
+    """Current value of /proc/sys/kernel/perf_event_paranoid.
+
+    Returns 2 (the RHEL default) on read failure — choosing the
+    conservative side so the panel surfaces the warning rather than
+    silently masking it. Cached for the process lifetime: the value
+    can in principle change while smtop runs, but uncached re-reads
+    on every panel redraw would be wasteful, and the user can press
+    `r` (reset) to recreate caches.
+    """
+    try:
+        with open("/proc/sys/kernel/perf_event_paranoid") as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return 2
+
+
+def perf_paranoid_blocks(required_max: int) -> Optional[str]:
+    """Return a human warning string if perf_event_paranoid is higher
+    than `required_max`, else None.
+
+    `required_max` is the highest paranoid value at which the caller's
+    feature still works for an unprivileged user, per the table in
+    doc/perf-event-paranoid.md (e.g. 0 for tracepoint events like
+    sched:sched_wakeup, 1 for the bcc off-CPU path).
+
+    The returned string names the current value, the required ceiling,
+    and the file an operator can edit to fix it — short enough to fit
+    in a flame-panel error line.
+    """
+    cur = perf_event_paranoid()
+    if cur <= required_max:
+        return None
+    return (f"kernel.perf_event_paranoid={cur}, this panel needs <={required_max}; "
+            f"uncomment the line in /usr/lib/sysctl.d/99-smartmet-perf.conf "
+            f"(or set in /etc/sysctl.d/) and run `sudo sysctl --system`")
+
+
+@lru_cache(maxsize=1)
 def have_perf() -> CapResult:
     if shutil.which("perf"):
         return True, "perf in PATH"

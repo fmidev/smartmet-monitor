@@ -30,6 +30,7 @@ from typing import Dict, List, Optional, Tuple
 
 from .. import theme
 from ..sources.analyze import Finding, SEV_HIGH, SEV_MED, analyze
+from ..sources.profile_caps import perf_paranoid_blocks
 from ..sources.smartmet_filter import (
     THREAD_CLASS_ALL,
     THREAD_CLASS_BACKGROUND,
@@ -834,47 +835,7 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
         # the ring was new and we were paranoid about CPU cost; tree
         # construction is fast.
         full_root = _build_flame_tree(stacks)
-        self._last_root = full_root
-        if self.zoom_path:
-            visible_root = _subtree_at(full_root, self.zoom_path)
-            if visible_root is None or not visible_root:
-                # Zoomed function disappeared from the latest stacks —
-                # quietly walk back up until we find something to render.
-                while self.zoom_path:
-                    self.zoom_path = self.zoom_path[:-1]
-                    visible_root = (_subtree_at(full_root, self.zoom_path)
-                                    if self.zoom_path else full_root)
-                    if visible_root:
-                        break
-                if not visible_root:
-                    visible_root = full_root
-        else:
-            visible_root = full_root
-
-        # Cap flame to half the screen so the symbol list always has room.
-        flame_top = top
-        flame_max_y = max(flame_top + 2, h - 12)
-        self._ensure_cursor()
-        frames = _render_flame(
-            win, flame_top, flame_max_y, 0, w - 1,
-            visible_root, self.zoom_path, self.cursor_path,
-        )
-        self._last_frames = frames
-        # If the cursor wasn't valid (first render or after PID switch),
-        # try again now that we know the new frame map.
-        if not self._frame_at(self.cursor_path):
-            self._ensure_cursor()
-            # Rerender just the highlight without rebuilding everything:
-            target = self._frame_at(self.cursor_path)
-            if target is not None:
-                y, xs, xe, sym, _cnt, _path = target
-                cw = xe - xs
-                label = sym[:cw] if len(sym) > cw else sym + " " * (cw - len(sym))
-                safe_addstr(win, y, xs, label,
-                            theme.attr(theme.P_HIGHLIGHT,
-                                       curses.A_BOLD | curses.A_UNDERLINE))
-        bottom = _max_depth(frames) if frames else flame_top
-        return bottom + 1
+        return self._render_with_zoom(win, full_root, top)
 
     def _draw_off_cpu_flame(self, win, store, info: ProcInfo,
                             top: int) -> int:
@@ -885,6 +846,11 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
         and what message we show when there is no data yet.
         """
         h, w = win.getmaxyx()
+        warn = perf_paranoid_blocks(1)
+        if warn:
+            self._last_frames = []
+            self._last_root = {}
+            return self._draw_paranoid_warning(win, top, h - 2, warn)
         if not store.offcpu_enabled:
             self._draw_offcpu_unavailable(win, store, top)
             self._last_frames = []
@@ -915,40 +881,7 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
             self._last_root = {}
             return top + 1
         full_root = _build_flame_tree(weighted)
-        self._last_root = full_root
-        if self.zoom_path:
-            visible_root = _subtree_at(full_root, self.zoom_path)
-            if visible_root is None or not visible_root:
-                while self.zoom_path:
-                    self.zoom_path = self.zoom_path[:-1]
-                    visible_root = (_subtree_at(full_root, self.zoom_path)
-                                    if self.zoom_path else full_root)
-                    if visible_root:
-                        break
-                if not visible_root:
-                    visible_root = full_root
-        else:
-            visible_root = full_root
-        flame_top = top
-        flame_max_y = max(flame_top + 2, h - 12)
-        self._ensure_cursor()
-        frames = _render_flame(
-            win, flame_top, flame_max_y, 0, w - 1,
-            visible_root, self.zoom_path, self.cursor_path,
-        )
-        self._last_frames = frames
-        if not self._frame_at(self.cursor_path):
-            self._ensure_cursor()
-            target = self._frame_at(self.cursor_path)
-            if target is not None:
-                y, xs, xe, sym, _cnt, _path = target
-                cw = xe - xs
-                label = sym[:cw] if len(sym) > cw else sym + " " * (cw - len(sym))
-                safe_addstr(win, y, xs, label,
-                            theme.attr(theme.P_HIGHLIGHT,
-                                       curses.A_BOLD | curses.A_UNDERLINE))
-        bottom = _max_depth(frames) if frames else flame_top
-        return bottom + 1
+        return self._render_with_zoom(win, full_root, top)
 
     def _draw_pagefault_flame(self, win, store, info: ProcInfo,
                               top: int) -> int:
@@ -961,6 +894,11 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
         function that caused the spike.
         """
         h, w = win.getmaxyx()
+        warn = perf_paranoid_blocks(0)
+        if warn:
+            self._last_frames = []
+            self._last_root = {}
+            return self._draw_paranoid_warning(win, top, h - 2, warn)
         if not store.pagefault_enabled:
             safe_addstr(win, top, 2,
                         "page-fault flame needs --perf",
@@ -997,40 +935,7 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
             self._last_root = {}
             return top + 1
         full_root = _build_flame_tree(stacks)
-        self._last_root = full_root
-        if self.zoom_path:
-            visible_root = _subtree_at(full_root, self.zoom_path)
-            if visible_root is None or not visible_root:
-                while self.zoom_path:
-                    self.zoom_path = self.zoom_path[:-1]
-                    visible_root = (_subtree_at(full_root, self.zoom_path)
-                                    if self.zoom_path else full_root)
-                    if visible_root:
-                        break
-                if not visible_root:
-                    visible_root = full_root
-        else:
-            visible_root = full_root
-        flame_top = top
-        flame_max_y = max(flame_top + 2, h - 12)
-        self._ensure_cursor()
-        frames = _render_flame(
-            win, flame_top, flame_max_y, 0, w - 1,
-            visible_root, self.zoom_path, self.cursor_path,
-        )
-        self._last_frames = frames
-        if not self._frame_at(self.cursor_path):
-            self._ensure_cursor()
-            target = self._frame_at(self.cursor_path)
-            if target is not None:
-                y, xs, xe, sym, _cnt, _path = target
-                cw = xe - xs
-                label = sym[:cw] if len(sym) > cw else sym + " " * (cw - len(sym))
-                safe_addstr(win, y, xs, label,
-                            theme.attr(theme.P_HIGHLIGHT,
-                                       curses.A_BOLD | curses.A_UNDERLINE))
-        bottom = _max_depth(frames) if frames else flame_top
-        return bottom + 1
+        return self._render_with_zoom(win, full_root, top)
 
     def _draw_perf_event_flame(self, win, store, info: ProcInfo,
                                top: int, stacks, enabled: bool,
@@ -1042,6 +947,16 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
         different empty / disabled / error messages.
         """
         h, w = win.getmaxyx()
+        # wakeup and blockflame both use raw tracepoints (sched:sched_wakeup,
+        # block:block_rq_issue), which the kernel denies to non-root users
+        # at paranoid >= 1. perf reports this as "event syntax error" which
+        # doesn't tell the operator what to do — replace it with a clean
+        # paranoid-too-high warning before we ever launch the recorder.
+        warn = perf_paranoid_blocks(0)
+        if warn:
+            self._last_frames = []
+            self._last_root = {}
+            return self._draw_paranoid_warning(win, top, h - 2, warn)
         if not enabled:
             safe_addstr(win, top, 2,
                         f"this flame mode needs --perf ({backend})",
@@ -1149,20 +1064,29 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
 
     def _render_with_zoom(self, win, full_root, top: int) -> int:
         """Shared zoom + render path used by all flame modes that
-        carry a fully-built tree at this point."""
+        carry a fully-built tree at this point.
+
+        The zoom path is treated as stable user intent: the recorder
+        ring rebuilds every few seconds and any given deep leaf may
+        not be sampled in the latest cycle, but that is a rendering
+        condition, not a reason to forget where the operator zoomed.
+        We walk a *local* fallback path back up just far enough to
+        find a non-empty subtree to draw, leaving self.zoom_path
+        untouched — so as soon as the leaf reappears in a later
+        ring the view springs back to the operator's zoom.
+        """
         h, w = win.getmaxyx()
         self._last_root = full_root
-        if self.zoom_path:
-            visible_root = _subtree_at(full_root, self.zoom_path)
+        render_path = self.zoom_path
+        if render_path:
+            visible_root = _subtree_at(full_root, render_path)
+            while (visible_root is None or not visible_root) and render_path:
+                render_path = render_path[:-1]
+                visible_root = (_subtree_at(full_root, render_path)
+                                if render_path else full_root)
             if visible_root is None or not visible_root:
-                while self.zoom_path:
-                    self.zoom_path = self.zoom_path[:-1]
-                    visible_root = (_subtree_at(full_root, self.zoom_path)
-                                    if self.zoom_path else full_root)
-                    if visible_root:
-                        break
-                if not visible_root:
-                    visible_root = full_root
+                visible_root = full_root
+                render_path = ()
         else:
             visible_root = full_root
         flame_top = top
@@ -1170,7 +1094,7 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
         self._ensure_cursor()
         frames = _render_flame(
             win, flame_top, flame_max_y, 0, w - 1,
-            visible_root, self.zoom_path, self.cursor_path,
+            visible_root, render_path, self.cursor_path,
         )
         self._last_frames = frames
         if not self._frame_at(self.cursor_path):
@@ -1466,6 +1390,40 @@ fault-causing / wakeup-causing / I/O-issuing / allocation-causing).
                 break
             safe_addstr(win, top + i, 4, line[:max(0, w - 6)],
                         theme.attr(theme.P_BAD))
+
+    def _draw_paranoid_warning(self, win, top: int, max_y: int,
+                               msg: str) -> int:
+        """Replace the panel body with a clean paranoid-too-high
+        warning. Used for modes whose recorder cannot start at all
+        until kernel.perf_event_paranoid is lowered — the perf
+        binary's native error there is "event syntax error: ..."
+        which doesn't tell the operator what to do. Returns the
+        bottom row written so the caller can place the rest of the
+        panel below it (or skip the body entirely)."""
+        h, w = win.getmaxyx()
+        safe_addstr(win, top, 2,
+                    "this panel needs a lower perf_event_paranoid",
+                    theme.attr(theme.P_BAD, curses.A_BOLD))
+        # Word-wrap the explanation so the file path and the
+        # `sysctl --system` invocation aren't truncated.
+        words = msg.split()
+        lines: List[str] = []
+        cur = ""
+        max_w = max(20, w - 6)
+        for word in words:
+            if cur and len(cur) + 1 + len(word) > max_w:
+                lines.append(cur)
+                cur = word
+            else:
+                cur = f"{cur} {word}".strip()
+        if cur:
+            lines.append(cur)
+        for i, line in enumerate(lines, start=1):
+            if top + i >= max_y:
+                break
+            safe_addstr(win, top + i, 4, line,
+                        theme.attr(theme.P_BAD))
+        return min(top + 1 + len(lines), max_y)
 
     def _draw_footer(self, win, n_procs: int) -> None:
         h, w = win.getmaxyx()

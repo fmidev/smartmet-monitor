@@ -68,23 +68,24 @@ the data-collection layer from smartmet-monitor; does not pull X11
 or any third-party Python packages.
 
 This package is for operators who study the dashboard's results.
-Installing it makes two host-level changes the dashboard needs to
+Installing it makes one host-level change the dashboard needs to
 work fully:
 
-  * /usr/lib/sysctl.d/99-smartmet-perf.conf sets
-    kernel.perf_event_paranoid = 0 (the RHEL default 2 denies
-    hardware perf counters and tracepoints to unprivileged users,
-    breaking the Flame panel and the Proc panel's perfstat numbers).
   * /usr/lib/modules-load.d/smartmet-perf.conf pre-loads the
     kheaders kernel module so bcc-tools (offcputime-bpfcc,
     biolatency-bpfcc, runqlat-bpfcc) can run without root.
 
-Both are applied at install time without requiring a reboot. The
-full reasoning, per-feature compatibility table, and security
+The Flame panel additionally needs kernel.perf_event_paranoid <= 0
+for an unprivileged daemon to attach hardware perf counters and
+tracepoints. That setting belongs to the host's hardening baseline,
+not to a monitoring tool — the smartmet-monitor RPM ships an
+already-staged drop-in file at
+/usr/lib/sysctl.d/99-smartmet-perf.conf with the line commented out;
+the operator uncomments it (or copies it to /etc/sysctl.d/) once
+they have agreed the change with whoever owns host security policy.
+The full reasoning, per-feature compatibility table, and security
 trade-offs are in
-/usr/share/doc/smartmet-monitor/perf-event-paranoid.md. Sites that
-can't accept those defaults should use the CLI tools (smtop, bstat,
-bperf) from smartmet-monitor instead and not install this package.
+/usr/share/doc/smartmet-monitor/perf-event-paranoid.md.
 
 The unit runs as the `smartmet-server` user (the same user that
 owns the smartmetd processes). Override via a drop-in
@@ -122,14 +123,13 @@ make install-webmon \
 
 %post
 %systemd_post smartmet-webmon.service
-# Apply the perf-event sysctl and load the kheaders module without
-# requiring a reboot. Both are also persistent across reboots via
-# the files in /usr/lib/sysctl.d/ and /usr/lib/modules-load.d/. The
-# || : guards keep package install from failing on hosts where the
-# kernel doesn't expose these (e.g. very old kernels that lack the
-# kheaders module); the dashboard will surface the resulting per-
-# sampler errors via /api/flame/status.
-sysctl --system >/dev/null 2>&1 || :
+# Load kheaders without requiring a reboot. Persistent across reboots
+# via /usr/lib/modules-load.d/smartmet-perf.conf. The || : guard
+# keeps package install from failing on kernels that don't expose
+# the module; the dashboard will surface the resulting per-sampler
+# errors via /api/flame/status. The perf paranoid sysctl is shipped
+# (commented out) by smartmet-monitor and intentionally not applied
+# here — that knob belongs to the host's hardening baseline owner.
 modprobe kheaders >/dev/null 2>&1 || :
 
 %preun
@@ -145,7 +145,6 @@ modprobe kheaders >/dev/null 2>&1 || :
 %config(noreplace) %{_sysconfdir}/sysconfig/smartmet-webmon
 %dir %{_sysconfdir}/smartmet-webmon
 %config(noreplace) %{_sysconfdir}/smartmet-webmon/clusters.conf
-%{_prefix}/lib/sysctl.d/99-smartmet-perf.conf
 %{_prefix}/lib/modules-load.d/smartmet-perf.conf
 %{_python3_sitelib}/smartmet_webmon/
 %{_mandir}/man1/smwebmon.1*

@@ -14,8 +14,8 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        26.5.2
-Release:        14%{?dist}.fmi
+Version:        26.5.4
+Release:        2%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -44,6 +44,18 @@ Recommends:     bcc-tools
 # stack traces. Optional; the off-CPU view falls back to bcc-tools
 # alone when bpftrace is missing.
 Recommends:     bpftrace
+# bcc-tools (offcputime-bpfcc, biolat-bpfcc, runqlat-bpfcc) compile
+# their BPF C source at runtime via libclang against the in-tree
+# kernel headers at /lib/modules/$(uname -r)/build. Without
+# kernel-devel installed they fail the moment they are launched
+# with `chdir(.../build): No such file or directory`. We Require
+# rather than Recommend because the Flame panel's analyse overlay
+# treats the bcc-backed detectors as table stakes, not optional.
+# Note: the running kernel must match an installed kernel-devel;
+# `dnf install kernel-devel-$(uname -r)` is the operator's job
+# after a kernel update, since a noarch package cannot pin to the
+# currently-running kernel version.
+Requires:       kernel-devel
 
 %description
 Two companion tools for operating a SmartMet Server:
@@ -118,8 +130,48 @@ make install \
 %doc %{_docdir}/smartmet-monitor/perf-event-paranoid.md
 %doc %{_docdir}/smartmet-monitor/images/
 %{_python3_sitelib}/smartmet_top/
+# Vendor sysctl drop-in. Every line commented out: the file is a
+# discoverable cheat-sheet for the Flame-panel paranoid setting,
+# never an instrument that lowers host policy on install. A site
+# /etc/sysctl.d/99-smartmet-perf.conf overrides this on
+# systemd-sysctl reload. %config(noreplace) so an operator who
+# uncomments the line directly here (instead of in /etc/) keeps
+# their edit across upgrades. smartmet-webmon depends on
+# smartmet-monitor at the same version, so the file is guaranteed
+# present whether only the CLI or the dashboard is installed.
+%config(noreplace) %{_prefix}/lib/sysctl.d/99-smartmet-perf.conf
 
 %changelog
+* Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-2.fmi
+- Require kernel-devel so bcc-tools (offcputime-bpfcc, biolat-bpfcc,
+  runqlat-bpfcc) find the in-tree kernel headers at runtime instead
+  of failing with `chdir(/lib/modules/$(uname -r)/build): No such
+  file or directory`. The matching kernel-devel for the running
+  kernel is the operator's responsibility after kernel updates —
+  a noarch package cannot pin to the running kernel version.
+- Take ownership of /usr/lib/sysctl.d/99-smartmet-perf.conf from
+  smartmet-webmon, ship it with kernel.perf_event_paranoid commented
+  out, %config(noreplace) so operator edits survive upgrades.
+  Installing smartmet-monitor no longer modifies host security
+  policy — the change belongs to the host's hardening baseline owner,
+  who uncomments the line (or sets it in /etc/sysctl.d/) once the
+  decision is made. smartmet-webmon's %post correspondingly stops
+  running `sysctl --system`; it still loads the kheaders module.
+- Flame panel modes that need a lower paranoid (off-CPU at >1,
+  wakeup / blockflame / pagefault at >0) now display a clean
+  "kernel.perf_event_paranoid=N, this panel needs <=M" warning with
+  the file path and `sudo sysctl --system` command, replacing perf's
+  misleading native "event syntax error" relay.
+
+* Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-1.fmi
+- Flame zoom is now stable across recorder cycles. The zoom path
+  used to be eroded each time the ring rebuilt (~3 s) when the
+  exact deep leaf the operator zoomed into was not sampled in
+  the latest cycle, walking the view back to root within seconds.
+  The walk-back is now render-only — self.zoom_path is preserved
+  as user intent, and the view springs back to the operator's
+  zoom as soon as the leaf reappears in a later ring.
+
 * Sat May 02 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.2-14.fmi
 - Flame panel: press `a` to freeze every recorder ring and run six
   anti-pattern detectors against the frozen stacks (locale-lock on

@@ -41,6 +41,7 @@ MANPAGES = smtop.1 bstat.1 bchart.1 burls.1 bstatus.1 bkeys.1 bperf.1 \
 
 install:
 	install -d $(BINDIR) $(SHAREDIR) $(MANDIR) $(DOCDIR) $(SITEDIR)
+	install -d $(DESTDIR)$(SYSCTLDIR)
 	# smtop plus bstat-family command wrappers
 	install -m 0755 smtop $(BINDIR)/smtop
 	$(foreach t,$(BTOOLS),install -m 0755 bin/$(t) $(BINDIR)/$(t); )
@@ -70,6 +71,12 @@ install:
 	install -m 0644 doc/perf-event-paranoid.md $(DOCDIR)/perf-event-paranoid.md
 	install -d $(DOCDIR)/images
 	install -m 0644 doc/images/*.png $(DOCDIR)/images/
+	# Vendor sysctl drop-in. Every setting is commented out — the file
+	# documents what the Flame panel needs without modifying host
+	# policy on install. Site-managed /etc/sysctl.d/99-smartmet-perf.conf
+	# wins via systemd-sysctl precedence.
+	install -m 0644 share/sysctl.d/99-smartmet-perf.conf \
+	    $(DESTDIR)$(SYSCTLDIR)/99-smartmet-perf.conf
 	# symlink for discoverability alongside smartmet-library-* and friends
 	ln -sf smtop $(BINDIR)/smartmet-top
 
@@ -82,6 +89,7 @@ uninstall:
 	$(foreach m,$(MANPAGES),rm -f $(MANDIR)/$(m); )
 	rm -rf $(DOCDIR)
 	rm -rf $(SITEDIR)
+	rm -f $(DESTDIR)$(SYSCTLDIR)/99-smartmet-perf.conf
 
 install-webmon:
 	install -d $(BINDIR) $(SITEDIR_WEBMON) $(WEBMON_ASSET_DIR) $(MANDIR)
@@ -109,16 +117,11 @@ install-webmon:
 	    $(DESTDIR)$(UNITDIR)/smartmet-webmon.service
 	install -m 0644 share/sysconfig/smartmet-webmon \
 	    $(DESTDIR)$(SYSCONFDIR)/sysconfig/smartmet-webmon
-	# Kernel-side prereqs for the Flame panel: lower
-	# perf_event_paranoid and pre-load the kheaders module so
-	# bcc-tools work. The package's audience is operators who
-	# install smartmet-webmon as a deliberate decision; ship the
-	# defaults that make the dashboard work, not defensive opt-in
-	# files. Sites that can't accept those defaults shouldn't
-	# install this package — the bstat / smtop CLI tools cover
-	# that audience.
-	install -m 0644 share/sysctl.d/99-smartmet-perf.conf \
-	    $(DESTDIR)$(SYSCTLDIR)/99-smartmet-perf.conf
+	# kheaders pre-load so bcc-tools (offcputime-bpfcc, biolat-bpfcc,
+	# runqlat-bpfcc) can run as a non-root daemon. The perf
+	# paranoid sysctl is shipped (commented out) by smartmet-monitor
+	# at /usr/lib/sysctl.d/99-smartmet-perf.conf — webmon does not
+	# touch host security policy on install.
 	install -m 0644 share/modules-load.d/smartmet-perf.conf \
 	    $(DESTDIR)$(MODLOADDIR)/smartmet-perf.conf
 	install -m 0644 doc/man/smwebmon.1 $(MANDIR)/smwebmon.1
@@ -129,7 +132,6 @@ uninstall-webmon:
 	rm -f $(DESTDIR)$(UNITDIR)/smartmet-webmon.service
 	rm -f $(DESTDIR)$(SYSCONFDIR)/sysconfig/smartmet-webmon
 	rm -rf $(DESTDIR)$(SYSCONFDIR)/smartmet-webmon
-	rm -f $(DESTDIR)$(SYSCTLDIR)/99-smartmet-perf.conf
 	rm -f $(DESTDIR)$(MODLOADDIR)/smartmet-perf.conf
 	rm -f $(MANDIR)/smwebmon.1
 
