@@ -50,8 +50,20 @@ class NetworkSnapshot:
                 "tx_latest": round(float(tx[-1]), 1) if tx else 0.0,
             })
 
+        # last_ts + step_seconds so the chart tooltips can show the
+        # time at the cursor. All netstats series come from one poll
+        # loop on a 2 s cadence; pulling last_ts from the latest TCP
+        # tuple is representative of every other series too (state,
+        # iface — same loop, same timestamps).
+        last_ts = 0.0
+        try:
+            last_ts = float(store.netstats_tcp[-1][0])
+        except (IndexError, TypeError):
+            last_ts = 0.0
         return {
             "enabled": bool(store.netstats_enabled),
+            "step_seconds": 2.0,
+            "last_ts": last_ts,
             "tcp_summary": {
                 "retrans_per_s": retrans,
                 "listen_overflow_per_s": overflow,

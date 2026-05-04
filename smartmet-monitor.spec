@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.5.4
-Release:        10%{?dist}.fmi
+Release:        11%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -197,6 +197,18 @@ fi
 %config(noreplace) %{_prefix}/lib/sysctl.d/99-smartmet-perf.conf
 
 %changelog
+* Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-11.fmi
+- CachesSnapshot.trends() and ServicesSnapshot.trends() now emit
+  step_seconds + last_ts at the response top level. The 26.5.4-10
+  fix added the JS-side plumbing for these but missed that the
+  trends endpoints (distinct from the cluster_chart endpoints,
+  which already had them) didn't actually return the fields —
+  result was the per-row sparkline tooltip kept rendering value-
+  only with no time. Same plumbing as the Plugins fix in 26.5.4-10.
+- NetworkSnapshot.detail() emits step_seconds + last_ts (extracted
+  from the netstats sample deque). Without it the Network panel's
+  TCP / state / per-NIC charts had value-only tooltips.
+
 * Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-10.fmi
 - Plugins panel: drop the "1m" entry from the window selector. It
   shared the visual meaning of the existing "60s" entry but mapped

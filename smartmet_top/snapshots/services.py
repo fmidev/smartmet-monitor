@@ -55,7 +55,24 @@ class ServicesSnapshot:
                     "handler": handler,
                     "values": [round(float(v), 3) for v in vs],
                 })
-        return {"metric": metric, "samples": samples, "rows": out}
+        # step_seconds + last_ts so the per-row sparkline tooltip can
+        # show the time at the cursor. Trend buckets are stamped at
+        # admin-poll cadence (2 s default); last_ts is the most recent
+        # fetched_at across configured hosts.
+        best = 0.0
+        for host in store.admin_hosts:
+            snap = store.servicestats.get(host)
+            if snap is None:
+                continue
+            if snap.fetched_at and snap.fetched_at > best:
+                best = snap.fetched_at
+        return {
+            "metric": metric,
+            "samples": samples,
+            "step_seconds": 2.0,
+            "last_ts": best,
+            "rows": out,
+        }
 
     @staticmethod
     def cluster_chart_per_host(store, *, handler: str,

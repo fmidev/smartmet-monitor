@@ -1873,15 +1873,23 @@
         `);
         body.innerHTML = `<div class="section-grid">${cards.join("")}</div>`;
 
-        // Now paint canvases.
+        // Now paint canvases. last_ts + step_seconds from the
+        // /network/detail response let every chart's tooltip show
+        // the time at the cursor — without them the tooltip would
+        // be value-only, which is disorienting against a coarse
+        // time axis.
+        const tsOpts = d.last_ts != null && d.step_seconds
+          ? { last_ts: d.last_ts, step_seconds: d.step_seconds }
+          : {};
         smChart.drawLine(body.querySelector('canvas[data-tcp="retrans"]'),
                           sum.retrans_per_s || [],
-                          { fmtY: v => v.toFixed(1) });
+                          { fmtY: v => v.toFixed(1), ...tsOpts });
         for (const s of d.states) {
           const c = body.querySelector(
             `canvas[data-state="${cssEsc(s.state)}"]`);
           if (c) smChart.drawSparkline(c, s.trend || [],
-                                        { fmtY: v => Math.round(v) });
+                                        { fmtY: v => Math.round(v),
+                                          ...tsOpts });
         }
         for (const f of d.ifaces) {
           const rx = body.querySelector(
@@ -1890,10 +1898,12 @@
             `canvas[data-iface="${cssEsc(f.iface)}"][data-dir="tx"]`);
           if (rx) smChart.drawLine(rx, f.rx_bps || [],
                                     { fmtY: fmtBytes,
-                                      lineColor: smChart.PALETTE.good });
+                                      lineColor: smChart.PALETTE.good,
+                                      ...tsOpts });
           if (tx) smChart.drawLine(tx, f.tx_bps || [],
                                     { fmtY: fmtBytes,
-                                      lineColor: smChart.PALETTE.warn });
+                                      lineColor: smChart.PALETTE.warn,
+                                      ...tsOpts });
         }
       },
     };

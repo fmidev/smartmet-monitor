@@ -62,7 +62,17 @@ class CachesSnapshot:
                     "cache_name": name,
                     "values": [round(float(v), 3) for v in vs],
                 })
-        return {"metric": metric, "samples": samples, "rows": out}
+        # step_seconds + last_ts so the per-row sparkline tooltip can
+        # show the time at the cursor. The trend buckets are stamped
+        # at admin-poll cadence (2 s by default) and the most recent
+        # fetched_at across all hosts is "now-ish" for the right edge.
+        return {
+            "metric": metric,
+            "samples": samples,
+            "step_seconds": 2.0,
+            "last_ts": _last_fetched(store.cachestats, store.admin_hosts),
+            "rows": out,
+        }
 
     @staticmethod
     def cluster_chart_per_host(store, *, cache_name: str,

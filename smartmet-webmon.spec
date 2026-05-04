@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.5.4
-Release:        10%{?dist}.fmi
+Release:        11%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -150,6 +150,17 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-11.fmi
+- Network panel charts (TCP retransmit, per-state trend, per-NIC
+  rx/tx) now show time-at-cursor in the tooltip. The four
+  drawLine / drawSparkline call sites needed last_ts +
+  step_seconds threaded through; the snapshot now provides them.
+- Caches and Services per-row sparklines pick up the new
+  step_seconds / last_ts fields the snapshots now return; the
+  JS side from 26.5.4-10 was already passing them whenever the
+  response contained them, so this part is server-side-only.
+- Co-bumped with smartmet-monitor 26.5.4-11.
+
 * Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-10.fmi
 - Per-row sparklines in the Plugins, Caches, and Services tables
   now show the time-at-cursor in their hover tooltip, threaded
