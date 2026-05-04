@@ -23,6 +23,7 @@ from smartmet_top.snapshots.logs import LogsSnapshot
 from smartmet_top.snapshots.network import NetworkSnapshot
 from smartmet_top.snapshots.overview import OverviewSnapshot
 from smartmet_top.snapshots.plugins import PluginsSnapshot
+from smartmet_top.snapshots.heap import HeapSnapshot
 from smartmet_top.snapshots.proc import ProcSnapshot
 from smartmet_top.snapshots.services import ServicesSnapshot
 from smartmet_top.snapshots.urls import URLsSnapshot
@@ -97,6 +98,7 @@ def panels(store, qs: Mapping[str, str]) -> Tuple[int, Any]:
             {"id": "active",   "title": "Active"},
             {"id": "keys",     "title": "API Keys"},
             {"id": "proc",     "title": "Proc"},
+            {"id": "heap",     "title": "Heap"},
             {"id": "network",  "title": "Network"},
             {"id": "flame",    "title": "Flame"},
             {"id": "logs",     "title": "Logs"},
@@ -298,6 +300,17 @@ def proc_pids(store, qs):
 def proc_detail(store, qs):
     pid = qs.get("pid")
     return 200, ProcSnapshot.detail(store, _int(pid, 0) if pid else None)
+
+
+# ---- Heap (allocator stats) -------------------------------------------------
+
+def heap_table(store, qs):
+    headers, rows = HeapSnapshot.table(store)
+    return 200, _table_envelope(HeapSnapshot, headers, rows)
+
+
+def heap_detail(store, qs):
+    return 200, HeapSnapshot.detail(store)
 
 
 # ---- Network ----------------------------------------------------------------
@@ -949,6 +962,9 @@ ROUTES = {
     "/proc":              proc_table,
     "/proc/pids":         proc_pids,
     "/proc/detail":       proc_detail,
+    # Heap (jemalloc / mimalloc stats from spine ?what=mallocstats)
+    "/heap":              heap_table,
+    "/heap/detail":       heap_detail,
     # Network
     "/network":           network_table,
     "/network/detail":    network_detail,

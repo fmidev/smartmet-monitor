@@ -429,6 +429,19 @@ class Store:
         self.servicestats: Dict[str, AdminSnapshot] = {}
         self.activerequests: Dict[str, AdminSnapshot] = {}
         self.lastrequests: Dict[str, AdminSnapshot] = {}
+        # Allocator-stats history per host. The latest sample drives
+        # the Heap section's current numbers; the bounded ring backs
+        # the sparkline. 30 samples × 30 s polling = 15 minutes of
+        # history visible at one zoom level. Polled less frequently
+        # than the other admin endpoints because the JSON dump is
+        # large (~50 KB on a 32-arena backend) and the numbers don't
+        # change at sub-second rates. Type is forward-string-quoted to
+        # avoid a circular import (sources/mallocstats.py imports
+        # store.MallocSample for typing).
+        self.mallocstats_latest: Dict[str, "MallocSample"] = {}
+        self.mallocstats_history: Dict[str, Deque["MallocSample"]] = {}
+        self.mallocstats_error: Dict[str, str] = {}
+        self.mallocstats_fetched_at: Dict[str, float] = {}
         # per-entity historical series (for sparklines), per host
         self.cache_history: Dict[str, HistorySeries] = {}
         self.service_history: Dict[str, HistorySeries] = {}
@@ -606,6 +619,9 @@ class Store:
             self.admin_status.setdefault(host, "(starting)")
             self.available_what.setdefault(host, set())
             self.host_role.setdefault(host, "unknown")
+            self.mallocstats_history.setdefault(host, deque(maxlen=120))
+            self.mallocstats_error.setdefault(host, "")
+            self.mallocstats_fetched_at.setdefault(host, 0.0)
 
     def hosts_supporting(self, what: str) -> List[str]:
         """Which configured hosts have declared support for a given what=?"""

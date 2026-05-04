@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.5.4
-Release:        8%{?dist}.fmi
+Release:        9%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -150,6 +150,19 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-9.fmi
+- New Heap tab in the dashboard surfaces the same allocator
+  stats the smtop Proc panel renders. Per host: allocated /
+  active / resident / mapped / retained / metadata bytes, arena
+  count, jemalloc version, fragmentation% (colour-coded), plus
+  a multi-line chart of allocated/active/resident over the
+  retained history. Backed by /api/heap/detail (JSON envelope
+  with the bounded per-host time series) and /api/heap (CSV-
+  style tabular export).
+- Co-bumped with smartmet-monitor 26.5.4-9 (poll source +
+  store schema + smtop Heap section live there). Spine >= 26.4.27
+  required on the target smartmetd.
+
 * Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-8.fmi
 - Co-bumped with smartmet-monitor 26.5.4-8 (smartmet-only filter
   now recognises Fmi::, Imagine::, Giza::, Locus::, Trax::, Osm::,

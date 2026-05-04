@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.5.4
-Release:        8%{?dist}.fmi
+Release:        9%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -40,6 +40,14 @@ Recommends:     perf
 # bcc-tools too. The Flame view detects the tool at runtime and
 # renders an install hint when it is missing.
 Recommends:     bcc-tools
+# The Heap section in the Proc panel polls spine's
+# ?what=mallocstats endpoint, which was added in
+# smartmet-library-spine 26.4.27. Older spine builds will return
+# 404 / "endpoint not found" and the panel renders an empty state;
+# operators upgrading the monitor without upgrading spine will see
+# the section but no data. The Recommends nudges the package
+# manager to keep them aligned without making a full Requires.
+Recommends:     smartmet-library-spine >= 26.4.27
 # bpftrace is the scripting alternative used for futex / lock-wait
 # stack traces. Optional; the off-CPU view falls back to bcc-tools
 # alone when bpftrace is missing.
@@ -189,6 +197,22 @@ fi
 %config(noreplace) %{_prefix}/lib/sysctl.d/99-smartmet-perf.conf
 
 %changelog
+* Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-9.fmi
+- New Heap section in the Proc panel surfaces the SmartMet
+  process's allocator stats (jemalloc only — mimalloc text is
+  ignored for v1). Polls spine's ?what=mallocstats endpoint at
+  30 s cadence (the JSON dump is large and the numbers don't
+  change at sub-second rates). Per host: allocated / active /
+  resident / mapped / retained bytes, arena count, jemalloc
+  version, plus a fragmentation% colour-coded by severity
+  (green <15%%, amber 15-30%%, red >30%%) and a sparkline of
+  allocated bytes over the retained 15-minute history.
+- New `h` hotkey in the Proc panel toggles the Heap section
+  visibility, parallel to `m` / `i` / `g`.
+- Recommends smartmet-library-spine >= 26.4.27 (the version
+  that added the ?what=mallocstats handler — older builds
+  return endpoint-not-found and the section renders empty).
+
 * Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-8.fmi
 - smartmet_filter.is_smartmet_frame() now recognises every namespace
   used inside smartmetd, not just SmartMet::. The earlier matcher

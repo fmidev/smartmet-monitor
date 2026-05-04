@@ -262,6 +262,27 @@ check:
 	    assert keep_for_thread_class(("SmartMet::Spine::SmartMetPlugin::callRequestHandler","x"), THREAD_CLASS_REQUEST); \
 	    assert keep_for_thread_class(("SmartMet::Engine::Cache::cleanup",), THREAD_CLASS_BACKGROUND); \
 	    assert keep_for_thread_class((), THREAD_CLASS_ALL); \
+	    from smartmet_top.sources.mallocstats import parse_jemalloc_json, parse_mallocstats; \
+	    import json as _json; \
+	    _je_dict = {"jemalloc": {"version": "5.2.1-0-g1234", "stats": {"allocated": 1000, "active": 1500, "metadata": 250, "resident": 2000, "mapped": 3000, "retained": 500}, "stats.arenas": {"narenas": 4}}}; \
+	    _je_doc = _json.dumps(_je_dict); \
+	    _ms = parse_jemalloc_json(_je_doc); \
+	    assert _ms is not None and _ms.allocator == "jemalloc", _ms; \
+	    assert _ms.allocated == 1000 and _ms.active == 1500 and _ms.resident == 2000, (_ms.allocated, _ms.active, _ms.resident); \
+	    assert _ms.narenas == 4 and _ms.version == "5.2.1-0-g1234", _ms; \
+	    assert abs(_ms.fragmentation_pct - (500/1500*100)) < 1e-6, _ms.fragmentation_pct; \
+	    assert parse_mallocstats(_je_doc) is not None; \
+	    assert parse_mallocstats("") is None; \
+	    assert parse_mallocstats("not json") is None; \
+	    assert parse_mallocstats(_json.dumps({"jemalloc": {"version": "x"}})) is None, "stats key required"; \
+	    from smartmet_top.snapshots.heap import HeapSnapshot; \
+	    from smartmet_top.state.store import Store as _HeapStore; \
+	    _hs = _HeapStore(); _hs.register_admin_host("c3.back"); \
+	    _hs.mallocstats_latest["c3.back"] = _ms; \
+	    _hs.mallocstats_history["c3.back"].append(_ms); \
+	    _hd = HeapSnapshot.detail(_hs); \
+	    assert len(_hd["hosts"]) == 1 and _hd["hosts"][0]["host"] == "c3.back"; \
+	    assert _hd["hosts"][0]["latest"]["allocated"] == 1000; \
 	    from smartmet_top.sources.smartmet_filter import is_smartmet_frame; \
 	    assert is_smartmet_frame("SmartMet::Spine::Reactor::run"); \
 	    assert is_smartmet_frame("Fmi::Cache::insert"); \

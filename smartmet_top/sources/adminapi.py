@@ -145,6 +145,13 @@ _POLLED_ENDPOINTS = [
 _LIST_REFRESH_SECONDS = 300.0  # re-check endpoint availability every 5 min
 
 
+# mallocstats lives outside the standard 2-s rotation: the JSON dump
+# is large (~50 KB on a 32-arena backend) and the underlying numbers
+# don't change at sub-second rates, so a slower cadence saves the
+# bandwidth and the spine-side epoch-refresh cost.
+_MALLOCSTATS_REFRESH_SECONDS = 30.0
+
+
 async def poll_admin(base_url: str, host: str, store,
                      interval: float = 2.0, executor=None) -> None:
     """Poll admin endpoints forever and push snapshots into store[host]."""
@@ -161,6 +168,7 @@ async def poll_admin(base_url: str, host: str, store,
     seen_requests: set = set()
     store.admin_status[host] = f"probing {base_url}"
     list_last_fetched: float = 0.0
+    mallocstats_last_fetched: float = 0.0
 
     try:
         while True:
@@ -240,6 +248,36 @@ async def poll_admin(base_url: str, host: str, store,
                     snap.error = f"{type(e).__name__}: {e}"
                     snap.fetched_at = time.time()
                     errors.append(f"{name}: {e}")
+
+            # (3) Allocator stats — poll on a 30 s cadence (see comment
+            #     near _MALLOCSTATS_REFRESH_SECONDS for the rationale).
+            #     Skip when the host hasn't advertised support, so the
+            #     poller doesn't spam old spine builds with 404s.
+            if (start - mallocstats_last_fetched >= _MALLOCSTATS_REFRESH_SECONDS
+                    and (not available or "mallocstats" in available)):
+                try:
+                    from . import mallocstats
+                    text = await _run(loop, executor,
+                                       mallocstats._fetch_mallocstats, base_url)
+                    if text.startswith("__MALLOCSTATS_FETCH_ERROR__"):
+                        store.mallocstats_error[host] = text.split(": ", 1)[-1]
+                    else:
+                        sample = mallocstats.parse_mallocstats(text)
+                        if sample is not None:
+                            store.mallocstats_latest[host] = sample
+                            store.mallocstats_history[host].append(sample)
+                            store.mallocstats_error[host] = ""
+                        else:
+                            # Empty / non-JSON / non-jemalloc response.
+                            # Keep the last good sample but record the
+                            # failure so the panel can surface it.
+                            store.mallocstats_error[host] = (
+                                "unrecognised mallocstats payload")
+                    store.mallocstats_fetched_at[host] = time.time()
+                    mallocstats_last_fetched = start
+                except Exception as e:
+                    store.mallocstats_error[host] = (
+                        f"{type(e).__name__}: {e}")
 
             role = store.host_role.get(host, "unknown")
             role_suffix = f" [{role}]" if role != "unknown" else ""

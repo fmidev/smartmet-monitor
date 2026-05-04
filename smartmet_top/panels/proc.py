@@ -361,7 +361,7 @@ Keys:
         # sections (vmstats, biolat, runqlat, perfstat, netstats,
         # perf, rollup) appear only when their data exists, so a
         # toggle on top would be redundant — they hide naturally.
-        self._visible = {"m", "i", "g"}
+        self._visible = {"m", "i", "g", "h"}
 
     # ---- key handling ------------------------------------------------------
 
@@ -388,10 +388,11 @@ Keys:
         elif key == ord("b"):
             i = pids.index(selected)
             store.proc_select(pids[(i - 1) % len(pids)])
-        elif key in (ord("m"), ord("i"), ord("g")):
-            # Section toggle: m = Memory, i = I/O, g = paGe-faults.
-            # The visibility set is the source of truth for both the
-            # renderer (skip drawing) and the section-header chevron.
+        elif key in (ord("m"), ord("i"), ord("g"), ord("h")):
+            # Section toggle: m = Memory, i = I/O, g = paGe-faults,
+            # h = Heap (allocator stats). The visibility set is the
+            # source of truth for both the renderer (skip drawing) and
+            # the section-header chevron.
             letter = chr(key)
             if letter in self._visible:
                 self._visible.discard(letter)
@@ -502,6 +503,8 @@ Keys:
             row = self._draw_perfstat(win, store, row)
         if store.netstats_enabled and store.netstats_tcp:
             row = self._draw_netstats(win, store, row)
+        if store.mallocstats_history and any(store.mallocstats_history.values()):
+            row = self._draw_heap(win, store, row)
         if store.perf_enabled:
             row = self._draw_perf(win, store, info, row)
         if info.rollup_ts > 0:
@@ -926,6 +929,64 @@ Keys:
         self._draw_spark(win, row, x, series, theme.attr(theme.P_SPARK),
                          spark_w)
         return row + self._spark_h + 1
+
+    def _draw_heap(self, win, store, row: int) -> int:
+        """Allocator / heap stats from spine's ?what=mallocstats endpoint.
+
+        One row per admin host that has data. Shows allocated / active /
+        resident bytes plus a fragmentation percentage colour-coded by
+        severity (green <15%, amber 15-30%, red >30%). The sparkline
+        shows allocated bytes over the retained history (15 min at the
+        default 30 s polling cadence).
+        """
+        h, w = win.getmaxyx()
+        if row + 2 >= h:
+            return row
+        self._section_divider(win, row, "Heap (allocator)", hotkey="h",
+                              hidden="h" not in self._visible)
+        row += 1
+        if "h" not in self._visible:
+            return row
+        hosts = sorted(h for h in store.mallocstats_history
+                       if store.mallocstats_history[h])
+        if not hosts:
+            safe_addstr(win, row, 2,
+                        "no allocator stats yet — admin polling…",
+                        theme.attr(theme.P_DIM))
+            return row + 1
+        for host in hosts:
+            if row + 1 >= h:
+                break
+            sample = store.mallocstats_latest.get(host)
+            if sample is None:
+                continue
+            frag = sample.fragmentation_pct
+            if frag < 15:
+                frag_attr = theme.attr(theme.P_GOOD)
+            elif frag < 30:
+                frag_attr = theme.attr(theme.P_WARN)
+            else:
+                frag_attr = theme.attr(theme.P_BAD)
+            label = host[:14] + ("…" if len(host) > 14 else "")
+            cells = [
+                (f"  {label:<15} ", theme.attr(theme.P_HEADER)),
+                (f"alloc {human_bytes(sample.allocated):>8}  ", 0),
+                (f"active {human_bytes(sample.active):>8}  ", 0),
+                (f"rss {human_bytes(sample.resident):>8}  ",
+                 theme.attr(theme.P_ACCENT)),
+                (f"frag {frag:>4.1f}%  ", frag_attr),
+                (f"arenas {sample.narenas:>3}", theme.attr(theme.P_DIM)),
+            ]
+            x = write_row(win, row, 0, cells)
+            # Sparkline of allocated bytes over the retained history.
+            spark_w = max(10, min(40, w - x - 2))
+            if spark_w >= 4:
+                series = [s.allocated
+                          for s in store.mallocstats_history[host]]
+                self._draw_spark(win, row, x, series,
+                                 theme.attr(theme.P_SPARK), spark_w)
+            row += max(1, self._spark_h)
+        return row + 1
 
     def _draw_perf(self, win, store, info: ProcInfo, row: int) -> int:
         h, w = win.getmaxyx()

@@ -1695,6 +1695,87 @@
     }
   })();
 
+  // -- Heap (allocator stats from spine ?what=mallocstats) -----------
+
+  PANELS.heap = (function () {
+    let body;
+    function fragClass(pct) {
+      if (pct < 15) return "lat-good";
+      if (pct < 30) return "lat-warn";
+      return "lat-bad";
+    }
+    return {
+      title: "Heap",
+      init(host) {
+        host.replaceChildren();
+        const panel = el("section", { class: "panel" },
+          el("div", { class: "panel-controls" },
+            el("span", { class: "panel-title" }, "Heap (allocator)")));
+        body = el("div");
+        panel.appendChild(body);
+        host.appendChild(panel);
+      },
+      async refresh() {
+        const d = await getJSON("/api/heap/detail");
+        const hosts = d.hosts || [];
+        if (hosts.length === 0) {
+          body.innerHTML = '<div class="panel-empty">' +
+            'No allocator stats yet. Spine ' +
+            '<code>?what=mallocstats</code> requires smartmet-library-spine ' +
+            '&ge; 26.4.27 on the target smartmetd.</div>';
+          return;
+        }
+        const cards = hosts.map(h => {
+          const L = h.latest;
+          const errBlock = h.error
+            ? `<div class="panel-empty">last error: ${escHtml(h.error)}</div>`
+            : "";
+          return `
+            <div class="section-card">
+              <h4>${escHtml(h.host)} — ${escHtml(h.allocator || "unknown")}
+                <span class="muted">${escHtml(h.version || "")}</span></h4>
+              ${errBlock}
+              <div class="kv">
+                <span class="k">allocated</span><span class="v">${fmtBytes(L.allocated)}</span>
+                <span class="k">active</span><span class="v">${fmtBytes(L.active)}</span>
+                <span class="k">resident</span><span class="v">${fmtBytes(L.resident)}</span>
+                <span class="k">mapped</span><span class="v">${fmtBytes(L.mapped)}</span>
+                <span class="k">retained</span><span class="v">${fmtBytes(L.retained)}</span>
+                <span class="k">metadata</span><span class="v">${fmtBytes(L.metadata)}</span>
+                <span class="k">arenas</span><span class="v">${L.narenas}</span>
+                <span class="k">fragmentation</span>
+                <span class="v ${fragClass(L.fragmentation_pct)}">${L.fragmentation_pct.toFixed(1)}%</span>
+                <span class="k">resident overhead</span>
+                <span class="v">${L.resident_overhead_pct.toFixed(1)}%</span>
+              </div>
+              <canvas class="chart" data-host="${escHtml(h.host)}" height="100"></canvas>
+            </div>
+          `;
+        });
+        body.innerHTML = cards.join("");
+        // Draw allocated/active/resident lines per host. Find canvases
+        // by iterating to avoid needing CSS.escape on host names that
+        // may contain dots (FQDNs always do).
+        const canvases = body.querySelectorAll("canvas[data-host]");
+        for (const canvas of canvases) {
+          const hostName = canvas.getAttribute("data-host");
+          const h = hosts.find(x => x.host === hostName);
+          if (!h) continue;
+          const series = h.series || [];
+          const palette = smChart.PALETTE;
+          smChart.drawLineMulti(canvas, [
+            { label: "allocated", values: series.map(s => s.allocated),
+              color: palette.line },
+            { label: "active", values: series.map(s => s.active),
+              color: palette.accent },
+            { label: "resident", values: series.map(s => s.resident),
+              color: palette.accent2 },
+          ], { fmtY: fmtBytes });
+        }
+      },
+    };
+  })();
+
   // -- Network ------------------------------------------------------
 
   PANELS.network = (function () {
