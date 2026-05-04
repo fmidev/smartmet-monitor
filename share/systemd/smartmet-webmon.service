@@ -37,8 +37,8 @@ MemoryMax=512M
 CPUQuota=200%
 
 # smwebmon must call perf_event_open(2) and use bcc-tools to
-# profile smartmetd. Two kernel checks block this for unprivileged
-# users:
+# profile smartmetd. Three kernel checks block this for an
+# unprivileged daemon:
 #
 #   * smartmetd has NoNewPrivileges=1 (its own systemd unit's
 #     hardening), which makes it non-traceable except by callers
@@ -53,11 +53,23 @@ CPUQuota=200%
 #     the narrower fit on kernel >= 5.8, but RHEL 8's 4.18 doesn't
 #     expose it; CAP_SYS_ADMIN is the next step up.)
 #
+#   * The bcc-tools that create kprobes (offcputime-bpfcc,
+#     biolat-bpfcc, runqlat-bpfcc) write to
+#     /sys/kernel/debug/tracing/kprobe_events. /sys/kernel/debug is
+#     mode 700 root:root by default on RHEL, and CAP_SYS_ADMIN does
+#     NOT bypass DAC checks — so traversing into that directory
+#     requires CAP_DAC_READ_SEARCH. Without it the three bcc modes
+#     fail with "create_probe_event: open(...): Permission denied"
+#     even with paranoid=0 and CAP_SYS_ADMIN already granted.
+#     CAP_DAC_READ_SEARCH is the narrower fit (read+traverse only,
+#     not write); CAP_SYS_ADMIN is broader anyway, so adding the
+#     narrower cap doesn't expand the worst-case attack surface.
+#
 # AmbientCapabilities only takes effect when NoNewPrivileges is
 # unset, so we drop it from this unit deliberately. The remaining
 # hardening (ProtectSystem, ProtectHome, PrivateTmp) still applies.
-AmbientCapabilities=CAP_SYS_PTRACE CAP_SYS_ADMIN
-CapabilityBoundingSet=CAP_SYS_PTRACE CAP_SYS_ADMIN
+AmbientCapabilities=CAP_SYS_PTRACE CAP_SYS_ADMIN CAP_DAC_READ_SEARCH
+CapabilityBoundingSet=CAP_SYS_PTRACE CAP_SYS_ADMIN CAP_DAC_READ_SEARCH
 NoNewPrivileges=no
 ProtectSystem=strict
 ProtectHome=yes

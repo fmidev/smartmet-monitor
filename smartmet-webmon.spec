@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.5.4
-Release:        4%{?dist}.fmi
+Release:        5%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -150,6 +150,20 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-5.fmi
+- Add CAP_DAC_READ_SEARCH to the smwebmon unit's AmbientCapabilities
+  / CapabilityBoundingSet. /sys/kernel/debug is mode 700 root:root
+  on RHEL, and CAP_SYS_ADMIN (already granted) does not bypass DAC
+  checks — so the bcc-tools that create kprobes (offcputime-bpfcc,
+  biolat-bpfcc, runqlat-bpfcc) failed with `open(...kprobe_events):
+  Permission denied` even after paranoid was lowered. CAP_DAC_READ_SEARCH
+  is the narrow fit (read + directory traverse only, not write) and
+  is strictly narrower than the CAP_SYS_ADMIN already in the unit,
+  so it does not expand the worst-case attack surface.
+- Existing webmon installs running this version will pick up the new
+  cap on the next `systemctl daemon-reload && systemctl restart
+  smartmet-webmon` (RPM upgrade does not auto-restart the unit).
+
 * Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-4.fmi
 - Browser-flame zoom is now stable across the periodic refresh.
   flame.js's setData() used to unconditionally reset this.zoomPath

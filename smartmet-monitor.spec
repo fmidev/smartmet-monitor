@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.5.4
-Release:        4%{?dist}.fmi
+Release:        5%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -189,6 +189,12 @@ fi
 %config(noreplace) %{_prefix}/lib/sysctl.d/99-smartmet-perf.conf
 
 %changelog
+* Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-5.fmi
+- Co-bumped with smartmet-webmon 26.5.4-5 (CAP_DAC_READ_SEARCH added
+  to the smwebmon unit so bcc-tools can traverse /sys/kernel/debug).
+  No smartmet-monitor changes; bump only to keep the
+  Requires: smartmet-monitor = %{version}-%{release} pin satisfiable.
+
 * Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-4.fmi
 - Co-bumped with smartmet-webmon 26.5.4-4 (browser-flame zoom-stability
   fix). No smartmet-monitor changes; bump only to keep the
