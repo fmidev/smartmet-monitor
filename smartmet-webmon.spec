@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.5.4
-Release:        7%{?dist}.fmi
+Release:        8%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -150,6 +150,15 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-8.fmi
+- Co-bumped with smartmet-monitor 26.5.4-8 (smartmet-only filter
+  now recognises Fmi::, Imagine::, Giza::, Locus::, Trax::, Osm::,
+  the grid-files / grid-content namespaces, NFmi-prefixed legacy
+  classes, and several other in-tree namespaces — the earlier
+  SmartMet::-only match was dropping most production stacks). No
+  webmon-specific changes; bump only to keep the
+  Requires: smartmet-monitor = %{version}-%{release} pin satisfiable.
+
 * Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-7.fmi
 - Bump cgroup MemoryMax from 512M to 2G. The earlier 512M cap was
   set when the unit only ran perf record; once the full bcc-tools

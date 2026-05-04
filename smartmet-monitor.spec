@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.5.4
-Release:        7%{?dist}.fmi
+Release:        8%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -189,6 +189,34 @@ fi
 %config(noreplace) %{_prefix}/lib/sysctl.d/99-smartmet-perf.conf
 
 %changelog
+* Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-8.fmi
+- smartmet_filter.is_smartmet_frame() now recognises every namespace
+  used inside smartmetd, not just SmartMet::. The earlier matcher
+  only caught the SmartMet:: namespace, which silently dropped any
+  flame stack rooted in Fmi:: (macgyver/spine/gis), NFmiArea / NFmiPoint
+  (newbase legacy class prefix), Giza:: (SVG), Imagine::, Locus::,
+  Trax::, Osm::, the grid-files namespaces (GRIB1, GRIB2, NetCDF,
+  QueryData, GeoTiff, Map, GRID, Identification), the grid-content
+  namespaces (ContentServer, DataServer, QueryServer, Functions, Lua,
+  HTTP, Corba, SessionManagement, UserManagement), TextGen / BrainStorm
+  / Aggregator / OptionParsers / SpecialParameter / Stat / TimeSeries,
+  Delfoi / FlashQuery / OracleUtils / Observation, and Dynlib —
+  all of which appear regularly in production smartmetd flames. The
+  smartmet-only mode was treating all of them as syscall noise and
+  dropping the stack. Surveyed across ~/hub on 2026-05-04 to enumerate
+  the exact set.
+- NFmi[A-Z] regex catches the legacy global-class convention
+  (NFmiArea, NFmiPoint, NFmiQueryData, ...) without false-matching
+  anything that just happens to start with those four characters.
+- Deliberately excluded: FMI:: (uppercase), DataTransform::,
+  RadContour::, TimeTools::, WRFData::, HDF5:: — these only appear
+  in fmitools / qdtools, which are CLI binaries that don't run
+  inside smartmetd, so including them is at-best ineffective and
+  at-worst confusing if a stray test process hits the dashboard.
+- make check exercises the new matcher against representative
+  symbols including the explicit fmitools/qdtools-exclusion guard
+  and the NFmi[A-Z] boundary cases.
+
 * Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-7.fmi
 - perftop.py: lower DEFAULT_INTERVAL 10s -> 6s (50%% duty cycle, the
   practical floor for "live-feeling updates that don't visibly hurt

@@ -12,18 +12,20 @@ Two filters are exposed:
   * `is_request_stack(stack)` — True when the stack contains spine's
     canonical request-entry symbol (`SmartMetPlugin::callRequestHandler`
     or its mangled prefix). Used to split samples into "request
-    handling" vs "background" without relying on thread names —
-    smartmetd does not call pthread_setname_np, so every thread shows
-    comm=smartmetd and comm-based filtering is useless.
+    handling" vs "background" without relying on thread names.
 
 Both filters operate on the symbol-string tuples produced by perftop's
-parser, so no DSO information is required. The heuristic for a SmartMet
-frame is symbol-prefix only (`SmartMet::` namespace) — that catches all
-library / engine / plugin code without needing a DSO list.
+parser, so no DSO information is required. "SmartMet code" is recognised
+by symbol prefix — see `_SMARTMET_NAMESPACE_PREFIXES` and `_NFMI_CLASS_RE`
+below for the full list. The previous version only matched the
+`SmartMet::` namespace, which dropped the entire flame for stacks rooted
+in `Fmi::`, `Imagine::`, `NFmiArea::`, etc., even though those are all
+part of the SmartMet codebase. Surveyed 2026-05-04 across ~/hub.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Optional, Tuple
 
 
@@ -36,17 +38,65 @@ from typing import Optional, Tuple
 REQUEST_ENTRY_SUBSTR = "callRequestHandler"
 
 
-# Prefixes / substrings that mark a frame as SmartMet code.
-#
-# `SmartMet::` covers the demangled namespace used by every library,
-# engine, and plugin. We also accept the `_ZN8SmartMet` mangled form
-# in case perf script emits mangled names on a host without c++filt
-# in PATH — it shouldn't, but the fallback is cheap.
-_SMARTMET_PREFIXES = ("SmartMet::", "_ZN8SmartMet")
+# Demangled namespace prefixes that mark a frame as SmartMet code.
+# Order doesn't matter — `startswith` returns on first match. fmitools /
+# qdtools-specific namespaces (FMI, DataTransform, RadContour, TimeTools,
+# WRFData, HDF5) are deliberately excluded: those are CLI-tool code that
+# doesn't run inside smartmetd, so including them would only false-match
+# at-most rare rare cases and confuse the hot-path interpretation.
+_SMARTMET_NAMESPACE_PREFIXES = (
+    # Core
+    "SmartMet::",
+    "Fmi::",
+    "Imagine::",
+    "Giza::",
+    "Locus::",
+    "Trax::",
+    "Osm::",
+    # grid-files
+    "GRIB1::", "GRIB2::", "NetCDF::", "QueryData::",
+    "GeoTiff::", "Map::", "GRID::", "Identification::",
+    # grid-content
+    "ContentServer::", "DataServer::", "QueryServer::",
+    "Functions::", "Lua::", "HTTP::", "Corba::",
+    "SessionManagement::", "UserManagement::",
+    # textgen / timeseries
+    "TextGen::", "BrainStorm::",
+    "Aggregator::", "OptionParsers::", "SpecialParameter::",
+    "Stat::", "TimeSeries::",
+    # delfoi / observations
+    "Delfoi::", "FlashQuery::", "OracleUtils::", "Observation::",
+    # other
+    "Dynlib::",
+)
+
+
+# Mangled-form fallbacks for hosts where perf script can't demangle
+# (e.g. c++filt missing from PATH). Modern perf demangles by default,
+# so these fire rarely; only the most common SmartMet:: form is worth
+# keeping in fast-path. The rest of the namespaces are left to the
+# demangled match.
+_SMARTMET_MANGLED_PREFIXES = (
+    "_ZN8SmartMet",
+)
+
+
+# Legacy class-prefix convention. newbase / smarttools / imagine predate
+# the SmartMet:: namespace and use `NFmi`-prefixed global classes
+# (`NFmiArea`, `NFmiPoint`, `NFmiQueryData`, ...). The `[A-Z]` lookahead
+# distinguishes a real class name from anything else that happens to
+# start with the four characters "NFmi" — paranoid but cheap.
+_NFMI_CLASS_RE = re.compile(r"^NFmi[A-Z]")
 
 
 def is_smartmet_frame(sym: str) -> bool:
-    return any(sym.startswith(p) for p in _SMARTMET_PREFIXES)
+    if any(sym.startswith(p) for p in _SMARTMET_NAMESPACE_PREFIXES):
+        return True
+    if any(sym.startswith(p) for p in _SMARTMET_MANGLED_PREFIXES):
+        return True
+    if _NFMI_CLASS_RE.match(sym):
+        return True
+    return False
 
 
 def collapse_to_smartmet(

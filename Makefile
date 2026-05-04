@@ -262,6 +262,27 @@ check:
 	    assert keep_for_thread_class(("SmartMet::Spine::SmartMetPlugin::callRequestHandler","x"), THREAD_CLASS_REQUEST); \
 	    assert keep_for_thread_class(("SmartMet::Engine::Cache::cleanup",), THREAD_CLASS_BACKGROUND); \
 	    assert keep_for_thread_class((), THREAD_CLASS_ALL); \
+	    from smartmet_top.sources.smartmet_filter import is_smartmet_frame; \
+	    assert is_smartmet_frame("SmartMet::Spine::Reactor::run"); \
+	    assert is_smartmet_frame("Fmi::Cache::insert"); \
+	    assert is_smartmet_frame("NFmiArea::xy"); \
+	    assert is_smartmet_frame("NFmiPoint::operator+"); \
+	    assert is_smartmet_frame("Giza::Box::draw"); \
+	    assert is_smartmet_frame("Imagine::NFmiColorTools::reduce"); \
+	    assert is_smartmet_frame("Locus::Query::execute"); \
+	    assert is_smartmet_frame("Trax::contour"); \
+	    assert is_smartmet_frame("GRIB2::Decoder::decode"); \
+	    assert is_smartmet_frame("Observation::PostgreSQLDriver::query"); \
+	    assert is_smartmet_frame("TextGen::Sentence::realize"); \
+	    assert is_smartmet_frame("_ZN8SmartMet5Spine7Reactor3runEv"), "mangled fallback"; \
+	    assert not is_smartmet_frame("memcpy"); \
+	    assert not is_smartmet_frame("std::vector<int>::push_back"); \
+	    assert not is_smartmet_frame("__schedule"); \
+	    assert not is_smartmet_frame("FMI::DoSomething"), "FMI:: (capital) deliberately excluded — fmitools/qdtools only"; \
+	    assert not is_smartmet_frame("DataTransform::convert"), "qdtools/fmitools only"; \
+	    assert not is_smartmet_frame("HDF5::Reader::open"), "qdtools-only"; \
+	    assert not is_smartmet_frame("NFmi"), "exact-match guard — must be NFmi[A-Z]"; \
+	    assert not is_smartmet_frame("NFmiscellaneous"), "NFmi[a-z] should not match"; \
 	    from smartmet_top.panels.flame import _apply_filters; \
 	    _af = _apply_filters([("main","SmartMet::A","pthread_mutex_lock","futex_wait"), ("main","libc_only","free")], thread_class=THREAD_CLASS_ALL, smartmet_only=True); \
 	    assert _af == [("SmartMet::A","pthread_mutex_lock")], _af; \
