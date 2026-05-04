@@ -99,9 +99,17 @@
       this.tree = buildTree(stacks);
       this.totalWeight = this.tree.weight;
       this.unit = opts.unit || "samples";
-      this.zoomPath = [];
+      // Preserve this.zoomPath as user intent. setData is called on
+      // every periodic refresh; resetting the zoom each cycle would
+      // pop the operator out of any zoom they had set within seconds.
+      // If a deep leaf the operator zoomed into is missing from the
+      // newly-built tree, draw() walks a *local* render path back up
+      // just far enough to find a non-empty subtree, leaving zoomPath
+      // untouched — so the view springs back to the operator's zoom
+      // as soon as that leaf reappears in a later refresh. Callers
+      // that mean to reset (e.g., the breadcrumb root link) call
+      // zoomTo([]) explicitly.
       this.draw();
-      if (this.onZoom) this.onZoom(this.zoomPath);
     }
 
     setSearch(term) {
@@ -143,7 +151,16 @@
         return;
       }
 
-      const visibleRoot = pathTo(this.tree, this.zoomPath);
+      // Resolve the zoom path against the just-built tree. If a
+      // segment is missing (the deep leaf wasn't sampled this cycle),
+      // walk a local renderPath back up until something resolves.
+      // Don't mutate this.zoomPath — see the note in setData().
+      let renderPath = this.zoomPath;
+      let visibleRoot = pathTo(this.tree, renderPath);
+      while ((!visibleRoot || !visibleRoot.weight) && renderPath.length > 0) {
+        renderPath = renderPath.slice(0, -1);
+        visibleRoot = pathTo(this.tree, renderPath);
+      }
       if (!visibleRoot || !visibleRoot.weight) {
         ctx.fillStyle = "#7c8794";
         ctx.font = "12px ui-monospace, monospace";
@@ -152,7 +169,7 @@
       }
 
       const innerW = cssW - 2 * PAD_L;
-      this._drawNode(ctx, visibleRoot, this.zoomPath,
+      this._drawNode(ctx, visibleRoot, renderPath,
                      PAD_L, PAD_T, innerW,
                      visibleRoot.weight);
     }

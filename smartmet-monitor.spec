@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.5.4
-Release:        3%{?dist}.fmi
+Release:        4%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -189,6 +189,11 @@ fi
 %config(noreplace) %{_prefix}/lib/sysctl.d/99-smartmet-perf.conf
 
 %changelog
+* Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-4.fmi
+- Co-bumped with smartmet-webmon 26.5.4-4 (browser-flame zoom-stability
+  fix). No smartmet-monitor changes; bump only to keep the
+  Requires: smartmet-monitor = %{version}-%{release} pin satisfiable.
+
 * Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-3.fmi
 - Drop the `Requires: kernel-devel` introduced in 26.5.4-2; restore
   `Recommends: kernel-devel-uname-r`. A noarch package cannot pin

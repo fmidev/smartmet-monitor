@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.5.4
-Release:        3%{?dist}.fmi
+Release:        4%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -150,6 +150,18 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-4.fmi
+- Browser-flame zoom is now stable across the periodic refresh.
+  flame.js's setData() used to unconditionally reset this.zoomPath
+  to [] every cycle, popping the operator out of any zoom they had
+  clicked into within seconds. Same conceptual bug the smtop TUI
+  fix in 26.5.4-1 addressed Python-side; the browser path was
+  missed. Now setData preserves zoomPath as user intent and draw()
+  walks a *local* render path up just far enough to find a
+  non-empty subtree when a deep leaf is missing from the latest
+  refresh — the view springs back to the operator's zoom as soon
+  as that leaf reappears.
+
 * Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-3.fmi
 - Co-bumped with smartmet-monitor 26.5.4-3 to keep the
   Requires: smartmet-monitor = %{version}-%{release} pin
