@@ -91,15 +91,16 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
              "back gracefully when it's missing.",
     )
     p.add_argument(
-        "--perf-interval", type=float, default=10.0, metavar="SEC",
+        "--perf-interval", type=float, default=6.0, metavar="SEC",
         help="Full perf cycle in seconds (record + idle remainder). "
-             "Default 10.0.",
+             "Default 6.0 (50%% duty cycle, the practical floor for "
+             "live-feeling updates that don't visibly hurt the host).",
     )
     p.add_argument(
         "--perf-record-seconds", type=int, default=3, metavar="N",
         help="Seconds to record per perf cycle. Default 3. Combined "
-             "with --perf-interval=10 the duty cycle on the target "
-             "smartmetd process is ~30%%.",
+             "with --perf-interval=6 the duty cycle on the target "
+             "smartmetd process is 50%%.",
     )
     p.add_argument(
         "--malloc-flame", nargs="?", type=int, const=4096, default=None,
@@ -161,6 +162,51 @@ def _expand_logs(args) -> List[str]:
     return out
 
 
+def _check_recent_oom() -> None:
+    """If the previous smwebmon instance was OOM-killed in the last
+    10 minutes, log a warning explaining the cgroup MemoryMax cap
+    and how to raise it. Best-effort — silent on any failure (no
+    journalctl, no permissions, busy host) since the diagnostic is
+    informational, not load-bearing.
+
+    The signature we look for is the kernel's OOM-killer line that
+    names smwebmon as the victim ("Killed process N (smwebmon)" or
+    the cgroup-side "oom_memcg=/system.slice/smartmet-webmon.service").
+    Either form means systemd is going to immediately restart us
+    (Restart=on-failure), and the operator's "graphs keep clearing"
+    confusion is one short journal line away from being explained.
+    """
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["journalctl", "-u", "smartmet-webmon",
+             "--since", "10 minutes ago",
+             "-o", "cat", "--no-pager"],
+            capture_output=True, timeout=5, text=True,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        return
+    if out.returncode != 0:
+        return
+    text = out.stdout
+    if ("Killed process" in text and "smwebmon" in text) \
+       or "oom_memcg=/system.slice/smartmet-webmon" in text:
+        sys.stderr.write(
+            "smwebmon: WARNING — the previous instance was OOM-killed "
+            "by the cgroup memory cap in the last 10 minutes. The "
+            "in-memory perfdata ring resets on every restart, so the "
+            "Flame panel's on-CPU graph will look sparse / keep "
+            "clearing until the cap is raised. Inspect with:\n"
+            "  systemctl show smartmet-webmon -p MemoryMax\n"
+            "Raise via:\n"
+            "  sudo systemctl edit smartmet-webmon\n"
+            "(add `[Service]` then `MemoryMax=4G` or higher; the "
+            "shipped 2G default suits most backends but a host with "
+            "many engines / plugins loading concurrently may need "
+            "more headroom).\n"
+        )
+
+
 async def _run(args: argparse.Namespace) -> int:
     asset_root = args.asset_root or assets.resolve_asset_root()
     if asset_root is None:
@@ -171,6 +217,7 @@ async def _run(args: argparse.Namespace) -> int:
         )
         return 2
 
+    _check_recent_oom()
     set_history_minutes(args.history_minutes)
     store = Store()
     log_paths = _expand_logs(args)

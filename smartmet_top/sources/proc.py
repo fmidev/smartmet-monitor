@@ -64,11 +64,37 @@ def read_cmdline(pid: int) -> str:
     return data.replace(b"\x00", b" ").decode("utf-8", errors="replace").rstrip()
 
 
+_PORT_RE = re.compile(r"--port[=\s]+(\d+)")
+
+
 def detect_role(cmdline: str) -> str:
-    """Best-effort role label. SmartMet operators usually name configs
-    `smartmetd-frontend.conf` / `smartmetd-backend.conf`; if neither
-    marker is present we say `unknown` and let the operator pick by hand
-    via the PID selector."""
+    """Best-effort role label.
+
+    Two signals, in priority order:
+
+      1. The ``--port=`` argument. Convention across FMI deployments
+         is port 8080 = frontend, port 8081 = backend. The port is
+         the most reliable signal because it's set in the systemd
+         drop-in / sysconfig file that operators actually edit; the
+         config-file path or the binary name can lag the deployment
+         when configs get renamed.
+
+      2. Failing that, ``frontend`` / ``backend`` (or short ``fe`` /
+         ``be``) substring in the cmdline — usually the path to the
+         config file. Less reliable: a site that names its config
+         ``backend.conf`` for a frontend deployment slips through
+         the port check, and we don't want to misclassify on a
+         word match.
+
+    Returns ``unknown`` when neither signal fires.
+    """
+    m = _PORT_RE.search(cmdline)
+    if m:
+        port = int(m.group(1))
+        if port == 8080:
+            return "frontend"
+        if port == 8081:
+            return "backend"
     cl = cmdline.lower()
     if "frontend" in cl or re.search(r"\bfe\b", cl):
         return "frontend"

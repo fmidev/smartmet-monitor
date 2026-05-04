@@ -25,8 +25,18 @@ from typing import List, Optional, Tuple
 
 PERF_FREQ = 99                  # samples/sec, mirrors btop's CPU graph default
 DEFAULT_RECORD_SECONDS = 3      # actual recording duration each cycle
-DEFAULT_INTERVAL = 10.0         # full cycle (record + idle)
+DEFAULT_INTERVAL = 6.0          # full cycle (record + idle); 50% duty cycle
+                                # — the practical floor for "doesn't visibly
+                                # hurt the host but updates feel live."
 PERF_DATA_PATH = "/tmp/.smtop_perf.data"
+# Per-CPU ring buffer pages for `perf record`. The default (8 pages
+# = 32 KB) overflows in milliseconds when DWARF stack-dumps fly in
+# from a 326-thread process; perf prints "Lost N events" or, worse,
+# silently downscales sample rate. 256 pages (1 MB per CPU) gives
+# the recorder room to keep up. Only safe with CAP_IPC_LOCK on the
+# unit (added in 26.5.4-6) — without that cap, mmap'ing >516 KB
+# fails with EPERM under perf_event_mlock_kb's default.
+PERF_MMAP_PAGES = 256
 
 
 _FRAME_RE = re.compile(
@@ -99,6 +109,7 @@ async def _run_perf_record(perf_bin: str, pid: int,
         perf_bin, "record",
         "-F", str(PERF_FREQ),
         "--call-graph=dwarf,32768",
+        "--mmap-pages", str(PERF_MMAP_PAGES),
         "-p", str(pid),
         "-o", PERF_DATA_PATH,
         "--", "sleep", str(record_seconds),

@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.5.4
-Release:        6%{?dist}.fmi
+Release:        7%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -189,6 +189,29 @@ fi
 %config(noreplace) %{_prefix}/lib/sysctl.d/99-smartmet-perf.conf
 
 %changelog
+* Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-7.fmi
+- perftop.py: lower DEFAULT_INTERVAL 10s -> 6s (50%% duty cycle, the
+  practical floor for "live-feeling updates that don't visibly hurt
+  the host"). The 10 s default was conservative when the recorder
+  was new; with `CPUQuota=200%%` already bounding the unit, the
+  shorter cycle makes the on-CPU flame feel responsive without any
+  realistic risk to the target. --perf-interval / --perf-record-seconds
+  defaults updated in smtop and smwebmon argparse to match.
+- perftop.py: pass --mmap-pages 256 to perf record. Default 8 pages
+  (32 KB) per CPU was overflowing within milliseconds when DWARF
+  stack-dumps fly in from a 326-thread process; perf would
+  silently downscale sample density. 256 pages (1 MB per CPU)
+  gives the recorder room to keep up. Only safe because the
+  smwebmon unit was granted CAP_IPC_LOCK in 26.5.4-6 — without
+  that, mmap'ing >516 KB hits perf_event_mlock_kb's default and
+  fails with "mmap: Operation not permitted".
+- proc.py: detect_role now parses --port=8080/8081 from cmdline
+  before falling back to the existing string-match on
+  frontend/backend keywords. Port is the more reliable signal
+  (operator-edited via the systemd drop-in / sysconfig env file)
+  versus the cmdline path which can lag the deployment.
+  make check covers the user's actual cmdline strings.
+
 * Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-6.fmi
 - /usr/lib/sysctl.d/99-smartmet-perf.conf gains a (commented out)
   kernel.kptr_restrict = 0 line alongside the existing paranoid

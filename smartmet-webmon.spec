@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.5.4
-Release:        6%{?dist}.fmi
+Release:        7%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -150,6 +150,30 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-7.fmi
+- Bump cgroup MemoryMax from 512M to 2G. The earlier 512M cap was
+  set when the unit only ran perf record; once the full bcc-tools
+  kit landed (off-CPU + page-fault + wakeup + blockflame + biolat
+  + runqlat) plus DWARF unwinding mmap pages plus journalctl-tail,
+  the cgroup peaks at ~860 MB — the kernel was OOM-killing
+  smwebmon every few minutes, which manifested as "the on-CPU
+  graph keeps clearing for no reason" (the bounded perfdata ring
+  lives in process memory, so each kill resets it). 2 GB gives
+  headroom for the realistic peak without being absurd; CPUQuota=200%%
+  still bounds runaways. Diagnosed by reading dmesg's oom-killer
+  output on a live backend.
+- smwebmon: at startup, check journalctl for an OOM kill of the
+  unit in the last 10 minutes. If found, log a clear breadcrumb
+  to stderr explaining the cap and how to raise it via
+  `systemctl edit`. So the next operator who hits the same
+  scenario sees "previous instance was OOM-killed" instead of
+  having to chase the empty graph through dmesg.
+- Co-bumped with smartmet-monitor 26.5.4-7 (--mmap-pages 256
+  added to perf record, --perf-interval default lowered to 6 s,
+  detect_role hardened to prefer --port=). Apply the new unit
+  with: sudo systemctl daemon-reload && sudo systemctl restart
+  smartmet-webmon.
+
 * Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-6.fmi
 - Cache-Control: no-store on the static asset responses
   (server.py). The handler previously sent no Cache-Control on

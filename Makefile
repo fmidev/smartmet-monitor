@@ -366,6 +366,14 @@ check:
 	    _st, _b = cluster_overview_chart(_reg, {"cluster": "back", "metrics": "count,mean_ms,p95_ms"}); \
 	    assert _st == 200 and set(_b["charts"]) == {"count","mean_ms","p95_ms"}, (_st, _b); \
 	    assert _plugin_label("/timeseries") == "timeseries" and _plugin_label("/wms/sub") == "wms" and _plugin_label("/") == ""; \
+	    from smartmet_top.sources.proc import detect_role; \
+	    assert detect_role("/usr/sbin/smartmetd --port=8081 --configfile /smartmet/cnf/smartmetd/clients/backend.conf") == "backend"; \
+	    assert detect_role("/usr/sbin/smartmetd --port=8080 --configfile /smartmet/cnf/smartmetd/clients/frontend.conf") == "frontend"; \
+	    assert detect_role("/usr/sbin/smartmetd --port=8081") == "backend", "port alone is enough"; \
+	    assert detect_role("/usr/sbin/smartmetd --port=8080") == "frontend"; \
+	    assert detect_role("/usr/sbin/smartmetd --configfile /etc/foo/backend.conf") == "backend", "cmdline fallback when no port"; \
+	    assert detect_role("/usr/sbin/smartmetd --configfile /etc/foo/random.conf") == "unknown"; \
+	    assert detect_role("/usr/sbin/smartmetd --port=9999") == "unknown", "non-conventional port"; \
 	    from smartmet_top.sources.analyze import analyze, Finding, SEV_HIGH; \
 	    _aregex_stack = ("main","SmartMet::Spine::SmartMetPlugin::callRequestHandler","SmartMet::P::q","std::__detail::_Compiler<X>::_M_compile"); \
 	    _AStore = type("_AStore", (), { \

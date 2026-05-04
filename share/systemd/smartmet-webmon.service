@@ -25,15 +25,19 @@ User=smartmet-server
 Restart=on-failure
 RestartSec=5
 
-# Defensive cgroup limits. Headroom over the cost-analysis figures
-# (~100 MB RSS, ~5 % of one core sustained) plus the perf samplers'
-# burst load: with --perf default-on, perf record / offcputime-bpfcc
-# / friends spawn periodically as descendants of smwebmon and share
-# its quota. 200% of one core gives the recording windows breathing
-# room without letting a runaway eat the host. Raise (or remove) in
-# a drop-in if you have a hot box and want full elasticity:
+# Defensive cgroup limits. The earlier 512M cap was set when the unit
+# only ran `perf record` and turned out to be wildly too tight once
+# the full bcc-tools kit landed: with off-CPU + page-fault + wakeup +
+# blockflame + biolat + runqlat all live concurrently, plus DWARF
+# unwinding mmap pages, plus journalctl-tail, the cgroup peaks at
+# ~860 MB — the kernel was OOM-killing smwebmon every few minutes,
+# which manifested as "the on-CPU graph keeps clearing for no reason"
+# (the bounded perfdata ring lives in process memory, so each kill
+# resets it). 2 GB gives headroom for the realistic peak (~1 GB)
+# without being absurd. CPUQuota=200% still bounds runaways.
+# Raise (or remove) in a drop-in if you want full elasticity:
 #   sudo systemctl edit smartmet-webmon
-MemoryMax=512M
+MemoryMax=2G
 CPUQuota=200%
 
 # smwebmon must call perf_event_open(2) and use bcc-tools to

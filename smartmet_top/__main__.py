@@ -103,9 +103,9 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
              "the panel surfaces an install hint when missing).",
     )
     p.add_argument(
-        "--perf-interval", type=float, default=10.0, metavar="SEC",
+        "--perf-interval", type=float, default=6.0, metavar="SEC",
         help="Full perf cycle in seconds (record + idle remainder). "
-             "Default 10.0.",
+             "Default 6.0 (50%% duty cycle).",
     )
     p.add_argument(
         "--perf-record-seconds", type=int, default=3, metavar="N",
@@ -113,8 +113,8 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
              "Longer = more samples per flamegraph (denser, more "
              "representative of typical behaviour) but proportionally "
              "more CPU overhead on the target during the recording "
-             "window. Combined with the default --perf-interval=10 "
-             "the duty cycle is ~30%%.",
+             "window. Combined with the default --perf-interval=6 "
+             "the duty cycle is 50%%.",
     )
     p.add_argument(
         "--journal-unit", type=str,
