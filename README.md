@@ -1028,9 +1028,9 @@ the stdlib `gzip` module; no pip dependency.
 
 The optional companion `smwebmon` exposes the same data over HTTP for
 a browser-based UI. It imports the same `Store`, source loops and
-snapshot classes as `smtop`; nothing is duplicated. The first release
-ships only the URLs panel as a web view; the remaining panels port
-over one at a time.
+snapshot classes as `smtop`; nothing is duplicated.
+
+![smwebmon Overview tab: totals table plus five full-width charts (req/min, mean ms, p95 ms, bytes/min, err %)](doc/images/webmon_overview.png)
 
 ### Why a separate package
 
@@ -1121,6 +1121,62 @@ and reuses the same color thresholds the curses view uses.
 The reading guide is unchanged from `smtop` — see the smtop section
 above for healthy-shape / trouble-pattern / typical-root-cause /
 where-to-look-next guidance, which applies as-written.
+
+#### Screenshots
+
+Plugins — one row per access-log source, latency + size sparklines, sortable / filterable / windowed:
+
+![Plugins tab: per-plugin table with latency and size sparklines](doc/images/webmon_plugins.png)
+
+URLs — per-URL latency / count / err table; click a row for a drill-down modal:
+
+![URLs tab: sortable per-URL table with latency, count and err columns](doc/images/webmon_urls.png)
+
+Caches — per-cache hit-rate bar (colour-coded) and hits/min trend sparkline:
+
+![Caches tab: per-cache hit-rate fill bars and hits/min sparklines](doc/images/webmon_caches.png)
+
+Services — per-handler row with req/min trend sparkline and `cpu%` colouring:
+
+![Services tab: per-handler request-rate trend sparklines](doc/images/webmon_services.png)
+
+Active — in-flight count chart on top, table of currently-running requests below:
+
+![Active tab: in-flight count chart with the table of in-flight requests below](doc/images/webmon_active.png)
+
+Proc — PID picker plus a card grid for memory, I/O, threads and major-page-faults:
+
+![Proc tab: section-card grid for the focused smartmetd PID](doc/images/webmon_proc.png)
+
+Network — TCP host summary, per-state counts, listen-socket table, per-NIC rx/tx charts:
+
+![Network tab: TCP retransmits, listen drops, per-state and per-NIC charts](doc/images/webmon_network.png)
+
+Logs — live tail of the multi-source log ring with substring filter and autoscroll toggle:
+
+![Logs tab: live multi-source tail with substring filter](doc/images/webmon_logs.png)
+
+Flame — interactive Canvas flame graph with five recording modes; SmartMet:: frames are coloured in the orange/yellow band so they pop against glibc / kernel frames.
+
+On-CPU (default, 99 Hz `perf record`) — where the CPU is going:
+
+![Flame tab, on-CPU mode: where the CPU is going](doc/images/webmon_flame_oncpu.png)
+
+Off-CPU (`offcputime-bpfcc`, weighted by µs blocked) — where threads are stuck:
+
+![Flame tab, off-CPU mode: stacks weighted by blocked microseconds](doc/images/webmon_flame_offcpu.png)
+
+Page-fault (`perf record -e major-faults`) — where smartmetd hits cold pages:
+
+![Flame tab, page-fault mode: stack at every major page fault](doc/images/webmon_flame_pagefault.png)
+
+Wakeup (`perf record -e sched:sched_wakeup`) — the dual of off-CPU, the other side of a contention pair:
+
+![Flame tab, wakeup mode: stack at every wakeup the focused PID initiated](doc/images/webmon_flame_wakeup.png)
+
+Block-I/O issue (`perf record -e block:block_rq_issue`) — every block-layer request the PID issued:
+
+![Flame tab, block-I/O mode: stack at every block-layer request](doc/images/webmon_flame_blockflame.png)
 
 ### Cluster mode
 
