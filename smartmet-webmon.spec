@@ -314,6 +314,24 @@ modprobe kheaders >/dev/null 2>&1 || :
   URL / API Keys panels refill from the live tail within seconds
   of replay completing. Combined with the 3× parser speedup,
   end-to-end replay is roughly 8× faster than before.
+- ``bulk_load`` calls ``posix_fadvise(SEQUENTIAL | NOREUSE)`` on
+  every replay file so the multi-GB read no longer evicts spine's
+  hot pages from the page cache. This reduces (but does not
+  eliminate) the contention with spine's access-logger cleaner
+  thread.
+- New ``--replay-live-bytes N`` CLI flag (default 0 = skip live
+  files entirely). On spine versions where the access-logger
+  cleaner thread holds its WriteLock for the duration of every
+  disk flush, our reader and the cleaner contend at the
+  filesystem inode-mutex level, stalling smartmetd's request
+  handlers for the duration of the live-file replay. Skipping
+  the live file at startup sidesteps this; the live tail picks
+  up new writes as they arrive (~5 s of empty IP Flow timeline,
+  then it populates from incoming traffic). Operators on a
+  spine build with the WriteLock-during-IO fix (HandlerView
+  three-phase cleanLog) can pass ``--replay-live-bytes=-1`` to
+  treat live files like rotated ones, or a positive number to
+  read only the trailing N bytes for a quick partial replay.
 - Access-log parser sped up by ~5× peak / ~3× on a realistic
   burst pattern (1.5 M / 932 k vs 297 k lines/s on RHEL 8 /
   Python 3.9). Four changes:

@@ -34,7 +34,8 @@ from .state.store import Store
 
 async def replay_logs(store: Store, log_paths: List[str], *,
                       replay_bytes: int = 1024 * 1024 * 1024,
-                      include_rotated: bool = False) -> None:
+                      include_rotated: bool = False,
+                      max_live_bytes: Optional[int] = 0) -> None:
     """Synchronous bulk-load of log tails. Run before ``start_sources``
     so panels come up populated rather than empty.
 
@@ -56,7 +57,8 @@ async def replay_logs(store: Store, log_paths: List[str], *,
     try:
         await bulk_load(log_paths, store,
                         max_bytes_per_file=replay_bytes,
-                        include_rotated=include_rotated)
+                        include_rotated=include_rotated,
+                        max_live_bytes=max_live_bytes)
     finally:
         store.replay_status = {
             "in_progress": False,
