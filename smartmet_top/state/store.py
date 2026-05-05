@@ -651,6 +651,107 @@ class Store:
 
     # -- log updates --------------------------------------------------------
 
+    def record_requests_bulk(
+        self,
+        records,
+        source_label: Optional[str] = None,
+    ) -> None:
+        """Streamlined replay-mode ingest. Each record is a 5-tuple
+        ``(ts, dur_ms, nbytes, status, ip)``. Maintains only the
+        aggregates the IP Flow + Overview + Plugins-timeline panels
+        need: total counters, ``_global_minutes`` (count, bytes,
+        errors), per-source minute_buckets (count, bytes, errors),
+        and ``_ipflow_minutes`` per-record retention.
+
+        Skipped vs ``record_request``:
+          * URL stats (per-URL latency histogram, percentiles)
+          * API-key stats and apikey_counts
+          * per-source per-second buckets (the "last 60 s" view)
+          * per-record latency histograms anywhere
+          * status-code histograms in MinuteBucket
+        These all refill from live tailing within seconds of replay
+        completing, so the panels that read them recover quickly.
+
+        Amortises the RLock over the entire batch — bulk_load passes
+        a few thousand records at a time, cutting lock-cycle cost
+        from once-per-record (~0.6 µs) to once-per-batch.
+        """
+        if not records:
+            return
+        history_minutes = HISTORY_MINUTES
+        with self._lock:
+            src = None
+            if source_label:
+                src = self.source_stats.get(source_label)
+                if src is None:
+                    src = SourceStats(label=source_label)
+                    self.source_stats[source_label] = src
+            global_minutes = self._global_minutes
+            ipflow_minutes = self._ipflow_minutes
+            src_minutes = src.minute_buckets if src is not None else None
+            last_ts = 0.0
+            count_added = 0
+            byte_added = 0
+            err_added = 0
+            for ts, dur_ms, nbytes, status, ip in records:
+                count_added += 1
+                byte_added += nbytes
+                is_err = status >= 400
+                if is_err:
+                    err_added += 1
+                m = int(ts // 60)
+
+                # Global minute aggregates (no histogram, no status_counts).
+                g = global_minutes.get(m)
+                if g is None:
+                    g = MinuteBucket()
+                    global_minutes[m] = g
+                    cutoff = m - history_minutes
+                    for k in list(global_minutes.keys()):
+                        if k < cutoff:
+                            del global_minutes[k]
+                g.count += 1
+                g.bytes += nbytes
+                if is_err:
+                    g.errors += 1
+
+                # Per-source minute aggregates (no second-buckets,
+                # no histogram, no status_counts).
+                if src_minutes is not None:
+                    mb = src_minutes.get(m)
+                    if mb is None:
+                        mb = MinuteBucket()
+                        src_minutes[m] = mb
+                        cutoff_m = m - history_minutes
+                        for k in list(src_minutes.keys()):
+                            if k < cutoff_m:
+                                del src_minutes[k]
+                    mb.count += 1
+                    mb.bytes += nbytes
+                    if is_err:
+                        mb.errors += 1
+                    if ts > last_ts:
+                        last_ts = ts
+
+                # IP-flow per-record retention.
+                if ip:
+                    bucket = ipflow_minutes.get(m)
+                    if bucket is None:
+                        bucket = []
+                        ipflow_minutes[m] = bucket
+                        cutoff = m - history_minutes
+                        for k in list(ipflow_minutes.keys()):
+                            if k < cutoff:
+                                del ipflow_minutes[k]
+                    bucket.append((ts, ip, int(dur_ms), int(nbytes),
+                                    int(status), source_label or ""))
+
+            self.total_requests += count_added
+            self.total_bytes += byte_added
+            self.total_errors += err_added
+            if src is not None and last_ts > src.last_seen:
+                src.last_seen = last_ts
+
     def record_request(
         self,
         ts: float,

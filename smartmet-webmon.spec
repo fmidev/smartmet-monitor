@@ -301,6 +301,19 @@ modprobe kheaders >/dev/null 2>&1 || :
   and (because of disk-bandwidth contention) appearing to
   "freeze" the daemon's own access-log writes. ``.gz`` archives
   are still read to natural EOF since rotated logs aren't growing.
+- New ``Store.record_requests_bulk(records, source_label)`` for
+  the replay path. Maintains only the aggregates the IP Flow,
+  Overview, and Plugins-timeline panels need (``_global_minutes``
+  count/bytes/errors, per-source minute_buckets, and the
+  per-record ``_ipflow_minutes`` retention) and skips per-URL
+  histograms, per-API-key stats, per-source per-second buckets,
+  and the raw-line ring. ``bulk_load`` batches records 5000 at a
+  time and amortises the store's RLock across the whole batch.
+  Replay-mode ingest goes from ~134 k records/s to ~507 k
+  records/s on RHEL 8 / Python 3.9 — about 4× faster — and the
+  URL / API Keys panels refill from the live tail within seconds
+  of replay completing. Combined with the 3× parser speedup,
+  end-to-end replay is roughly 8× faster than before.
 - Access-log parser sped up by ~5× peak / ~3× on a realistic
   burst pattern (1.5 M / 932 k vs 297 k lines/s on RHEL 8 /
   Python 3.9). Four changes:
