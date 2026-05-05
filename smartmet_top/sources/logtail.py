@@ -211,10 +211,31 @@ def _bulk_load_one_file(path: str, store, max_bytes_per_file: int) -> None:
             # gzip files don't support cheap arbitrary-position
             # seeks, so we read them fully and let the store's
             # minute-bucket pruning bound memory.
-            if not path.endswith(".gz") and size > max_bytes_per_file:
+            is_gz = path.endswith(".gz")
+            if not is_gz and size > max_bytes_per_file:
                 fh.seek(size - max_bytes_per_file)
                 fh.readline()  # skip partial line
-            for line in fh:
+            # Stop at the size we observed when we opened the file.
+            # Without this guard, a live access log that smartmetd
+            # is currently writing to keeps growing past our seek
+            # position, ``for line in fh`` never reaches EOF, and
+            # the replay banner stays stuck on that file forever
+            # while we tail behind the daemon. ``.gz`` files don't
+            # have a meaningful uncompressed size from stat, so we
+            # let them read to natural EOF (a static rotated
+            # archive isn't growing under us).
+            if is_gz:
+                lines_iter = fh
+            else:
+                end = size
+                def _bounded():
+                    while fh.tell() < end:
+                        line = fh.readline()
+                        if not line:
+                            break
+                        yield line
+                lines_iter = _bounded()
+            for line in lines_iter:
                 line = line.rstrip("\n")
                 store.record_raw_line(line, source=label)
                 rec = parse(line)

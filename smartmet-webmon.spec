@@ -293,6 +293,14 @@ modprobe kheaders >/dev/null 2>&1 || :
   replay banner stuck at ``N-1 / N files`` indefinitely. The skip
   still increments the per-file counter so the banner reaches
   ``N / N`` and clears.
+- ``_bulk_load_one_file`` now stops at the file's size as captured
+  at ``open()`` time, instead of letting ``for line in fh`` run
+  to natural EOF. On a live access log that smartmetd is actively
+  writing to, the previous code could read indefinitely as the
+  file kept growing under our cursor, blocking the replay queue
+  and (because of disk-bandwidth contention) appearing to
+  "freeze" the daemon's own access-log writes. ``.gz`` archives
+  are still read to natural EOF since rotated logs aren't growing.
 - Access-log parser sped up by ~5× peak / ~3× on a realistic
   burst pattern (1.5 M / 932 k vs 297 k lines/s on RHEL 8 /
   Python 3.9). Four changes:
