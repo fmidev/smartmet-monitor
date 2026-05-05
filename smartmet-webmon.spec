@@ -293,6 +293,19 @@ modprobe kheaders >/dev/null 2>&1 || :
   replay banner stuck at ``N-1 / N files`` indefinitely. The skip
   still increments the per-file counter so the banner reaches
   ``N / N`` and clears.
+- Access-log parser sped up by ~2× (582 k vs 297 k lines/s on
+  RHEL 8 / Python 3.9). The 10-line regex was replaced with
+  ``str.split()`` over the 13 fixed space-separated tokens — safe
+  because URLs are URL-encoded and never contain literal spaces
+  (per the project's documented log format). Validation is just
+  the field count plus the three int conversions on STATUS /
+  DUR_MS / BYTES, which catch the truncated first/last lines a
+  logrotate fence-post can leave behind. The fixed-format
+  ISO-8601 timestamp parser is also hand-rolled, with a per-date
+  midnight-epoch cache so ``time.mktime`` (the slow path that
+  consults the local tz files) is called once per unique date in
+  the replay set rather than per line. End-to-end effect: a
+  multi-GB replay's parse slice shrinks by roughly 50 %.
 
 * Tue May 05 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.5-1.fmi
 - New IP Flow panel: animated topological view of access-log
