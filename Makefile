@@ -427,7 +427,44 @@ check:
 	        "malloc_recent_stacks":   lambda self, pid: [], \
 	    }); \
 	    _af = analyze(_AStore(), 1); \
-	    assert any(f.detector_id == "request-regex-compile" and f.severity == SEV_HIGH for f in _af), _af'
+	    assert any(f.detector_id == "request-regex-compile" and f.severity == SEV_HIGH for f in _af), _af; \
+	    from smartmet_top.snapshots.ipflow import IPFlowSnapshot, angle_for_ip, _ip_to_int; \
+	    assert _ip_to_int("0.0.0.0") == 0 and _ip_to_int("255.255.255.255") == 0xFFFFFFFF; \
+	    assert _ip_to_int("1.2.3.4") == ((1<<24)|(2<<16)|(3<<8)|4); \
+	    assert _ip_to_int("-") == 0 and _ip_to_int("nonsense") == 0; \
+	    assert angle_for_ip("0.0.0.0") == 0.0; \
+	    _a1 = angle_for_ip("10.0.0.1"); _a2 = angle_for_ip("10.0.0.2"); \
+	    assert 0.0 < _a2 - _a1 < 1.0, "/24 neighbours must sit at adjacent angles"; \
+	    _stf = Store(); \
+	    _t0 = 1700000000.0; \
+	    _stf.record_request(ts=_t0+1, url="/a", dur_ms=10, nbytes=100, status=200, apikey="-", ip="1.2.3.4"); \
+	    _stf.record_request(ts=_t0+2, url="/b", dur_ms=20, nbytes=200, status=200, apikey="-", ip="1.2.3.4"); \
+	    _stf.record_request(ts=_t0+3, url="/c", dur_ms=30, nbytes=300, status=500, apikey="-", ip="5.6.7.8"); \
+	    _stf.record_request(ts=_t0+4, url="/d", dur_ms=40, nbytes=400, status=200, apikey="-"); \
+	    _tl = IPFlowSnapshot.timeline(_stf, minutes=60); \
+	    assert _tl["minute_step"] == 60 and len(_tl["buckets"]) == 1 and _tl["buckets"][0]["reqs"] == 4 and _tl["buckets"][0]["bytes"] == 1000, _tl; \
+	    _w = IPFlowSnapshot.window(_stf, start_ts=_t0, seconds=60, top_n=0); \
+	    assert len(_w["requests"]) == 3, _w; \
+	    assert sorted(_w["ips"].keys()) == ["1.2.3.4", "5.6.7.8"], _w["ips"]; \
+	    assert _w["ips"]["1.2.3.4"]["count"] == 2 and _w["ips"]["1.2.3.4"]["bytes"] == 300; \
+	    assert abs(_w["ips"]["1.2.3.4"]["angle"] - angle_for_ip("1.2.3.4")) < 1e-9; \
+	    _w2 = IPFlowSnapshot.window(_stf, start_ts=_t0, seconds=60, top_n=1); \
+	    assert sorted(set(r["ip"] for r in _w2["requests"])) == ["1.2.3.4"], "top_n=1 keeps only the busiest IP"; \
+	    assert sorted(_w2["ips"].keys()) == ["1.2.3.4", "5.6.7.8"], "summary still complete"; \
+	    from smartmet_webmon.handlers import ipflow_timeline as _itl, ipflow_window as _iwd; \
+	    _st_t, _b_t = _itl(_stf, {"minutes": "60"}); \
+	    assert _st_t == 200 and _b_t["minute_step"] == 60 and _b_t["buckets"][0]["reqs"] == 4; \
+	    _st_w, _b_w = _iwd(_stf, {"start": str(_t0), "seconds": "60"}); \
+	    assert _st_w == 200 and len(_b_w["requests"]) == 3, (_st_w, _b_w); \
+	    _st_w2, _b_w2 = _iwd(_stf, {"start": "abc"}); \
+	    assert _st_w2 == 400, (_st_w2, _b_w2); \
+	    from smartmet_webmon.handlers import panels as _panels_h; \
+	    _ps_st, _ps_b = _panels_h(_stf, {}); \
+	    assert any(p["id"] == "ipflow" for p in _ps_b["panels"]), _ps_b; \
+	    _idx = open("share/smartmet/webmon/index.html").read(); \
+	    assert "ipflow.js" in _idx, "ipflow.js must be loaded by index.html"; \
+	    _ifjs = open("share/smartmet/webmon/ipflow.js").read(); \
+	    assert "smIPFlow" in _ifjs and "IPFlowAnimator" in _ifjs, "ipflow.js must export smIPFlow"'
 	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
 	$(PYTHON) -m py_compile smartmet_webmon/*.py
 	$(PYTHON) -m py_compile share/smartmet/bperf.py

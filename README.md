@@ -1116,6 +1116,7 @@ and reuses the same color thresholds the curses view uses.
 | Proc       | PID picker plus a section-card grid: memory (with VM RSS / anon / file / shmem and a Canvas RSS chart), I/O totals + read-rate chart, threads + fds + chart, major-page-fault rate chart. |
 | Network    | TCP host-wide summary (retrans/s, listen overflow/drop with line chart), per-state count + trend sparkline, listen-socket table with recv-Q (highlighted when non-zero), per-NIC rx/tx Canvas charts. |
 | Flame      | Interactive Canvas flame graph: click a rectangle to zoom in, click any breadcrumb segment to zoom out, hover for full function name + weight + %, search box highlights matching frames. Mode bar (on-cpu / off-cpu / off-cpu-locks / pagefault / wakeup / blockflame / malloc), thread-class filter (all / request / background), smartmet-only toggle. SmartMet:: frames are deterministically coloured in the orange/yellow band so they pop against glibc / kernel frames. Top-symbols table below the flame mirrors the curses list. |
+| IP Flow    | Topological animation of access-log traffic. Two stacked timeline charts (req/min, bytes/min) span the retained history and act as the scrubber — click anywhere to pin the topology view to that minute. Topology canvas underneath places each client IP at a fixed angle on the rim (`angle = ip_int * 360 / 2**32`, so /24 neighbours sit at adjacent angles); each request becomes a circle that flies from its IP's slot to the centre over its `dur_ms`. Speed encodes latency, colour encodes status (green 2xx / blue 3xx / amber 4xx / red 5xx), radius encodes `log10(bytes)`. Header: history depth, window length, top-N filter (10/25/50/100/all), Live, Pause. |
 | Logs       | Live tail of the multi-source log ring with substring filter and autoscroll toggle.                                            |
 
 The reading guide is unchanged from `smtop` — see the smtop section
@@ -1155,6 +1156,12 @@ Network — TCP host summary, per-state counts, listen-socket table, per-NIC rx/
 Logs — live tail of the multi-source log ring with substring filter and autoscroll toggle:
 
 ![Logs tab: live multi-source tail with substring filter](doc/images/webmon_logs.png)
+
+IP Flow — topological animation of access-log traffic.
+
+**How to read it.** *Healthy shape:* a steady stream of green particles, with bursts clustered around one or two angles (the busy clients on this backend, e.g. AWS); particle radius mostly small; speed mostly fast. *Trouble pattern:* (a) a stream of red particles from one angle — one client driving an error path; (b) many slow particles from many angles — server-wide latency spike, look at Active and Proc; (c) a sudden change in dominant angle — a new heavy client arrived, cross-check with URLs and API Keys to see what it's requesting. *Typical root cause:* a hot single-IP red stream is usually a misconfigured client retrying a 5xx; a server-wide slowdown shows as the rim filling with slow particles regardless of angle. *Where to look next:* note the dominant angle, then jump to URLs (filtered to the busy time) to see which endpoints that client is hitting.
+
+**Limitation.** The IP shown is whatever the access logger captured. On a backend behind a frontend cluster, that's the original client IP only if the backend is configured to log `X-Forwarded-For` (FMI's backends do); otherwise it's the frontend's own IP and the panel collapses to a small fan rather than the full circle.
 
 Flame — interactive Canvas flame graph with five recording modes; SmartMet:: frames are coloured in the orange/yellow band so they pop against glibc / kernel frames.
 

@@ -673,4 +673,28 @@ canvas.chart {
   font-variant-numeric: tabular-nums;
 }
 .kv > .k { color: var(--fg-muted); }
+
+/* IP Flow panel — two timeline charts on top, topology canvas below. */
+.ipflow-charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 6px 0;
+}
+.ipflow-chart-wrap { display: flex; flex-direction: column; gap: 2px; }
+.ipflow-chart-title { font-size: 0.85em; padding-left: 4px; }
+.ipflow-chart {
+  width: 100%;
+  height: 80px;
+  cursor: crosshair;
+  background: #11161d;
+  border-radius: 3px;
+}
+.ipflow-topo {
+  width: 100%;
+  height: min(640px, 70vh);
+  background: #11161d;
+  border-radius: 3px;
+}
+.ipflow-status { margin-left: auto; font-variant-numeric: tabular-nums; }
 .kv > .v { text-align: right; }

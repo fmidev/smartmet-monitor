@@ -14,8 +14,8 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        26.5.4
-Release:        11%{?dist}.fmi
+Version:        26.5.5
+Release:        1%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -197,6 +197,17 @@ fi
 %config(noreplace) %{_prefix}/lib/sysctl.d/99-smartmet-perf.conf
 
 %changelog
+* Tue May 05 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.5-1.fmi
+- New IPFlow data path: ``Store.record_request`` accepts an ``ip``
+  argument (default empty), and a per-minute ``_ipflow_minutes``
+  ring retains raw ``(ts, ip, dur_ms, bytes, status)`` tuples
+  pruned by the same HISTORY_MINUTES window everything else uses.
+  ``smartmet_top.snapshots.ipflow`` exposes ``timeline()`` and
+  ``window()`` readers plus a stable ``angle_for_ip(ip)`` mapping
+  ``ip_int * 360 / 2**32`` so /24 neighbours sit at adjacent
+  angles. Used by the smartmet-webmon IPFlow panel — see the
+  webmon changelog for the dashboard side.
+
 * Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-11.fmi
 - CachesSnapshot.trends() and ServicesSnapshot.trends() now emit
   step_seconds + last_ts at the response top level. The 26.5.4-10

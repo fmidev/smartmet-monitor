@@ -183,6 +183,7 @@ async def tail_many(paths: Iterable[str], store, poll_interval: float = 0.25) ->
                     status=rec["status"],
                     apikey=rec["apikey"],
                     source_label=f.label,
+                    ip=rec["ip"],
                 )
         if any_data:
             store.logtail_status = f"tailing {len(files)} file(s)"
@@ -227,6 +228,7 @@ def _bulk_load_one_file(path: str, store, max_bytes_per_file: int) -> None:
                     status=rec["status"],
                     apikey=rec["apikey"],
                     source_label=label,
+                    ip=rec["ip"],
                 )
     except FileNotFoundError:
         return

@@ -21,8 +21,8 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-webmon
-Version:        26.5.4
-Release:        11%{?dist}.fmi
+Version:        26.5.5
+Release:        1%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -150,6 +150,28 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Tue May 05 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.5-1.fmi
+- New IP Flow panel: animated topological view of access-log
+  traffic. Two stacked timeline charts at the top (req/min,
+  bytes/min) span the retained history and act as the scrubber —
+  click anywhere to pin the topology view to that minute. The
+  topology canvas underneath places client IPs at fixed angles
+  around the rim (``angle = ip_int * 360 / 2**32``, so /24
+  neighbours sit at adjacent angles), and each request becomes a
+  particle that flies from its IP's slot to the centre over its
+  ``dur_ms``. Speed encodes latency, colour encodes status (green
+  2xx / blue 3xx / amber 4xx / red 5xx), radius encodes
+  ``log10(bytes)``. Header controls: history depth, window length,
+  top-N filter (10/25/50/100/all), Live, Pause. Pause freezes
+  both polling and the RAF loop so the operator can study a moment
+  without it being overwritten by the next poll. Endpoints:
+  ``/api/ipflow/timeline?minutes=N`` and
+  ``/api/ipflow/window?start=T&seconds=N&top_n=K``.
+- Bumped ``smartmet_webmon.__version__`` from the lagging 26.5.2 to
+  26.5.5 so dashboard runtime metadata matches the package version.
+- Co-bumped with smartmet-monitor 26.5.5-1 (the IPFlow data path
+  lives in the shared monitor package).
+
 * Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-11.fmi
 - Network panel charts (TCP retransmit, per-state trend, per-NIC
   rx/tx) now show time-at-cursor in the tooltip. The four
