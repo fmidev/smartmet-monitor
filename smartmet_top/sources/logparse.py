@@ -25,6 +25,16 @@ from typing import Optional
 
 _MIDNIGHT_CACHE: dict = {}
 
+# 1-deep last-seen cache. On a busy backend, the access-log cleaner
+# flushes lines in 5-second bursts, so consecutive records often
+# share the same second. Caching just the previous (key, epoch) pair
+# turns most parse_iso calls into a string equality test plus a
+# tuple read — about 6 ns. The fractional second is dropped (no
+# consumer uses sub-second precision; minute-bucketing and the
+# IP Flow playhead both round to seconds) so two records in the
+# same wall-clock second share a cache key.
+_LAST_TS: tuple = ("", 0.0)
+
 
 def parse_iso(s: str) -> float:
     """Hand-parse the AccessLogger's fixed-format timestamp to epoch.
@@ -34,19 +44,28 @@ def parse_iso(s: str) -> float:
     timestamps and we want to preserve that for sparkline / scrub
     alignment.
 
-    ``time.mktime`` is the slowest part of the path (~3 µs on
-    RHEL 8 / Python 3.9 because it consults the local tz files);
-    we cache the midnight-epoch for each ``YYYY-MM-DD`` key so
-    mktime is called once per unique date in the replay set —
-    typically 1–7 times for a normal smwebmon session — and the
-    per-line cost falls back to plain integer arithmetic.
+    Two caches:
+
+      * ``_LAST_TS`` — single-entry cache of the most recent
+        ``(YYYY-MM-DDTHH:MM:SS, epoch_seconds)`` pair. Hits on every
+        record that shares the same second as the previous one,
+        which is most records during a 5-second log-flush burst.
+
+      * ``_MIDNIGHT_CACHE`` — per-day midnight-epoch cache so the
+        slow ``time.mktime`` (consults local tz files) runs once
+        per unique date in the replay set rather than per line.
 
     Falls back to ``time.time()`` for malformed input so a single
-    bad line in a multi-million-line replay doesn't poison the
-    whole run.
+    bad line doesn't poison a multi-million-line replay.
     """
+    global _LAST_TS
+    # Truncate to second precision.  s[:19] is "YYYY-MM-DDTHH:MM:SS".
+    last = _LAST_TS
+    key = s[:19]
+    if last[0] == key:
+        return last[1]
     try:
-        date_key = s[0:10]
+        date_key = s[:10]
         midnight = _MIDNIGHT_CACHE.get(date_key)
         if midnight is None:
             year  = int(s[0:4])
@@ -58,14 +77,9 @@ def parse_iso(s: str) -> float:
         h   = int(s[11:13])
         mn  = int(s[14:16])
         sec = int(s[17:19])
-        frac = 0.0
-        if len(s) > 19:
-            sep = s[19]
-            if sep == "," or sep == ".":
-                frac_str = s[20:]
-                if frac_str:
-                    frac = int(frac_str) / (10 ** len(frac_str))
-        return midnight + h * 3600 + mn * 60 + sec + frac
+        result = midnight + h * 3600 + mn * 60 + sec
+        _LAST_TS = (key, result)
+        return result
     except (ValueError, IndexError):
         return time.time()
 
