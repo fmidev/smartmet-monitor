@@ -49,7 +49,8 @@ def _aggregate(
             if m < cutoff:
                 continue
             bucket_cc: Dict[str, List[int]] = {}
-            for ts, ip, dur, nb, status in store._ipflow_minutes[m]:
+            for rec in store._ipflow_minutes[m]:
+                ts, ip, dur, nb, status = rec[0], rec[1], rec[2], rec[3], rec[4]
                 cc = cdb.lookup(ip) or "??"
                 pm = bucket_cc.get(cc)
                 if pm is None:

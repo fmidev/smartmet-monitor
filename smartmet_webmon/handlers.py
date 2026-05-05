@@ -71,6 +71,7 @@ def health(store, qs: Mapping[str, str]) -> Tuple[int, Any]:
                       if hasattr(store, "logtail_status_per_path") else [],
         "admin_hosts": list(store.admin_hosts),
         "logtail_status": getattr(store, "logtail_status", "unknown"),
+        "replay": getattr(store, "replay_status", {"in_progress": False}),
     }
 
 
@@ -922,7 +923,9 @@ def cluster_proc_detail(registry, qs):
 
 def ipflow_timeline(store, qs):
     minutes = _int(qs.get("minutes"), 1440)
-    return 200, IPFlowSnapshot.timeline(store, minutes=minutes)
+    source = qs.get("source", "") or ""
+    return 200, IPFlowSnapshot.timeline(
+        store, minutes=minutes, source=source)
 
 
 def ipflow_window(store, qs):
@@ -934,18 +937,14 @@ def ipflow_window(store, qs):
         seconds = float(qs.get("seconds", "60") or 60.0)
     except ValueError:
         return 400, {"error": "invalid 'seconds'"}
-    # Cap window length. A full-history replay can legitimately ask
-    # for a day's worth of records; the snapshot's max_records=200k
-    # cap already bounds the response shape to a manageable size
-    # (~20 MB JSON in the worst case). Anything beyond a day is
-    # almost certainly a bug.
     seconds = max(0.0, min(seconds, 86400.0))
     if start_ts <= 0.0:
-        # Default: the most recent `seconds` of retained traffic.
         start_ts = time.time() - seconds
     top_n = _int(qs.get("top_n"), 0)
+    source = qs.get("source", "") or ""
     return 200, IPFlowSnapshot.window(
-        store, start_ts=start_ts, seconds=seconds, top_n=top_n)
+        store, start_ts=start_ts, seconds=seconds,
+        top_n=top_n, source=source)
 
 
 # ---- Countries --------------------------------------------------------------

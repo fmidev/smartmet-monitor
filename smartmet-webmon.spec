@@ -227,6 +227,37 @@ modprobe kheaders >/dev/null 2>&1 || :
   dev-box ``/tmp/smartmet-rir/`` path. Test-phase only — replaced
   later by an explicit refresh mechanism so the RPM stops
   shipping ~40 MB of dated data.
+- IP Flow now has a **service** dropdown in the panel header,
+  letting the operator filter the topology + timeline charts to
+  one access-log source ("wms", "timeseries", "wfs", …) or "all".
+  The dropdown auto-populates from
+  ``/api/ipflow/timeline``'s ``sources`` field so newly-spawned
+  plugins appear without a panel reload. Backend: per-record
+  ``_ipflow_minutes`` tuple gained a 6th field (source_label),
+  ``Store.ipflow_window`` and ``Store.ipflow_timeline`` accept a
+  ``source=`` filter, and ``Store.ipflow_sources`` enumerates
+  labels with retained traffic.
+- IP Flow timeline charts switched to ``smChart.drawLine`` so they
+  inherit the dashboard-wide hover tooltip (vertical guide + value
+  + time at cursor); start / midpoint / end time labels still
+  drawn as a small overlay.
+- IP Flow timeline charts doubled in height (80 → 160 px) for
+  better trend resolution, especially when zoomed out to 24 h.
+- IP Flow cursor div now shows correctly: explicit display:block
+  (the empty string was inheriting the stylesheet's display:none)
+  and offsetTop relative to the chart-wrap so the line lands over
+  the canvas, not the title row above it.
+- IP Flow preset buttons (Live / Replay 1h / Replay 24h / Pause)
+  show their active state via a coloured outline + slight bg
+  tint via a new ``.btn.active`` rule; the dispatcher tracks the
+  last user intent so a click on the timeline (which also enters
+  scrub mode) doesn't visually conflict with the Replay buttons.
+- New global "replay in progress" banner: while
+  ``runtime.replay_logs`` is bulk-loading the access-log tails at
+  startup, the dashboard surfaces a top-of-page strip with
+  elapsed seconds + file count instead of leaving the operator
+  staring at empty panels. Polls ``/api/health`` (now exposing
+  ``replay``) on every refresh tick.
 
 * Tue May 05 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.5-1.fmi
 - New IP Flow panel: animated topological view of access-log

@@ -23,6 +23,14 @@
      single-host mode. -->
 <div id="cluster-topology" class="cluster-topology hidden"></div>
 
+<!-- Replay-in-progress banner. Shown while smwebmon is bulk-loading
+     access logs at startup. Hidden once /api/health reports
+     replay.in_progress = false. -->
+<div id="replay-banner" class="replay-banner hidden">
+  <span class="replay-spinner"></span>
+  <span class="replay-text"></span>
+</div>
+
 <main id="panel-host"></main>
 
 <!-- URLs / Keys drill-down modal -->

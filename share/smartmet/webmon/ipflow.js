@@ -24,123 +24,56 @@
   };
 
   // ---- timeline ---------------------------------------------------
+  //
+  // Delegates to ``smChart.drawLine`` so the panel inherits the
+  // dashboard-wide hover tooltip (vertical guide + value at cursor)
+  // for free, then overlays our own start / middle / end time
+  // labels at the bottom — those help orient the eye on a 24-hour
+  // chart even before hovering. Padding constants must match
+  // chart.js's drawLine; if it ever changes the constants here go
+  // out of sync and the cursor div ends up offset.
 
-  const TL_PAD = { l: 56, r: 8, t: 6, b: 18 };
-
-  function _setupHiDPI(canvas) {
-    const dpr = global.devicePixelRatio || 1;
-    const r = canvas.getBoundingClientRect();
-    const w = Math.max(1, Math.round(r.width));
-    const h = Math.max(1, Math.round(r.height));
-    if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
-      canvas.width = w * dpr;
-      canvas.height = h * dpr;
-    }
-    const ctx = canvas.getContext("2d");
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    return { ctx, w, h };
-  }
-
-  function _niceMax(v) {
-    if (v <= 0) return 1;
-    const p = Math.pow(10, Math.floor(Math.log10(v)));
-    const n = v / p;
-    if (n <= 1) return 1 * p;
-    if (n <= 2) return 2 * p;
-    if (n <= 5) return 5 * p;
-    return 10 * p;
-  }
+  const CHART_PAD = { l: 44, r: 8, t: 6, b: 16 };
 
   function drawTimeline(canvas, buckets, opts = {}) {
-    const { ctx, w, h } = _setupHiDPI(canvas);
-    const innerW = w - TL_PAD.l - TL_PAD.r;
-    const innerH = h - TL_PAD.t - TL_PAD.b;
-    const fmtY = opts.fmtY || (v => String(v));
-
-    ctx.fillStyle = PALETTE.bg;
-    ctx.fillRect(0, 0, w, h);
-
     if (!buckets || !buckets.length) {
-      ctx.fillStyle = PALETTE.axis;
-      ctx.font = "12px ui-monospace, monospace";
-      ctx.fillText("(no data)", TL_PAD.l, TL_PAD.t + 14);
+      global.smChart.drawLine(canvas, [], { fmtY: opts.fmtY });
       canvas._tlState = null;
       return;
     }
-
     const key = opts.key || "reqs";
-    const valid = buckets.map(b => +b[key] || 0);
-    const dataMax = Math.max(1, ...valid);
-    const vmax = _niceMax(dataMax);
-    const yScale = innerH / vmax;
-    const t0 = buckets[0].t;
-    const t1 = buckets[buckets.length - 1].t;
-    const span = Math.max(1, t1 - t0);
-    const xOf = t => TL_PAD.l + ((t - t0) / span) * innerW;
-    const yOf = v => TL_PAD.t + innerH - v * yScale;
+    const values = buckets.map(b => +b[key] || 0);
+    const ts = buckets.map(b => +b.t);
+    global.smChart.drawLine(canvas, values, {
+      ts,
+      fmtY: opts.fmtY,
+      lineColor: opts.lineColor,
+      fillColor: opts.fillColor,
+    });
 
-    ctx.strokeStyle = PALETTE.grid;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(TL_PAD.l, TL_PAD.t + innerH);
-    ctx.lineTo(TL_PAD.l + innerW, TL_PAD.t + innerH);
-    ctx.stroke();
-    const gridLines = 4;
-    ctx.strokeStyle = "rgba(42, 49, 60, 0.55)";
-    for (let i = 1; i < gridLines; i++) {
-      const y = TL_PAD.t + innerH - (innerH * i) / gridLines;
-      ctx.beginPath();
-      ctx.moveTo(TL_PAD.l, y);
-      ctx.lineTo(TL_PAD.l + innerW, y);
-      ctx.stroke();
-    }
-
+    // Overlay: start / midpoint / end time labels at the bottom.
+    const dpr = global.devicePixelRatio || 1;
+    const w = canvas.width / dpr;
+    const h = canvas.height / dpr;
+    const innerW = w - CHART_PAD.l - CHART_PAD.r;
+    const innerH = h - CHART_PAD.t - CHART_PAD.b;
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = PALETTE.axis;
     ctx.font = "11px ui-monospace, monospace";
-    ctx.textBaseline = "middle";
-    ctx.textAlign = "right";
-    for (let i = 0; i <= gridLines; i++) {
-      const v = (vmax * i) / gridLines;
-      ctx.fillText(fmtY(v), TL_PAD.l - 4, yOf(v));
-    }
-
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
-    const fmtT = sec => {
-      const d = new Date(sec * 1000);
-      return d.toTimeString().slice(0, 5);
-    };
-    ctx.fillText(fmtT(t0), TL_PAD.l, TL_PAD.t + innerH + 2);
-    ctx.fillText(fmtT((t0 + t1) / 2), TL_PAD.l + innerW / 2,
-                 TL_PAD.t + innerH + 2);
-    ctx.fillText(fmtT(t1), TL_PAD.l + innerW, TL_PAD.t + innerH + 2);
-
-    ctx.strokeStyle = opts.lineColor || PALETTE.line;
-    ctx.fillStyle   = opts.fillColor || PALETTE.fill;
-    ctx.lineWidth = 1.5;
-
-    ctx.beginPath();
-    for (let i = 0; i < buckets.length; i++) {
-      const b = buckets[i];
-      const x = xOf(b.t);
-      const y = yOf(+b[key] || 0);
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(xOf(t0), TL_PAD.t + innerH);
-    for (let i = 0; i < buckets.length; i++) {
-      const b = buckets[i];
-      ctx.lineTo(xOf(b.t), yOf(+b[key] || 0));
-    }
-    ctx.lineTo(xOf(t1), TL_PAD.t + innerH);
-    ctx.closePath();
-    ctx.fill();
+    const t0 = ts[0], t1 = ts[ts.length - 1];
+    const fmtT = sec => new Date(sec * 1000).toTimeString().slice(0, 5);
+    const yLabel = CHART_PAD.t + innerH + 3;
+    ctx.fillText(fmtT(t0), CHART_PAD.l, yLabel);
+    ctx.fillText(fmtT((t0 + t1) / 2),
+                 CHART_PAD.l + innerW / 2, yLabel);
+    ctx.fillText(fmtT(t1), CHART_PAD.l + innerW, yLabel);
 
     canvas._tlState = {
       t0, t1, innerW, innerH,
-      padL: TL_PAD.l, padT: TL_PAD.t,
+      padL: CHART_PAD.l, padT: CHART_PAD.t,
     };
   }
 
@@ -172,17 +105,21 @@
       return null;
     }
     // Always render the cursor: clamp to the chart's edge if the
-    // playhead happens to fall outside the rendered time range
-    // (e.g. live mode with no fresh data — playhead = wallclock
-    // now but the rightmost bucket is older). Hiding it confused
-    // operators who expected the timestamp readout and the
-    // vertical line to agree.
+    // playhead falls outside the rendered time range (e.g. live
+    // mode with no fresh data — playhead = wallclock now but the
+    // rightmost bucket is older).
     const span = Math.max(1, s.t1 - s.t0);
     const clamped = Math.max(s.t0, Math.min(s.t1, t));
     const x = s.padL + ((clamped - s.t0) / span) * s.innerW;
-    cursorDiv.style.display = "";
+    // canvas.offsetTop accounts for the title-text label sitting
+    // above the canvas inside the chart-wrap; without it the
+    // cursor would land on the title row instead of over the
+    // chart. The CSS rule sets display:none by default so any
+    // panel re-init starts hidden — we set "block" explicitly
+    // here, not "" (which inherits the stylesheet's none).
+    cursorDiv.style.display = "block";
     cursorDiv.style.left = x + "px";
-    cursorDiv.style.top = s.padT + "px";
+    cursorDiv.style.top = (canvas.offsetTop + s.padT) + "px";
     cursorDiv.style.height = s.innerH + "px";
     return x;
   }

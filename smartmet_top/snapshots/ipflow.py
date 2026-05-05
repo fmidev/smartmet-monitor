@@ -69,12 +69,13 @@ class IPFlowSnapshot:
     name = "ipflow"
 
     @staticmethod
-    def timeline(store, minutes: int = 1440) -> Dict:
-        rows = store.ipflow_timeline(minutes=minutes)
-        # Each entry: (minute_epoch_seconds, count, bytes).
+    def timeline(store, minutes: int = 1440, source: str = "") -> Dict:
+        rows = store.ipflow_timeline(minutes=minutes, source=source or None)
         return {
             "name": "ipflow_timeline",
             "minute_step": 60,
+            "source": source or "",
+            "sources": store.ipflow_sources(),
             "buckets": [
                 {"t": int(t), "reqs": int(c), "bytes": int(b)}
                 for (t, c, b) in rows
@@ -87,9 +88,11 @@ class IPFlowSnapshot:
         start_ts: float,
         seconds: float,
         top_n: int = 0,
+        source: str = "",
         max_records: int = 200_000,
     ) -> Dict:
-        recs, summary = store.ipflow_window(start_ts, seconds, top_n=top_n)
+        recs, summary = store.ipflow_window(
+            start_ts, seconds, top_n=top_n, source=source or None)
         # The top-N filter trims by IP, but a 5-minute window of a
         # busy backend can still spill far more raw records than the
         # browser wants to render. Cap the records list at
@@ -112,6 +115,7 @@ class IPFlowSnapshot:
             "start": float(start_ts),
             "seconds": float(seconds),
             "top_n": int(top_n),
+            "source": source or "",
             "ips": ips,
             "requests": [
                 {
@@ -120,7 +124,8 @@ class IPFlowSnapshot:
                     "dur_ms": int(dur),
                     "bytes": int(nb),
                     "status": int(stt),
+                    "src": src or "",
                 }
-                for (ts, ip, dur, nb, stt) in recs
+                for (ts, ip, dur, nb, stt, src) in recs
             ],
         }

@@ -2208,22 +2208,28 @@
       layout: "numeric",       // "numeric" | "spread"
       speed: 60,               // playback speed multiplier (scrub)
       scrubStart: null,        // epoch seconds (only valid in scrub mode)
+      source: "",              // "" = all sources
+      activeBtn: "live",       // which preset is "lit"
     };
     let reqsCanvas, bytesCanvas, reqsCursor, bytesCursor, topoCanvas;
-    let animator, statusEl, legendEl;
+    let animator, statusEl, legendEl, sourceSel;
+    let _knownSources = [];
 
     function _setLive() {
       ps.mode = "live";
+      ps.activeBtn = "live";
       ps.scrubStart = null;
       if (animator) {
         animator.clearReplay();
         animator.setLive();
       }
+      _updateButtonStates();
       _refresh().catch(showError);
     }
 
     function _replay(secondsBack) {
       const start = (Date.now() / 1000) - secondsBack;
+      ps.activeBtn = secondsBack === 86400 ? "24h" : "1h";
       _startScrub(start);
     }
 
@@ -2234,6 +2240,7 @@
         animator.clearReplay();
         animator.startScrub(t, ps.speed);
       }
+      _updateButtonStates();
       _refresh().catch(showError);
     }
 
@@ -2241,16 +2248,57 @@
       if (!animator) return;
       if (ps.mode === "paused") {
         ps.mode = "scrub";
+        ps.activeBtn = ps.scrubStart != null ? null : "live";
         animator.resume();
       } else {
         ps.mode = "paused";
+        ps.activeBtn = "pause";
         animator.pause();
       }
+      _updateButtonStates();
       _updateStatus();
     }
 
     function _onCursorEvent(e) {
+      ps.activeBtn = null;     // clicked-on-timeline scrub: no preset lit
       _startScrub(e.detail.t);
+    }
+
+    function _updateButtonStates() {
+      const map = {
+        "live":  state.panels.ipflow.btnLive,
+        "1h":    state.panels.ipflow.btn1h,
+        "24h":   state.panels.ipflow.btn24h,
+        "pause": state.panels.ipflow.btnPause,
+      };
+      for (const k in map) {
+        if (map[k]) map[k].classList.toggle("active", ps.activeBtn === k);
+      }
+    }
+
+    function _populateSources(list) {
+      // Re-render the dropdown only if the list of sources actually
+      // changed; otherwise it'd reset the user's mid-selection focus
+      // on every poll. Always include "" / all as the first option.
+      const incoming = JSON.stringify(list || []);
+      if (incoming === JSON.stringify(_knownSources)) return;
+      _knownSources = list ? list.slice() : [];
+      if (!sourceSel) return;
+      const cur = ps.source;
+      sourceSel.innerHTML = "";
+      const optAll = document.createElement("option");
+      optAll.value = ""; optAll.textContent = "all";
+      sourceSel.appendChild(optAll);
+      for (const s of _knownSources) {
+        const o = document.createElement("option");
+        o.value = s; o.textContent = s;
+        sourceSel.appendChild(o);
+      }
+      // Preserve the user's selection if still present, otherwise
+      // fall back to "all".
+      sourceSel.value =
+        (_knownSources.includes(cur) ? cur : "");
+      if (sourceSel.value !== cur) ps.source = sourceSel.value;
     }
 
     function _updateStatus() {
@@ -2289,6 +2337,19 @@
 
         const ctrls = el("div", { class: "panel-controls" },
           el("span", { class: "panel-title" }, "IP Flow"),
+          el("label", null, "service",
+            (sourceSel = (function () {
+              const s = el("select", { class: "control",
+                                          id: "ipflow-source" });
+              s.addEventListener("change", () => {
+                ps.source = s.value;
+                _refresh().catch(showError);
+              });
+              // Single "all" option until the first /api/ipflow/timeline
+              // response replaces it with the live source list.
+              s.appendChild(el("option", { value: "" }, "all"));
+              return s;
+            })())),
           el("label", null, "history",
             selectInput("ipflow-hist", String(ps.historyMinutes),
               [["15","15m"],["60","1h"],["360","6h"],["1440","24h"]].map(
@@ -2316,14 +2377,18 @@
               [["10","10"],["25","25"],["50","50"],["100","100"],["0","all"]].map(
                 ([v,l]) => ({value: v, label: l})),
               v => { ps.topN = +v; _refresh().catch(showError); })),
-          el("button", { class: "btn",
-                          events: { click: _setLive } }, "Live"),
-          el("button", { class: "btn",
-                          events: { click: () => _replay(3600) } }, "Replay 1h"),
-          el("button", { class: "btn",
-                          events: { click: () => _replay(86400) } }, "Replay 24h"),
-          el("button", { class: "btn",
-                          events: { click: _togglePause } }, "Pause"),
+          (state.panels.ipflow.btnLive = el("button",
+            { class: "btn", "data-mode-btn": "live",
+              events: { click: _setLive } }, "Live")),
+          (state.panels.ipflow.btn1h = el("button",
+            { class: "btn", "data-mode-btn": "replay-3600",
+              events: { click: () => _replay(3600) } }, "Replay 1h")),
+          (state.panels.ipflow.btn24h = el("button",
+            { class: "btn", "data-mode-btn": "replay-86400",
+              events: { click: () => _replay(86400) } }, "Replay 24h")),
+          (state.panels.ipflow.btnPause = el("button",
+            { class: "btn", "data-mode-btn": "paused",
+              events: { click: _togglePause } }, "Pause")),
           (statusEl = el("span", { class: "muted ipflow-status" })),
         );
         panel.appendChild(ctrls);
@@ -2359,6 +2424,8 @@
           onPlayhead: _onPlayhead,
         });
         animator.setLayout(ps.layout);
+        ps.activeBtn = "live";
+        _updateButtonStates();
         _updateStatus();
       },
       async refresh() { await _refresh(); },
@@ -2366,7 +2433,8 @@
 
     async function _refresh() {
       const tl = await getJSON("/api/ipflow/timeline",
-        { minutes: ps.historyMinutes });
+        { minutes: ps.historyMinutes, source: ps.source });
+      _populateSources(tl.sources || []);
       const buckets = tl.buckets || [];
       smIPFlow.drawTimeline(reqsCanvas, buckets, {
         key: "reqs", fmtY: fmtCount,
@@ -2380,24 +2448,20 @@
       if (ps.mode === "paused") { _updateStatus(); return; }
 
       let win;
+      const baseParams = { top_n: ps.topN, source: ps.source };
       if (ps.mode === "scrub" && ps.scrubStart != null) {
-        // Scrub: fetch from playhead all the way to now, in one
-        // shot. The snapshot caps the result at 200k records, so
-        // even a 24-hour window stays under ~20 MB.
         const ph = animator ? animator.playhead : ps.scrubStart;
         const seconds = Math.max(60,
           Math.ceil((Date.now() / 1000) - ph));
         win = await getJSON("/api/ipflow/window",
-          { start: ph, seconds, top_n: ps.topN });
+          Object.assign({ start: ph, seconds }, baseParams));
         if (animator) {
           animator.setIPs(win.ips || {});
           animator.addRecords(win.requests || [], "scrub");
         }
       } else {
-        // Live: fetch the trailing 60 seconds, spawn new arrivals
-        // immediately.
         win = await getJSON("/api/ipflow/window",
-          { seconds: 60, top_n: ps.topN });
+          Object.assign({ seconds: 60 }, baseParams));
         if (animator) {
           animator.setIPs(win.ips || {});
           animator.addRecords(win.requests || [], "live");
@@ -2580,12 +2644,50 @@
   }
 
   function tickActive() {
+    _refreshReplayBanner().catch(() => {});
     if (!state.active) return;
     const host = document.getElementById("panel-host");
     PANELS[state.active].refresh()
       .then(() => { setupCardCollapse(host); setIndicator("live", "live"); })
       .catch(e => showError(e));
     if (state.modalRefresh) state.modalRefresh().catch(showError);
+  }
+
+  // ---- Replay-progress banner ------------------------------------
+  //
+  // Polls /api/health every refresh tick; while replay.in_progress
+  // is true, surfaces a top-of-page strip with elapsed time and the
+  // file count. The dashboard's panels are still empty during this
+  // window because replay_logs is a single bulk_load that doesn't
+  // populate the store incrementally — operators were confused by
+  // panels showing "(no data)" for several seconds when an RPM
+  // upgrade restarted smwebmon mid-day.
+
+  async function _refreshReplayBanner() {
+    const el = document.getElementById("replay-banner");
+    if (!el) return;
+    let h;
+    try {
+      h = await getJSON("/api/health");
+    } catch (e) {
+      el.classList.add("hidden");
+      return;
+    }
+    const r = (h && h.replay) || {};
+    const txt = el.querySelector(".replay-text");
+    if (r.in_progress) {
+      el.classList.remove("hidden");
+      const elapsed = r.started_at
+        ? Math.max(0, Math.round(Date.now() / 1000 - r.started_at))
+        : 0;
+      const rotated = r.include_rotated ? " (incl. rotated)" : "";
+      const files = r.files_total || 0;
+      txt.textContent =
+        `Replaying ${files} log file${files === 1 ? "" : "s"}${rotated}` +
+        ` — ${elapsed}s elapsed`;
+    } else {
+      el.classList.add("hidden");
+    }
   }
 
   function showError(e) {
@@ -2749,6 +2851,7 @@
       panels.some(p => p.id === parsed.panel) ? parsed.panel : "urls";
     activatePanel(initialPanel);
     _refreshTopology().catch(() => {});
+    _refreshReplayBanner().catch(() => {});
 
     // Periodically refresh the cluster list (alive counts in the
     // dropdown drift as backends come/go) without thrashing.

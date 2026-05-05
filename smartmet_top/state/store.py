@@ -425,13 +425,17 @@ class Store:
         # client IP. Used by the IPFlow panel to animate requests as
         # particles flying from each IP toward the centre. Stored as
         # tuples (not dataclasses) so a busy backend with 100k requests
-        # per day costs ~14 MB at most: ~140 B per tuple including
-        # CPython overhead. Pruned by the same HISTORY_MINUTES window
-        # as everything else. Optional: only populated when the caller
-        # passes a non-empty `ip` to record_request, so existing tests
-        # and snapshot replay paths that don't carry an IP keep working
-        # without paying the retention cost.
-        self._ipflow_minutes: Dict[int, List[Tuple[float, str, int, int, int]]] = {}
+        # per day costs ~16 MB at most: ~160 B per tuple including
+        # CPython overhead. Tuple shape:
+        # ``(ts, ip, dur_ms, nbytes, status, source_label)`` —
+        # source_label is the access-log source name (e.g. "wms",
+        # "timeseries"), interned by CPython so the per-record cost
+        # of the extra string is just a pointer. "" when the caller
+        # didn't supply one. Pruned by the same HISTORY_MINUTES
+        # window as everything else.
+        self._ipflow_minutes: Dict[
+            int, List[Tuple[float, str, int, int, int, str]]
+        ] = {}
         # admin snapshots keyed by host label (so the UI can show all hosts).
         # The "default" / single-host case still works — it just lives at
         # host=<the one label>.
@@ -477,6 +481,11 @@ class Store:
         # status: data source health
         self.logtail_status: str = "(starting)"
         self.admin_status: Dict[str, str] = {}
+        # Replay progress — populated by runtime.replay_logs while a
+        # bulk_load is in flight so the dashboard can render a
+        # "processing logs…" banner instead of empty panels. Always a
+        # dict so handlers can read it without isinstance checks.
+        self.replay_status: Dict[str, object] = {"in_progress": False}
         # Cross-panel "drill into another panel" request. A panel sets
         # this to (target_hotkey, params_dict) when the operator drills
         # in (e.g. Plugins → URLs filtered by plugin label); the App
@@ -712,35 +721,59 @@ class Store:
                     for k in list(self._ipflow_minutes.keys()):
                         if k < cutoff:
                             del self._ipflow_minutes[k]
-                bucket.append((ts, ip, int(dur_ms), int(nbytes), int(status)))
+                bucket.append((ts, ip, int(dur_ms), int(nbytes),
+                                int(status), source_label or ""))
 
-    def ipflow_timeline(self, minutes: int = HISTORY_MINUTES) -> List[Tuple[int, int, int]]:
+    def ipflow_timeline(
+        self,
+        minutes: int = HISTORY_MINUTES,
+        source: Optional[str] = None,
+    ) -> List[Tuple[int, int, int]]:
         """Per-minute aggregate (count, bytes) over the last `minutes`
-        of retained history. Reads from `_global_minutes` rather than
-        `_ipflow_minutes` because the global ring is always populated
-        (every request, IP or not) and is what the timeline graph
-        wants to plot. Returned newest-last so the chart's X axis runs
-        left-to-right in time order.
-        """
+        of retained history. Returned newest-last so the chart's X
+        axis runs left-to-right in time order.
+
+        With ``source=None`` reads from ``_global_minutes`` (always
+        populated, every request whether IP-tagged or not). With a
+        named source it reads from ``source_stats[source].minute_buckets``,
+        which the access-log tail populates directly via
+        ``SourceStats.record``."""
         with self._lock:
-            if not self._global_minutes:
-                return []
-            latest = max(self._global_minutes)
+            if source:
+                src = self.source_stats.get(source)
+                if src is None or not src.minute_buckets:
+                    return []
+                buckets = src.minute_buckets
+            else:
+                if not self._global_minutes:
+                    return []
+                buckets = self._global_minutes
+            latest = max(buckets)
             cutoff = latest - max(1, int(minutes)) + 1
             out: List[Tuple[int, int, int]] = []
-            for m in sorted(self._global_minutes):
+            for m in sorted(buckets):
                 if m < cutoff:
                     continue
-                b = self._global_minutes[m]
+                b = buckets[m]
                 out.append((m * 60, int(b.count), int(b.bytes)))
             return out
+
+    def ipflow_sources(self) -> List[str]:
+        """List of access-log source labels with at least one
+        recorded request, used to populate the IP Flow panel's
+        source-filter dropdown."""
+        with self._lock:
+            return sorted(
+                lbl for lbl, s in self.source_stats.items()
+                if s.minute_buckets or s.history)
 
     def ipflow_window(
         self,
         start_ts: float,
         seconds: float,
         top_n: int = 0,
-    ) -> Tuple[List[Tuple[float, str, int, int, int]], Dict[str, Tuple[int, int]]]:
+        source: Optional[str] = None,
+    ) -> Tuple[List[Tuple[float, str, int, int, int, str]], Dict[str, Tuple[int, int]]]:
         """Return raw IP-flow records intersecting [start_ts, start_ts+seconds]
         plus a per-IP `(count, bytes)` summary for the same window.
 
@@ -748,20 +781,26 @@ class Store:
         (by request count) are dropped from the records list — the
         summary still includes every IP so the panel can show the
         long-tail count without rendering it as particles.
-        """
+
+        With ``source`` set, only records whose source_label matches
+        the filter are returned (and contribute to the summary). The
+        empty string and ``None`` both mean "all sources"."""
         with self._lock:
             end_ts = start_ts + max(0.0, seconds)
             m_start = int(start_ts // 60)
             m_end = int(end_ts // 60)
-            recs: List[Tuple[float, str, int, int, int]] = []
+            want_source = source or None
+            recs: List[Tuple[float, str, int, int, int, str]] = []
             ip_summary: Dict[str, List[int]] = {}
             for m in range(m_start, m_end + 1):
                 bucket = self._ipflow_minutes.get(m)
                 if bucket is None:
                     continue
                 for rec in bucket:
-                    ts, ip, dur, nb, st = rec
+                    ts, ip, dur, nb, st, src = rec
                     if ts < start_ts or ts > end_ts:
+                        continue
+                    if want_source is not None and src != want_source:
                         continue
                     recs.append(rec)
                     s = ip_summary.get(ip)
@@ -772,10 +811,6 @@ class Store:
                         s[1] += nb
             recs.sort(key=lambda r: r[0])
             if top_n and len(ip_summary) > top_n:
-                # Keep the top-N IPs by request count; rebuild recs
-                # without the long tail. The summary itself stays
-                # complete so the caller can still show "and N more
-                # IPs not drawn" in the UI.
                 top = set(ip for ip, _ in sorted(
                     ip_summary.items(),
                     key=lambda kv: kv[1][0], reverse=True)[:top_n])

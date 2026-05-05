@@ -472,6 +472,27 @@ check:
 	    assert _st_w == 200 and len(_b_w["requests"]) == 3, (_st_w, _b_w); \
 	    _st_w2, _b_w2 = _iwd(_stf, {"start": "abc"}); \
 	    assert _st_w2 == 400, (_st_w2, _b_w2); \
+	    _stf2 = Store(); \
+	    _stf2.record_request(ts=_t0+1, url="/a", dur_ms=10, nbytes=100, status=200, apikey="-", source_label="wms", ip="1.2.3.4"); \
+	    _stf2.record_request(ts=_t0+2, url="/b", dur_ms=20, nbytes=200, status=200, apikey="-", source_label="wms", ip="1.2.3.5"); \
+	    _stf2.record_request(ts=_t0+3, url="/c", dur_ms=30, nbytes=300, status=200, apikey="-", source_label="timeseries", ip="1.2.3.6"); \
+	    assert sorted(_stf2.ipflow_sources()) == ["timeseries", "wms"], _stf2.ipflow_sources(); \
+	    _all = IPFlowSnapshot.window(_stf2, start_ts=_t0, seconds=60); \
+	    assert len(_all["requests"]) == 3 and all(r["src"] in ("wms","timeseries") for r in _all["requests"]); \
+	    _wms = IPFlowSnapshot.window(_stf2, start_ts=_t0, seconds=60, source="wms"); \
+	    assert len(_wms["requests"]) == 2 and all(r["src"] == "wms" for r in _wms["requests"]); \
+	    _ts = IPFlowSnapshot.window(_stf2, start_ts=_t0, seconds=60, source="timeseries"); \
+	    assert len(_ts["requests"]) == 1 and _ts["requests"][0]["src"] == "timeseries"; \
+	    _tlall = IPFlowSnapshot.timeline(_stf2, minutes=60); \
+	    assert _tlall["sources"] == ["timeseries", "wms"] and _tlall["buckets"][0]["reqs"] == 3; \
+	    _tlwms = IPFlowSnapshot.timeline(_stf2, minutes=60, source="wms"); \
+	    assert _tlwms["buckets"][0]["reqs"] == 2; \
+	    _tlnone = IPFlowSnapshot.timeline(_stf2, minutes=60, source="missing"); \
+	    assert _tlnone["buckets"] == []; \
+	    _stsh, _btsh = _itl(_stf2, {"source": "wms"}); \
+	    assert _stsh == 200 and _btsh["source"] == "wms"; \
+	    _swh, _bwh = _iwd(_stf2, {"start": str(_t0), "source": "wms"}); \
+	    assert _swh == 200 and len(_bwh["requests"]) == 2; \
 	    from smartmet_webmon.handlers import panels as _panels_h; \
 	    _ps_st, _ps_b = _panels_h(_stf, {}); \
 	    assert any(p["id"] == "ipflow" for p in _ps_b["panels"]), _ps_b; \
