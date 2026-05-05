@@ -294,9 +294,9 @@
           ctx.fillStyle = "#cbd5e0";
           const lx = cx + Math.cos(a) * (R + 8);
           const ly = cy + Math.sin(a) * (R + 8);
-          // Anchor label so it doesn't overlap the rim from the inside.
           ctx.textAlign = (Math.cos(a) >= 0) ? "left" : "right";
-          ctx.fillText(ip, lx, ly);
+          const label = meta.cc ? `${ip} ${meta.cc}` : ip;
+          ctx.fillText(label, lx, ly);
         }
       }
 

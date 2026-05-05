@@ -132,6 +132,15 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
              "$SMARTMET_WEBMON_ASSETS, then sibling share/smartmet/"
              "webmon/, then /usr/share/smartmet/webmon/.",
     )
+    p.add_argument(
+        "--country-db", default=None, metavar="PATH",
+        help="Path to a directory of RIR delegated-stats files (or a "
+             "single concatenated file) for IP→country lookup, used by "
+             "the IP Flow panel's hot-IP labels and the Countries "
+             "panel. When unset, smwebmon searches "
+             "/var/lib/smartmet-monitor/ then /tmp/smartmet-rir/. The "
+             "country-aware UI hides itself if no files are found.",
+    )
     return p.parse_args(argv)
 
 
@@ -220,6 +229,23 @@ async def _run(args: argparse.Namespace) -> int:
     _check_recent_oom()
     set_history_minutes(args.history_minutes)
     store = Store()
+
+    # Country DB load — best-effort. Missing files just disable the
+    # country-aware UI (the IP Flow rim labels lose the cc suffix and
+    # the Countries panel renders an empty-state message).
+    from smartmet_top.sources.geo import CountryDB, discover_db_files
+    db_paths = discover_db_files(args.country_db)
+    if db_paths:
+        cdb = CountryDB()
+        cdb.load(db_paths)
+        if cdb:
+            store.country_db = cdb
+            sys.stderr.write(
+                f"smwebmon: country DB loaded from {len(db_paths)} "
+                f"file(s), {len(cdb.v4_starts) + len(cdb.v6_starts)} "
+                f"netblocks\n"
+            )
+
     log_paths = _expand_logs(args)
     admin_urls = _parse_admin_urls(args.admin_url)
     if not admin_urls and not args.no_admin:

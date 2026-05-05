@@ -22,7 +22,7 @@
 
 Name:           smartmet-webmon
 Version:        26.5.5
-Release:        1%{?dist}.fmi
+Release:        2%{?dist}.fmi
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -150,6 +150,26 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Tue May 05 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.5-2.fmi
+- New Countries panel: per-country view of access-log traffic
+  derived from RIR delegated-stats files. Header chart is a
+  multi-line series (one line per top-N country, plus "other" for
+  the long tail) over the retained history; the table below ranks
+  countries by request count and surfaces the busiest IPs from
+  each. Endpoints:
+  ``/api/countries/status`` (whether a DB is loaded),
+  ``/api/countries/timeline?minutes=N&top_n=K``,
+  ``/api/countries?minutes=N&top_n=K``.
+- IP Flow rim labels: hot-IP labels now include the 2-letter
+  country code when a country DB is loaded (``8.8.8.8 US``). Falls
+  back to plain IP when no DB is configured.
+- New ``--country-db PATH`` CLI flag. Default search:
+  ``/var/lib/smartmet-monitor/`` then ``/tmp/smartmet-rir/``. The
+  Countries panel renders an empty-state explanation when no DB is
+  found; the IP Flow panel keeps working unchanged.
+- Co-bumped with smartmet-monitor 26.5.5-2 (the geo module +
+  CountriesSnapshot live in the shared monitor package).
+
 * Tue May 05 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.5-1.fmi
 - New IP Flow panel: animated topological view of access-log
   traffic. Two stacked timeline charts at the top (req/min,

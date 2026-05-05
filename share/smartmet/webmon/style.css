@@ -697,4 +697,21 @@ canvas.chart {
   border-radius: 3px;
 }
 .ipflow-status { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+/* Countries panel */
+.countries-chart {
+  width: 100%;
+  height: 200px;
+  background: #11161d;
+  border-radius: 3px;
+  margin: 6px 0 10px;
+}
+.cc-dot {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.cc-ip { font-size: 0.85em; margin-right: 0.5em; white-space: nowrap; }
 .kv > .v { text-align: right; }

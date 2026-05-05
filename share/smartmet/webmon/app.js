@@ -2331,6 +2331,117 @@
     }
   })();
 
+  // -- Countries ----------------------------------------------------
+
+  PANELS.countries = (function () {
+    const ps = state.panels.countries = {
+      minutes: 60, topN: 12,
+    };
+    let chartCanvas, tbody, hostEl, statusEl, emptyEl;
+    return {
+      title: "Countries",
+      init(host) {
+        hostEl = host;
+        host.replaceChildren();
+        const panel = el("section", { class: "panel" });
+
+        const ctrls = el("div", { class: "panel-controls" },
+          el("span", { class: "panel-title" }, "Countries"),
+          el("label", null, "history",
+            selectInput("countries-mins", String(ps.minutes),
+              [["15","15m"],["60","1h"],["360","6h"],["1440","24h"]].map(
+                ([v,l]) => ({value: v, label: l})),
+              v => { ps.minutes = +v; refresh(); })),
+          el("label", null, "top",
+            selectInput("countries-top", String(ps.topN),
+              [["6","6"],["8","8"],["12","12"],["20","20"],["50","50"]].map(
+                ([v,l]) => ({value: v, label: l})),
+              v => { ps.topN = +v; refresh(); })),
+          (statusEl = el("span", { class: "muted ipflow-status" })),
+        );
+        panel.appendChild(ctrls);
+
+        chartCanvas = el("canvas", { class: "countries-chart" });
+        panel.appendChild(chartCanvas);
+
+        const table = el("table", { class: "data-table" },
+          el("thead", null, el("tr", null,
+            ...["country","reqs","bytes","err %","ips","top IPs"]
+              .map((h, i) => el("th",
+                { class: i === 0 ? "" : "num" }, h)))),
+          el("tbody"));
+        tbody = table.querySelector("tbody");
+        panel.appendChild(table);
+
+        emptyEl = el("div", { class: "panel-empty hidden" },
+          el("p", null, "No country database loaded."),
+          el("p", { class: "muted" },
+            "Pass --country-db PATH (or place RIR delegated-stats files "
+            + "under /var/lib/smartmet-monitor/) and restart smwebmon. "
+            + "Files are downloaded from each RIR's ftp.* server "
+            + "(apnic, ripe, arin, lacnic, afrinic)."));
+        panel.appendChild(emptyEl);
+
+        host.appendChild(panel);
+      },
+      async refresh() { await refresh(); },
+    };
+
+    async function refresh() {
+      const status = await getJSON("/api/countries/status");
+      if (!status.enabled) {
+        emptyEl.classList.remove("hidden");
+        chartCanvas.classList.add("hidden");
+        statusEl.textContent = "(no country DB)";
+        tbody.replaceChildren();
+        return;
+      }
+      emptyEl.classList.add("hidden");
+      chartCanvas.classList.remove("hidden");
+      statusEl.textContent =
+        `${status.netblocks_v4 + status.netblocks_v6} netblocks`;
+
+      const tl = await getJSON("/api/countries/timeline",
+        { minutes: ps.minutes, top_n: ps.topN });
+      const series = (tl.series || []).map(s => ({
+        label: s.label,
+        color: s.label === "other"
+                ? "rgba(155,175,198,0.55)"
+                : smChart.colorFor(s.label),
+        values: s.values,
+      }));
+      smChart.drawLineMulti(chartCanvas, series, {
+        fmtY: smChart.formatCount,
+        last_ts: tl.ts && tl.ts.length ? tl.ts[tl.ts.length - 1] : null,
+        step_seconds: 60,
+      });
+
+      const tab = await getJSON("/api/countries",
+        { minutes: ps.minutes, top_n: ps.topN });
+      const rows = tab.rows || [];
+      tbody.replaceChildren();
+      for (const r of rows) {
+        const topIpsHtml = (r.top_ips || []).map(t =>
+          `<span class="cc-ip">${escHtml(t.ip)} (${t.count})</span>`
+        ).join(" ");
+        const tr = el("tr", null,
+          el("td", null,
+            el("span", { class: "cc-dot",
+                          style: `background:${smChart.colorFor(r.cc)}` }),
+            r.cc),
+          el("td", { class: "num" }, fmtCount(r.reqs)),
+          el("td", { class: "num" }, fmtBytes(r.bytes)),
+          el("td", { class: "num " + errColor(r.err_pct) },
+            r.err_pct.toFixed(2)),
+          el("td", { class: "num" }, String(r.ips)),
+          el("td", { class: "muted",
+                      html: topIpsHtml }),
+        );
+        tbody.appendChild(tr);
+      }
+    }
+  })();
+
   // =================================================================
   // boot, tab strip, polling
   // =================================================================

@@ -4,4 +4,4 @@ __version__ = "26.5.5"
 # Release marker (matches the spec Release field) so build telemetry
 # can identify exactly which RPM build a running smtop came from when
 # the operator pastes a screenshot. Bump alongside the spec.
-__release__ = "1"
+__release__ = "2"

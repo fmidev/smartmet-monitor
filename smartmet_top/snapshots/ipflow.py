@@ -97,11 +97,13 @@ class IPFlowSnapshot:
         # complete either way.
         if len(recs) > max_records:
             recs = recs[-max_records:]
+        cdb = getattr(store, "country_db", None)
         ips = {
             ip: {
                 "angle": angle_for_ip(ip),
                 "count": int(count),
                 "bytes": int(b),
+                "cc": cdb.lookup(ip) if cdb else "",
             }
             for ip, (count, b) in summary.items()
         }

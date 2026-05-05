@@ -23,6 +23,7 @@ from smartmet_top.snapshots.logs import LogsSnapshot
 from smartmet_top.snapshots.network import NetworkSnapshot
 from smartmet_top.snapshots.overview import OverviewSnapshot
 from smartmet_top.snapshots.plugins import PluginsSnapshot
+from smartmet_top.snapshots.countries import CountriesSnapshot
 from smartmet_top.snapshots.heap import HeapSnapshot
 from smartmet_top.snapshots.ipflow import IPFlowSnapshot
 from smartmet_top.snapshots.proc import ProcSnapshot
@@ -101,8 +102,9 @@ def panels(store, qs: Mapping[str, str]) -> Tuple[int, Any]:
             {"id": "proc",     "title": "Proc"},
             {"id": "heap",     "title": "Heap"},
             {"id": "network",  "title": "Network"},
-            {"id": "ipflow",   "title": "IP Flow"},
-            {"id": "flame",    "title": "Flame"},
+            {"id": "ipflow",    "title": "IP Flow"},
+            {"id": "countries", "title": "Countries"},
+            {"id": "flame",     "title": "Flame"},
             {"id": "logs",     "title": "Logs"},
         ],
     }
@@ -944,6 +946,24 @@ def ipflow_window(store, qs):
         store, start_ts=start_ts, seconds=seconds, top_n=top_n)
 
 
+# ---- Countries --------------------------------------------------------------
+
+def countries_status(store, qs):
+    return 200, CountriesSnapshot.status(store)
+
+
+def countries_timeline(store, qs):
+    minutes = _int(qs.get("minutes"), 60)
+    top_n   = _int(qs.get("top_n"), 8)
+    return 200, CountriesSnapshot.timeline(store, minutes=minutes, top_n=top_n)
+
+
+def countries_table(store, qs):
+    minutes = _int(qs.get("minutes"), 60)
+    top_n   = _int(qs.get("top_n"), 0)
+    return 200, CountriesSnapshot.table(store, minutes=minutes, top_n=top_n)
+
+
 # ---- routing ----------------------------------------------------------------
 
 # Cluster-scope endpoints — these get the ``ClusterRegistry`` directly
@@ -1005,6 +1025,10 @@ ROUTES = {
     # IPFlow
     "/ipflow/timeline":   ipflow_timeline,
     "/ipflow/window":     ipflow_window,
+    # Countries (RIR-derived)
+    "/countries/status":   countries_status,
+    "/countries/timeline": countries_timeline,
+    "/countries":          countries_table,
     # Logs
     "/logs":              logs_stream,
 }

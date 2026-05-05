@@ -15,7 +15,7 @@
 
 Name:           smartmet-monitor
 Version:        26.5.5
-Release:        1%{?dist}.fmi
+Release:        2%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -197,6 +197,19 @@ fi
 %config(noreplace) %{_prefix}/lib/sysctl.d/99-smartmet-perf.conf
 
 %changelog
+* Tue May 05 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.5-2.fmi
+- New ``smartmet_top.sources.geo`` module: parses RIR delegated-stats
+  files (APNIC / RIPE / ARIN / LACNIC / AFRINIC) into a bisect-backed
+  IP→country index. Pure stdlib — no pip dep, no licence tracking,
+  no signup. Lookup is ~µs; load of all five RIR files (~325 k
+  netblocks) takes under 1 s. Used by the Countries panel and the
+  IP Flow panel's hot-IP rim labels in smartmet-webmon.
+- New ``smartmet_top.snapshots.countries`` snapshot: aggregates
+  ``Store._ipflow_minutes`` by country code on demand. Two readers:
+  ``timeline()`` for a multi-line per-country chart, ``table()`` for
+  the panel's main view (cc, reqs, bytes, err %, distinct IPs, top
+  IPs from that country).
+
 * Tue May 05 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.5-1.fmi
 - New IPFlow data path: ``Store.record_request`` accepts an ``ip``
   argument (default empty), and a per-minute ``_ipflow_minutes``

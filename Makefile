@@ -464,7 +464,49 @@ check:
 	    _idx = open("share/smartmet/webmon/index.html").read(); \
 	    assert "ipflow.js" in _idx, "ipflow.js must be loaded by index.html"; \
 	    _ifjs = open("share/smartmet/webmon/ipflow.js").read(); \
-	    assert "smIPFlow" in _ifjs and "IPFlowAnimator" in _ifjs, "ipflow.js must export smIPFlow"'
+	    assert "smIPFlow" in _ifjs and "IPFlowAnimator" in _ifjs, "ipflow.js must export smIPFlow"; \
+	    from smartmet_top.sources.geo import CountryDB, parse_delegated, _ipv4_to_int, _ipv6_to_int; \
+	    assert _ipv4_to_int("0.0.0.0") == 0 and _ipv4_to_int("255.255.255.255") == 0xFFFFFFFF; \
+	    assert _ipv4_to_int("256.0.0.0") is None and _ipv4_to_int("a.b.c.d") is None; \
+	    assert _ipv6_to_int("::1") == 1 and _ipv6_to_int("::") == 0; \
+	    assert _ipv6_to_int("2001:db8::") == ((0x2001 << 112) | (0xdb8 << 96)); \
+	    assert _ipv6_to_int("garbage::xx") is None; \
+	    _sample = chr(10).join(["2|x|0|0|0|0|+0000", "x|*|ipv4|*|0|summary", "x|FI|ipv4|193.166.0.0|65536|19920510|allocated", "x|US|ipv4|3.0.0.0|256|19920521|allocated", "x|FI|ipv4|10.10.10.10|10|20200101|reserved", "x|JP|ipv6|2001:db8::|32|20200101|allocated", ""]); \
+	    _recs = list(parse_delegated(_sample)); \
+	    _expected = sorted([(4, 0xC1A60000, 0xC1A6FFFF, "FI"), (4, 0x03000000, 0x030000FF, "US"), (6, 0x20010DB8 << 96, ((0x20010DB8 + 1) << 96) - 1, "JP")]); \
+	    assert sorted(_recs) == _expected, _recs; \
+	    import tempfile as _tf, os as _os; \
+	    _tmp = _tf.NamedTemporaryFile("w", prefix="delegated-", suffix="-extended-latest", delete=False); \
+	    _tmp.write(_sample); _tmp.close(); \
+	    _cdb = CountryDB(); _cdb.load([_tmp.name]); \
+	    assert _cdb.lookup("193.166.1.1") == "FI", _cdb.lookup("193.166.1.1"); \
+	    assert _cdb.lookup("3.0.0.5") == "US"; \
+	    assert _cdb.lookup("10.10.10.10") == "??", "reserved entries are skipped"; \
+	    assert _cdb.lookup("127.0.0.1") == "??"; \
+	    assert _cdb.lookup("2001:db8::1") == "JP"; \
+	    assert bool(_cdb); \
+	    _os.unlink(_tmp.name); \
+	    from smartmet_top.snapshots.countries import CountriesSnapshot; \
+	    _stc = Store(); \
+	    assert CountriesSnapshot.status(_stc)["enabled"] is False; \
+	    assert CountriesSnapshot.timeline(_stc)["series"] == []; \
+	    _stc.country_db = _cdb; \
+	    _t1 = 1700000060.0; \
+	    _stc.record_request(ts=_t1, url="/", dur_ms=1, nbytes=100, status=200, apikey="-", ip="193.166.1.1"); \
+	    _stc.record_request(ts=_t1, url="/", dur_ms=2, nbytes=200, status=500, apikey="-", ip="3.0.0.5"); \
+	    _stc.record_request(ts=_t1, url="/", dur_ms=3, nbytes=300, status=200, apikey="-", ip="3.0.0.6"); \
+	    _ct = CountriesSnapshot.table(_stc, minutes=60); \
+	    assert _ct["rows"][0]["cc"] in ("US", "FI") and _ct["rows"][0]["reqs"] >= 1, _ct["rows"]; \
+	    assert any(r["cc"] == "US" and r["reqs"] == 2 for r in _ct["rows"]); \
+	    _ctl = CountriesSnapshot.timeline(_stc, minutes=60, top_n=8); \
+	    _labels = sorted(s["label"] for s in _ctl["series"]); \
+	    assert "US" in _labels and "FI" in _labels, _labels; \
+	    from smartmet_webmon.handlers import countries_status as _cs, countries_table as _ctab, countries_timeline as _ctlh; \
+	    assert _cs(_stc, {})[1]["enabled"]; \
+	    assert _ctab(_stc, {})[0] == 200; \
+	    assert _ctlh(_stc, {})[0] == 200; \
+	    _ipw = IPFlowSnapshot.window(_stc, start_ts=_t1 - 30, seconds=60); \
+	    assert _ipw["ips"]["193.166.1.1"]["cc"] == "FI" and _ipw["ips"]["3.0.0.5"]["cc"] == "US", _ipw["ips"]'
 	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
 	$(PYTHON) -m py_compile smartmet_webmon/*.py
 	$(PYTHON) -m py_compile share/smartmet/bperf.py
