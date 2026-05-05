@@ -278,7 +278,31 @@ async def bulk_load(paths: Iterable[str], store,
     for actual in actual_files:
         if isinstance(rs, dict) and rs.get("in_progress"):
             rs["current_file"] = actual
-        await loop.run_in_executor(
-            None, _bulk_load_one_file, actual, store, max_bytes_per_file)
+        # Pre-flight: skip the per-file executor when the file is
+        # missing, isn't a regular file, or is a non-gzip file of
+        # zero bytes. These cases produce no records and can in
+        # exotic setups (e.g. a logger writing to a FIFO that we
+        # mistake for a regular log) make the executor block on
+        # ``open()`` or ``read()``. Filtering up front keeps the
+        # replay banner moving and guarantees the loop terminates.
+        skip = False
+        try:
+            st = os.stat(actual)
+            import stat as _stat
+            if not _stat.S_ISREG(st.st_mode):
+                skip = True
+            elif not actual.endswith(".gz") and st.st_size == 0:
+                skip = True
+        except FileNotFoundError:
+            skip = True
+        except OSError:
+            # Permission or filesystem error — _bulk_load_one_file
+            # surfaces the message via logtail_status, but don't
+            # stall the queue waiting on it.
+            skip = True
+        if not skip:
+            await loop.run_in_executor(
+                None, _bulk_load_one_file, actual, store,
+                max_bytes_per_file)
         if isinstance(rs, dict) and rs.get("in_progress"):
             rs["files_done"] = int(rs.get("files_done", 0)) + 1

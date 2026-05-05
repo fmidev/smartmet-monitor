@@ -284,6 +284,15 @@ modprobe kheaders >/dev/null 2>&1 || :
   operator can tell whether a long-running replay is making
   progress or stuck on a single huge file. ``bulk_load`` updates
   ``store.replay_status`` after each file.
+- ``bulk_load`` now pre-flights each file with ``os.stat`` and
+  skips zero-byte regular files, missing files, and non-regular
+  files (FIFOs, sockets, etc.) before handing them to the
+  executor. Previously, an exotic disabled-logger setup (e.g.
+  ``frontend-access-log`` reduced to zero bytes when the
+  frontend daemon's logging was switched off) could leave the
+  replay banner stuck at ``N-1 / N files`` indefinitely. The skip
+  still increments the per-file counter so the banner reaches
+  ``N / N`` and clears.
 
 * Tue May 05 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.5-1.fmi
 - New IP Flow panel: animated topological view of access-log
