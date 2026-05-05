@@ -293,8 +293,9 @@ modprobe kheaders >/dev/null 2>&1 || :
   replay banner stuck at ``N-1 / N files`` indefinitely. The skip
   still increments the per-file counter so the banner reaches
   ``N / N`` and clears.
-- Access-log parser sped up by ~3.2× (940 k vs 297 k lines/s on
-  RHEL 8 / Python 3.9). Three changes:
+- Access-log parser sped up by ~5× peak / ~3× on a realistic
+  burst pattern (1.5 M / 932 k vs 297 k lines/s on RHEL 8 /
+  Python 3.9). Four changes:
    * The 10-line regex was replaced with ``str.split()`` over the
      13 fixed space-separated tokens — safe because URLs are
      URL-encoded and never contain literal spaces. Validation is
@@ -303,14 +304,19 @@ modprobe kheaders >/dev/null 2>&1 || :
    * Timestamp parser hand-rolled with a per-date midnight-epoch
      cache so ``time.mktime`` (consults local tz files) runs once
      per unique date in the replay set, not per line.
-   * 1-deep last-seen cache on ``parse_iso``. The access-log
-     cleaner flushes in 5-second bursts so consecutive records
-     usually share the same wall-clock second; on a cache hit the
-     parse collapses to a string equality test (~65 ns). The
-     fractional-second component is dropped — no consumer uses
-     sub-second precision.
-  End-to-end effect: a multi-GB replay's parse slice shrinks by
-  roughly two-thirds.
+   * 1-deep last-seen cache on ``parse_iso`` keyed by
+     ``YYYY-MM-DDTHH:MM:SS``. The access-log cleaner flushes in
+     5-second bursts so consecutive records usually share the
+     same wall-clock second; on a cache hit the parse collapses
+     to a string equality test (~65 ns).
+   * Same-minute fast path. When the cache key differs only in
+     the seconds digits, recompute by ASCII-arithmetic delta on
+     the two digit pairs and add to the cached epoch. Catches
+     every record inside a single ``MM`` boundary regardless of
+     how many distinct seconds occur in it. ~140 ns/call.
+  Fractional seconds are dropped — no consumer uses sub-second
+  precision. End-to-end: a multi-GB replay's parse slice shrinks
+  to roughly a third of the regex-era cost.
 
 * Tue May 05 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.5-1.fmi
 - New IP Flow panel: animated topological view of access-log
