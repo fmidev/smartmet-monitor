@@ -268,6 +268,22 @@ modprobe kheaders >/dev/null 2>&1 || :
   timestamp. Operator sees the panel run ~10 s behind real time
   but with a continuous flow that matches the cadence at which
   the requests originally arrived.
+- Bug fix: ``Store.ipflow_sources`` no longer crashes
+  ``/api/ipflow/timeline`` with HTTP 500 when ``tail_many`` has
+  registered a source label but no requests have parsed yet.
+  The previous predicate referenced a non-existent
+  ``SourceStats.history`` attribute; the fix uses ``last_seen``,
+  which is correctly populated only after the first record.
+- Bug fix: IP Flow service dropdown now repopulates correctly
+  when the operator navigates away from the panel and back. The
+  closure-scoped dedup cache was persisting across panel re-init
+  while the ``<select>`` element itself got rebuilt fresh each
+  time, leaving the dropdown stuck at "all" on revisit.
+- Replay banner now shows per-file progress (``5 / 22 files``)
+  and the basename of the file currently being parsed, so the
+  operator can tell whether a long-running replay is making
+  progress or stuck on a single huge file. ``bulk_load`` updates
+  ``store.replay_status`` after each file.
 
 * Tue May 05 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.5-1.fmi
 - New IP Flow panel: animated topological view of access-log

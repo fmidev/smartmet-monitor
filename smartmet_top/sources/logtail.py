@@ -261,7 +261,24 @@ async def bulk_load(paths: Iterable[str], store,
     and the HTTP server keeps answering /api/* without lag.
     """
     loop = asyncio.get_event_loop()
+    # Expand the rotation set up front so the dashboard's replay
+    # banner can show real per-file progress (`5 / 22`) instead of
+    # the user-supplied path count, which on `--include-rotated`
+    # underestimates by an order of magnitude.
+    actual_files: List[str] = []
     for p in paths:
-        for actual in (expand_rotated_paths(p) if include_rotated else [p]):
-            await loop.run_in_executor(
-                None, _bulk_load_one_file, actual, store, max_bytes_per_file)
+        if include_rotated:
+            actual_files.extend(expand_rotated_paths(p))
+        else:
+            actual_files.append(p)
+    rs = getattr(store, "replay_status", None)
+    if isinstance(rs, dict) and rs.get("in_progress"):
+        rs["files_total"] = len(actual_files)
+        rs["files_done"] = 0
+    for actual in actual_files:
+        if isinstance(rs, dict) and rs.get("in_progress"):
+            rs["current_file"] = actual
+        await loop.run_in_executor(
+            None, _bulk_load_one_file, actual, store, max_bytes_per_file)
+        if isinstance(rs, dict) and rs.get("in_progress"):
+            rs["files_done"] = int(rs.get("files_done", 0)) + 1

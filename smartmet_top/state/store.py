@@ -761,11 +761,14 @@ class Store:
     def ipflow_sources(self) -> List[str]:
         """List of access-log source labels with at least one
         recorded request, used to populate the IP Flow panel's
-        source-filter dropdown."""
+        source-filter dropdown. Filters by ``last_seen`` so a
+        source that was registered (via ``tail_many``) but has not
+        yet seen traffic stays out of the list — the dropdown only
+        offers options that would actually return data."""
         with self._lock:
             return sorted(
                 lbl for lbl, s in self.source_stats.items()
-                if s.minute_buckets or s.history)
+                if s.last_seen > 0)
 
     def ipflow_window(
         self,

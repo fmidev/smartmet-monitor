@@ -2428,6 +2428,13 @@
         });
         animator.setLayout(ps.layout);
         ps.activeBtn = "live";
+        // The sourceSel was just rebuilt fresh with only "all";
+        // clear the closure-scoped dedup cache so the next
+        // /api/ipflow/timeline response actually rebuilds the
+        // dropdown options. Without this, navigating away from IP
+        // Flow and back would leave the dropdown stuck at "all"
+        // because the cached list still matched the server's reply.
+        _knownSources = [];
         _updateButtonStates();
         _updateStatus();
       },
@@ -2684,10 +2691,14 @@
         ? Math.max(0, Math.round(Date.now() / 1000 - r.started_at))
         : 0;
       const rotated = r.include_rotated ? " (incl. rotated)" : "";
-      const files = r.files_total || 0;
-      txt.textContent =
-        `Replaying ${files} log file${files === 1 ? "" : "s"}${rotated}` +
-        ` — ${elapsed}s elapsed`;
+      const total = r.files_total || 0;
+      const done = r.files_done || 0;
+      const cur = r.current_file ? r.current_file.split("/").pop() : "";
+      let parts = [`Replaying logs${rotated}`];
+      if (total) parts.push(`${done} / ${total} files`);
+      if (cur) parts.push(`current: ${cur}`);
+      parts.push(`${elapsed}s elapsed`);
+      txt.textContent = parts.join(" — ");
     } else {
       el.classList.add("hidden");
     }
