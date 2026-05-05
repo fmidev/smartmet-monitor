@@ -139,22 +139,23 @@ _POLLED_ENDPOINTS = [
     ("cachestats",     "?what=cachestats&format=json"),
     ("servicestats",   "?what=servicestats&format=json"),
     ("activerequests", "?what=activerequests&format=json"),
-    # ``fields=all`` and ``timeformat=epoch`` were added to spine's
-    # lastrequests handler in the log-flush-no-lock branch:
-    #   * ``fields=all`` asks for every log field (IP, Status,
-    #     ContentLength, Apikey, Plugin, …) instead of the legacy
-    #     three-column shape.
-    #   * ``timeformat=epoch`` returns the Time / End / Start fields
-    #     as Unix epoch seconds, sidestepping the legacy
-    #     HH:MM:SS.fff time-of-day format that smwebmon's parse_iso
-    #     can't decode (it would silently fall back to wall-clock
-    #     ``now``, clustering all replayed records at startup time).
-    # Older spine builds ignore both query parameters and return
-    # their historical response; ``_ingest_lastrequests`` parses by
-    # field name and tolerates either time format, so the same
-    # smwebmon binary works against both old and new spine.
+    # ``fields=`` and ``timeformat=`` were added to spine's
+    # lastrequests handler in the log-flush-no-lock branch.
+    # Smwebmon asks for the minimum set of fields IP Flow needs
+    # (no RequestString — URLs and API-key per-URL stats fill from
+    # the live tail when log files are reachable; on log-less
+    # backends those panels stay empty until the operator finds an
+    # alternative ingest, but the size + parsing cost of pulling
+    # full URLs every 2 s is too high to justify pulling them by
+    # default). ``timeformat=epoch`` returns Time as Unix epoch
+    # seconds; ``_ingest_lastrequests`` parses that directly. Older
+    # spine builds ignore both parameters and return the legacy
+    # three-column response; the parser detects that case by the
+    # presence of RequestString and falls back to URL-stats ingest
+    # so old hosts keep their previous behaviour.
     ("lastrequests",   "?what=lastrequests&format=json&minutes=1"
-                       "&fields=all&timeformat=epoch"),
+                       "&fields=time,duration,ip,status,size,plugin"
+                       "&timeformat=epoch"),
 ]
 
 _LIST_REFRESH_SECONDS = 300.0  # re-check endpoint availability every 5 min
@@ -397,50 +398,66 @@ def _update_service_history(history, rows, ts: float) -> None:
 
 
 def _ingest_lastrequests(store, rows, seen: set, keep_last: int = 20_000) -> None:
-    """Feed admin /lastrequests rows into the URL + IP Flow stores.
+    """Feed admin /lastrequests rows into the IP Flow + URL stores.
 
-    Old spine returns Time, Duration, RequestString. The
-    log-flush-no-lock spine adds (when ``fields=all`` is passed):
-    Time, End, Start, Duration, DurationMs, CpuMs, IP, Status,
-    ContentLength, Method, Version, ETag, Apikey, Plugin,
-    RequestString. We parse by field name so the same code handles
-    both shapes — extras simply enable the IP Flow side.
+    Two response shapes:
 
-    Dedupe key combines (Time, RequestString, IP) so two requests
-    that arrived in the same wall-clock second from different
-    clients aren't collapsed.
+      * **New spine** (log-flush-no-lock branch and later) honours
+        ``fields=time,duration,ip,status,bytes,plugin&timeformat=epoch``
+        in the URL — Time arrives as Unix epoch seconds and the
+        per-IP fields are present. We feed only the IP Flow
+        retention; URL / API-key stats refill from the live log
+        tail on backends that have one. The URL itself is not
+        requested in fields= since it dominates response size and
+        IP Flow doesn't need it.
+      * **Old spine** ignores the parameters and returns the
+        historical three-column response (Time, Duration, URL).
+        We detect that by the presence of URL without IP and
+        fall back to URL-stats ingest so backends still on
+        pre-fix spine keep their previous behaviour.
+
+    Dedupe key combines (Time, IP-or-URL).
     """
     if not rows:
         return
+    ipflow_by_plugin: dict = {}
     for r in rows:
         t_str = r.get("Time") or r.get("time") or ""
-        # ``Duration`` arrives as a millisecond value formatted by
-        # spine's ``average_and_format`` (e.g. "12.34"); ``float()``
-        # parses it cleanly.
+        # ``Duration`` is integer milliseconds in the new spine
+        # response; older spine used a 4-significant-digit
+        # ``average_and_format`` string. ``float()`` handles either.
         dur_str = r.get("Duration") or r.get("duration") or "0"
-        req_str = r.get("RequestString") or r.get("requeststring") or ""
+        # Spine's lastrequests handler renamed RequestString → URL
+        # in the log-flush-no-lock branch; tolerate both spellings
+        # for old hosts.
+        url_str = (r.get("URL") or r.get("url")
+                   or r.get("RequestString") or r.get("requeststring")
+                   or "")
         status = r.get("Status") or r.get("status") or 0
+        # Spine's lastrequests handler renamed Bytes → ContentLength
+        # (header) and the field key bytes → size in the
+        # log-flush-no-lock branch; tolerate every form for
+        # forward / backward compatibility.
         bytes_ = (r.get("ContentLength") or r.get("contentlength")
+                  or r.get("Size") or r.get("size")
                   or r.get("Bytes") or r.get("bytes") or 0)
         apikey = r.get("Apikey") or r.get("apikey") or "-"
         ip = r.get("IP") or r.get("ip") or ""
         plugin = r.get("Plugin") or r.get("plugin") or ""
-        key = (t_str, req_str, ip)
-        if key in seen:
+        dedup_key = (t_str, ip or url_str)
+        if dedup_key in seen:
             continue
-        seen.add(key)
+        seen.add(dedup_key)
         if len(seen) > keep_last:
-            # drop some arbitrary old entries to bound memory
             for _ in range(keep_last // 4):
                 seen.pop()
         try:
-            # New-spine path: Time arrives as Unix epoch seconds via
-            # ``timeformat=epoch``. Old-spine path: Time is
+            # New-spine path: Time is Unix epoch seconds (via
+            # ``timeformat=epoch``). Old-spine path: Time is
             # "HH:MM:SS.fff" time-of-day, which the fast parse_iso
-            # can't decode and falls back to ``now`` — keeps records
-            # visible but clusters them at the wall-clock instant of
-            # ingestion (an old behavior we don't fix on the
-            # smwebmon side).
+            # can't decode and falls back to wall-clock ``now`` —
+            # records remain visible but cluster at the ingestion
+            # instant.
             if t_str:
                 try:
                     ts = float(t_str)
@@ -453,18 +470,28 @@ def _ingest_lastrequests(store, rows, seen: set, keep_last: int = 20_000) -> Non
             nb = int(bytes_) if bytes_ else 0
         except (ValueError, TypeError):
             continue
-        url = strip_query(req_str.split(" ", 1)[-1] if " " in req_str else req_str)
-        if not url:
-            continue
-        # URL / API-key stats path (always populated for backward
-        # compatibility with the legacy 3-column response).
-        store.record_request(
-            ts=ts,
-            url=url,
-            dur_ms=dur,
-            nbytes=nb,
-            status=st,
-            apikey=apikey,
-            source_label=plugin or None,
-            ip=ip,
-        )
+
+        if ip:
+            # New-spine path: feed IP Flow only. No URL parsing.
+            ipflow_by_plugin.setdefault(plugin, []).append(
+                (ts, dur, nb, st, ip))
+        elif url_str:
+            # Old-spine fallback: no IP, but URL is present. Feed
+            # URL stats so log-less backends running pre-fix spine
+            # keep their previous URLs / API Keys panels.
+            url = strip_query(
+                url_str.split(" ", 1)[-1] if " " in url_str else url_str)
+            if url:
+                store.record_request(
+                    ts=ts,
+                    url=url,
+                    dur_ms=dur,
+                    nbytes=nb,
+                    status=st,
+                    apikey=apikey,
+                    source_label=plugin or None,
+                )
+
+    # Batch IP Flow records under one Store lock per plugin.
+    for plugin, records in ipflow_by_plugin.items():
+        store.record_requests_bulk(records, source_label=plugin or None)
