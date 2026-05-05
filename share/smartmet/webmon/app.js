@@ -2322,10 +2322,13 @@
         smIPFlow.positionCursor(bytesCursor, bytesCanvas, ph);
       }
       _updateStatus();
-      // Auto-transition out of scrub when playhead reaches "now".
+      // Transition out of scrub when the playhead catches up to
+      // the live position (wallclock minus the live lag), so the
+      // cursor doesn't jump backwards by LAG seconds when modes
+      // switch. Threshold matches LIVE_LAG in ipflow.js.
       if (ps.mode === "scrub") {
-        const now = Date.now() / 1000;
-        if (ph >= now) _setLive();
+        const liveEdge = (Date.now() / 1000) - 10;
+        if (ph >= liveEdge) _setLive();
       }
     }
 

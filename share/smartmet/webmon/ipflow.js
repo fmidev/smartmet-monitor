@@ -150,6 +150,16 @@
   // draw cost at ~2 ms/frame on a typical laptop; well under the
   // 16 ms RAF budget.
   const MAX_PARTICLES = 2000;
+  // Live-mode playhead lag in seconds. Spine's access-log cleaner
+  // thread (see spine/ContentHandlerMap.cpp:588) flushes log lines
+  // to disk every 5 s, so records arrive at smwebmon in 5-second
+  // bursts. Without a lag, every poll spawned the entire batch at
+  // once and the animation looked bursty. Holding the playhead
+  // 10 s behind wallclock lets each batch sit in `pending` for
+  // roughly twice the flush interval before the playhead reaches
+  // it, so records drip out smoothly at 1× wallclock matching the
+  // cadence the requests originally arrived in.
+  const LIVE_LAG = 10;
 
   // FNV-1a 32-bit hash. Stable per-input, near-uniform output.
   // Used by the "spread" layout to give every IP a deterministic
@@ -211,12 +221,14 @@
     function setLive(now_t) {
       self.mode = "live";
       self.speed = 1;
-      // In live mode the playhead just sits at the newest data;
-      // particle spawning is driven by addRecords append, not by
-      // the playhead's forward motion. Keeping playhead pegged at
-      // (typically) wallclock now means the timeline cursor sits
-      // on the right edge.
-      self.playhead_t = now_t || (Date.now() / 1000);
+      // Hold the playhead LIVE_LAG seconds behind wallclock so the
+      // 5-second log-flush bursts have somewhere to sit in
+      // `pending` while waiting their turn. The playhead advances
+      // at 1× wallclock and crosses each record's t at roughly the
+      // same cadence the requests originally arrived, instead of
+      // spawning the entire flush batch in a single frame.
+      const base = now_t || (Date.now() / 1000);
+      self.playhead_t = base - LIVE_LAG;
       self.playhead_anim_t = performance.now() / 1000;
       _requestDraw();
     }
@@ -258,27 +270,20 @@
     }
 
     // Append records (sorted ascending by t) to the pending queue.
-    // Dedup by (t.toFixed(3), ip). In live mode, addRecords spawns
-    // the records immediately at "now"; in scrub mode they sit in
-    // pending until the playhead crosses them.
+    // Dedup by (t.toFixed(3), ip). Both live and scrub modes drip
+    // records out via the playhead-driven spawn loop in `_draw`;
+    // live differs only in that the playhead sits LIVE_LAG seconds
+    // behind wallclock instead of walking forward from a clicked
+    // start point at speed.
     function addRecords(records, mode) {
-      if (mode === "live") {
-        const now = performance.now() / 1000;
-        for (const r of records || []) {
-          const k = r.t.toFixed(3) + "|" + r.ip;
-          if (self.seen.has(k)) continue;
-          self.seen.add(k);
-          _spawnParticle(r, now);
-        }
-      } else {
-        for (const r of records || []) {
-          const k = r.t.toFixed(3) + "|" + r.ip;
-          if (self.seen.has(k)) continue;
-          self.seen.add(k);
-          self.pending.push(r);
-        }
-        self.pending.sort((a, b) => a.t - b.t);
+      void mode;
+      for (const r of records || []) {
+        const k = r.t.toFixed(3) + "|" + r.ip;
+        if (self.seen.has(k)) continue;
+        self.seen.add(k);
+        self.pending.push(r);
       }
+      self.pending.sort((a, b) => a.t - b.t);
       _requestDraw();
     }
 

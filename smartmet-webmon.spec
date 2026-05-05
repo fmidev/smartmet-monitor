@@ -258,6 +258,16 @@ modprobe kheaders >/dev/null 2>&1 || :
   elapsed seconds + file count instead of leaving the operator
   staring at empty panels. Polls ``/api/health`` (now exposing
   ``replay``) on every refresh tick.
+- IP Flow live mode: smooth burstiness. Spine's access-log
+  cleaner thread (spine/ContentHandlerMap.cpp:588) flushes log
+  lines every 5 s, so records arrive at smwebmon in 5-second
+  bursts. Live mode now uses the same playhead-driven spawn loop
+  as scrub mode, with the playhead held 10 seconds behind
+  wallclock; each batch sits in the pending queue and drips out
+  smoothly at 1× wallclock as the playhead crosses each record's
+  timestamp. Operator sees the panel run ~10 s behind real time
+  but with a continuous flow that matches the cadence at which
+  the requests originally arrived.
 
 * Tue May 05 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.5-1.fmi
 - New IP Flow panel: animated topological view of access-log
