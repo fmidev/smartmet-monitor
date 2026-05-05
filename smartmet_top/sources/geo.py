@@ -219,7 +219,15 @@ class CountryDB:
 # flag (which accepts a directory or a single file). The first path
 # that exists wins; we don't merge across them.
 DEFAULT_DB_DIRS = (
+    # Operator-managed override location (e.g. a daily refresh
+    # cron). Wins if populated.
     "/var/lib/smartmet-monitor",
+    # RPM-shipped snapshot — the smartmet-webmon package installs
+    # the five delegated-stats files here so the Countries panel
+    # works out-of-the-box on a fresh install. Test-phase only;
+    # later replaced by an explicit refresh mechanism.
+    "/usr/share/smartmet/country-db",
+    # Dev-box convenience path for ad-hoc local testing.
     "/tmp/smartmet-rir",
 )
 

@@ -141,6 +141,10 @@ modprobe kheaders >/dev/null 2>&1 || :
 %files
 %{_bindir}/smwebmon
 %{_datadir}/smartmet/webmon/
+# RIR delegated-stats snapshot bundled for IP→country lookup.
+# Test-phase only — long-term we'll switch to a daily refresh
+# mechanism so the RPM doesn't ship 40+ MB of timestamped data.
+%{_datadir}/smartmet/country-db/
 %{_unitdir}/smartmet-webmon.service
 %config(noreplace) %{_sysconfdir}/sysconfig/smartmet-webmon
 %dir %{_sysconfdir}/smartmet-webmon
@@ -199,6 +203,30 @@ modprobe kheaders >/dev/null 2>&1 || :
   so a Replay-24h fetch can pull the full retained history in one
   shot. The snapshot's max_records=200k cap still bounds the
   response size.
+- IP Flow ``spread`` layout now uses a per-IP FNV-1a hash instead
+  of rank-based ordering. Rank-based placed the busiest IP at 0°,
+  which on a backend with one dominant client (e.g. AWS at 80 %
+  of traffic) made every particle pile up on the right side of
+  the canvas. Hash-based gives a deterministic, near-uniform
+  angular slot per IP independent of count.
+- IP Flow rim shows tick marks for **every** IP again, with a
+  subtle 1.3 px low-alpha dot, while the labelled hot-IP set
+  bumped from 16 to 32. The earlier "no cold ticks" change made
+  the long tail invisible; restoring the dots without crowding
+  the labels gives both the full distribution and the readable
+  busy clients.
+- IP Flow timeline cursor no longer hides itself when the
+  playhead falls outside the chart's rendered time range. It
+  clamps to the chart edge so the vertical line and the
+  ``scrub @ HH:MM:SS`` text always agree.
+- RIR delegated-stats snapshot bundled in the webmon RPM under
+  ``/usr/share/smartmet/country-db/`` so the Countries panel and
+  the IP Flow rim country labels work out-of-the-box on a fresh
+  install. ``CountryDB`` searches ``/var/lib/smartmet-monitor/``
+  first (operator override), then the bundled snapshot, then the
+  dev-box ``/tmp/smartmet-rir/`` path. Test-phase only — replaced
+  later by an explicit refresh mechanism so the RPM stops
+  shipping ~40 MB of dated data.
 
 * Tue May 05 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.5-1.fmi
 - New IP Flow panel: animated topological view of access-log

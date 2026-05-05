@@ -125,10 +125,24 @@ install-webmon:
 	install -m 0644 share/modules-load.d/smartmet-perf.conf \
 	    $(DESTDIR)$(MODLOADDIR)/smartmet-perf.conf
 	install -m 0644 doc/man/smwebmon.1 $(MANDIR)/smwebmon.1
+	# RIR delegated-stats files — IP→country lookup for the
+	# Countries panel and the IP Flow rim labels. Bundled with
+	# the RPM during the test phase; long-term replaced by an
+	# explicit refresh mechanism (a daily timer + curl, or
+	# operator-driven). Skip the install if the dir is absent so
+	# a contributor without the snapshot can still build the RPM.
+	if [ -d share/smartmet/country-db ]; then \
+	    install -d $(SHAREDIR)/country-db; \
+	    for f in share/smartmet/country-db/delegated-*-extended-latest; do \
+	        [ -f "$$f" ] || continue; \
+	        install -m 0644 "$$f" $(SHAREDIR)/country-db/; \
+	    done; \
+	fi
 
 uninstall-webmon:
 	rm -f $(BINDIR)/smwebmon
 	rm -rf $(SITEDIR_WEBMON) $(WEBMON_ASSET_DIR)
+	rm -rf $(SHAREDIR)/country-db
 	rm -f $(DESTDIR)$(UNITDIR)/smartmet-webmon.service
 	rm -f $(DESTDIR)$(SYSCONFDIR)/sysconfig/smartmet-webmon
 	rm -rf $(DESTDIR)$(SYSCONFDIR)/smartmet-webmon

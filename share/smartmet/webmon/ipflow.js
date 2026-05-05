@@ -171,12 +171,12 @@
       cursorDiv.style.display = "none";
       return null;
     }
-    if (t < s.t0 - 60 || t > s.t1 + 60) {
-      cursorDiv.style.display = "none";
-      return null;
-    }
-    const r = canvas.getBoundingClientRect();
-    // Map record-time t to canvas pixels.
+    // Always render the cursor: clamp to the chart's edge if the
+    // playhead happens to fall outside the rendered time range
+    // (e.g. live mode with no fresh data — playhead = wallclock
+    // now but the rightmost bucket is older). Hiding it confused
+    // operators who expected the timestamp readout and the
+    // vertical line to agree.
     const span = Math.max(1, s.t1 - s.t0);
     const clamped = Math.max(s.t0, Math.min(s.t1, t));
     const x = s.padL + ((clamped - s.t0) / span) * s.innerW;
@@ -214,13 +214,30 @@
   // 16 ms RAF budget.
   const MAX_PARTICLES = 2000;
 
+  // FNV-1a 32-bit hash. Stable per-input, near-uniform output.
+  // Used by the "spread" layout to give every IP a deterministic
+  // angular slot independent of its numeric value or its rank,
+  // so /24 neighbours don't cluster and the busiest IP doesn't
+  // always land at 0°.
+  function _hash32(s) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return h >>> 0;
+  }
+
+  function _hashAngleRad(s) {
+    return (_hash32(s) * Math.PI * 2) / 0x100000000;
+  }
+
   function IPFlowAnimator(canvas, options = {}) {
     const self = {
       canvas,
       options,
       ips: {},
       layout: "numeric",          // "numeric" | "spread"
-      spreadAngles: {},
       particles: [],
       pending: [],                 // sorted by t ascending
       seen: new Set(),             // (t.toFixed(3) + "|" + ip)
@@ -234,32 +251,16 @@
 
     function setLayout(l) {
       self.layout = (l === "spread") ? "spread" : "numeric";
-      _rebuildSpreadAngles();
       _requestDraw();
     }
 
     function setIPs(ips) {
       self.ips = ips || {};
-      _rebuildSpreadAngles();
-    }
-
-    function _rebuildSpreadAngles() {
-      if (self.layout !== "spread") return;
-      const ranked = Object.entries(self.ips)
-        .sort((a, b) => b[1].count - a[1].count);
-      const n = ranked.length || 1;
-      self.spreadAngles = {};
-      for (let i = 0; i < ranked.length; i++) {
-        self.spreadAngles[ranked[i][0]] = (i * 360) / n;
-      }
     }
 
     function _angleRad(ip) {
+      if (self.layout === "spread") return _hashAngleRad(ip);
       const meta = self.ips[ip];
-      if (self.layout === "spread") {
-        const a = self.spreadAngles[ip];
-        return a == null ? 0 : (a * Math.PI) / 180;
-      }
       if (!meta) return 0;
       return (meta.angle * Math.PI) / 180;
     }
@@ -402,23 +403,37 @@
       ctx.arc(cx, cy, R, 0, Math.PI * 2);
       ctx.stroke();
 
-      // Hot-IP labels (no cold-IP tick clutter — particles still
-      // spawn at the right angles even without a tick).
       const ipList = Object.entries(self.ips)
         .sort((a, b) => b[1].count - a[1].count);
-      const HOT_N = 16;
+
+      // Tick mark at every IP's slot — subtle so they don't crowd
+      // the rim, but visible so the operator sees the full distribution.
+      ctx.fillStyle = "rgba(155, 175, 198, 0.30)";
+      for (const [ip, meta] of ipList) {
+        const a = self.layout === "spread"
+                ? _hashAngleRad(ip)
+                : (meta.angle * Math.PI) / 180;
+        const x = cx + Math.cos(a) * R;
+        const y = cy + Math.sin(a) * R;
+        ctx.beginPath();
+        ctx.arc(x, y, 1.3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Top-N by count: bigger blue dot + IP/cc label.
+      const HOT_N = 32;
       const hot = ipList.slice(0, HOT_N);
       ctx.font = "10px ui-monospace, monospace";
       ctx.textBaseline = "middle";
       for (const [ip, meta] of hot) {
-        const a = (self.layout === "spread"
-                    ? (self.spreadAngles[ip] || 0)
-                    : meta.angle) * Math.PI / 180;
+        const a = self.layout === "spread"
+                ? _hashAngleRad(ip)
+                : (meta.angle * Math.PI) / 180;
         const x = cx + Math.cos(a) * R;
         const y = cy + Math.sin(a) * R;
         ctx.fillStyle = "#5dade2";
         ctx.beginPath();
-        ctx.arc(x, y, 2, 0, Math.PI * 2);
+        ctx.arc(x, y, 2.5, 0, Math.PI * 2);
         ctx.fill();
         const lx = cx + Math.cos(a) * (R + 8);
         const ly = cy + Math.sin(a) * (R + 8);
