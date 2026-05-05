@@ -1,14 +1,18 @@
 // ipflow.js — IP-flow panel rendering.
 //
-// Two pieces:
+// Three pieces:
 //   * drawTimeline(canvas, buckets, opts) — req/min or bytes/min line
-//     chart with optional cursor marker. Click dispatches a CustomEvent
-//     "ipflow-cursor" with `detail.t` (epoch seconds) so the panel can
-//     pan into scrub mode.
-//   * IPFlowAnimator(canvas) — RAF-driven particle field. Each request
-//     becomes a circle that flies from its IP's slot on the rim to the
-//     centre over its `dur_ms`. Speed encodes latency; colour encodes
-//     status; radius encodes log(bytes).
+//     chart with optional cursor marker. Click dispatches a
+//     "ipflow-cursor" CustomEvent with detail.t (epoch seconds) so
+//     the panel can pan into scrub mode.
+//   * IPFlowAnimator(canvas, options) — playhead-driven particle
+//     field. The animator owns a record-time clock that walks
+//     forward at `speed × wallclock` (in scrub mode) or stays
+//     pinned to the newest data (in live mode); particles spawn as
+//     the playhead crosses each record's `t`. Decouples the panel's
+//     polling cadence from the visual flow rate.
+//   * drawLegend(el) — DOM legend strip with the colour / speed /
+//     size encoding.
 
 (function (global) {
   "use strict";
@@ -75,7 +79,6 @@
     const xOf = t => TL_PAD.l + ((t - t0) / span) * innerW;
     const yOf = v => TL_PAD.t + innerH - v * yScale;
 
-    // Axes + horizontal grid lines.
     ctx.strokeStyle = PALETTE.grid;
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -101,7 +104,6 @@
       ctx.fillText(fmtY(v), TL_PAD.l - 4, yOf(v));
     }
 
-    // Time labels at the left, middle, right.
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     const fmtT = sec => {
@@ -113,7 +115,6 @@
                  TL_PAD.t + innerH + 2);
     ctx.fillText(fmtT(t1), TL_PAD.l + innerW, TL_PAD.t + innerH + 2);
 
-    // Filled line.
     ctx.strokeStyle = opts.lineColor || PALETTE.line;
     ctx.fillStyle   = opts.fillColor || PALETTE.fill;
     ctx.lineWidth = 1.5;
@@ -137,19 +138,10 @@
     ctx.closePath();
     ctx.fill();
 
-    // Cursor.
-    if (opts.cursor != null
-        && opts.cursor >= t0 - 60 && opts.cursor <= t1 + 60) {
-      const cx = xOf(Math.max(t0, Math.min(t1, opts.cursor)));
-      ctx.strokeStyle = "#f5b041";
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(cx, TL_PAD.t);
-      ctx.lineTo(cx, TL_PAD.t + innerH);
-      ctx.stroke();
-    }
-
-    canvas._tlState = { t0, t1, innerW, innerH };
+    canvas._tlState = {
+      t0, t1, innerW, innerH,
+      padL: TL_PAD.l, padT: TL_PAD.t,
+    };
   }
 
   function _attachTimelineClick(canvas) {
@@ -160,12 +152,39 @@
       if (!s) return;
       const r = canvas.getBoundingClientRect();
       const x = e.clientX - r.left;
-      const f = (x - TL_PAD.l) / s.innerW;
+      const f = (x - s.padL) / s.innerW;
       if (f < 0 || f > 1) return;
       const t = s.t0 + f * (s.t1 - s.t0);
       canvas.dispatchEvent(new CustomEvent("ipflow-cursor",
         { detail: { t }, bubbles: true }));
     });
+  }
+
+  // Position a CSS-positioned cursor div over a chart canvas.
+  // The wrap element is `position: relative`; the cursor div is
+  // `position: absolute`. Returns the pixel-x of the cursor (or
+  // null when out of range), so the panel can hide the cursor when
+  // the playhead falls outside the chart's time range.
+  function positionCursor(cursorDiv, canvas, t) {
+    const s = canvas._tlState;
+    if (!s || t == null) {
+      cursorDiv.style.display = "none";
+      return null;
+    }
+    if (t < s.t0 - 60 || t > s.t1 + 60) {
+      cursorDiv.style.display = "none";
+      return null;
+    }
+    const r = canvas.getBoundingClientRect();
+    // Map record-time t to canvas pixels.
+    const span = Math.max(1, s.t1 - s.t0);
+    const clamped = Math.max(s.t0, Math.min(s.t1, t));
+    const x = s.padL + ((clamped - s.t0) / span) * s.innerW;
+    cursorDiv.style.display = "";
+    cursorDiv.style.left = x + "px";
+    cursorDiv.style.top = s.padT + "px";
+    cursorDiv.style.height = s.innerH + "px";
+    return x;
   }
 
   // ---- topology animator -----------------------------------------
@@ -178,86 +197,193 @@
   }
 
   function _radiusForBytes(b) {
-    // log scale: 0 → 1.5 px, 1KB → ~3 px, 1MB → ~6 px, 1GB → ~9 px.
     const v = Math.log10(Math.max(1, b + 1));
     return Math.max(1.5, Math.min(12, 1.5 + v * 1.2));
   }
 
-  function IPFlowAnimator(canvas) {
+  // Min visible particle lifetime in animation seconds. At very
+  // high replay speeds a 100 ms request would otherwise traverse
+  // the radius in 0.17 ms — invisible. Floor at 200 ms wallclock
+  // so every particle is at least perceptible; the speed-encodes-
+  // latency metaphor degrades gracefully toward "everything looks
+  // fast" at extreme speeds, which is the right semantic.
+  const MIN_LIFE_ANIM = 0.2;
+  // Max simultaneous particles in flight. Spawning beyond this
+  // drops oldest first to keep the canvas readable. 2000 puts the
+  // draw cost at ~2 ms/frame on a typical laptop; well under the
+  // 16 ms RAF budget.
+  const MAX_PARTICLES = 2000;
+
+  function IPFlowAnimator(canvas, options = {}) {
     const self = {
       canvas,
-      ips: {},                // ip -> { angle, count, bytes, hot }
-      particles: [],          // active particles
-      seen: new Map(),        // (t.toFixed(3) + ip) -> insertedAt anim-t
-      paused: false,
-      mode: "live",
-      windowStart: null,      // for scrub mode
-      windowSeconds: 60,
-      speed: 1.0,
+      options,
+      ips: {},
+      layout: "numeric",          // "numeric" | "spread"
+      spreadAngles: {},
+      particles: [],
+      pending: [],                 // sorted by t ascending
+      seen: new Set(),             // (t.toFixed(3) + "|" + ip)
+      mode: "live",                // "live" | "scrub" | "paused"
+      speed: 1,
+      playhead_t: 0,               // record-time epoch seconds
+      playhead_anim_t: 0,          // performance.now()/1000 anchor
       _raf: null,
-      _baseAnimT: null,       // performance.now()/1000 at last setWindow
-      _baseRecordT: null,     // newest record ts at last setWindow
-      _lastDraw: 0,
+      _lastSpawnPurge: 0,
     };
 
-    function setWindow(data, opts = {}) {
-      self.ips = data.ips || {};
-      const recs = data.requests || [];
-      const now = performance.now() / 1000;
-      const mode = opts.mode || "live";
-      self.mode = mode;
+    function setLayout(l) {
+      self.layout = (l === "spread") ? "spread" : "numeric";
+      _rebuildSpreadAngles();
+      _requestDraw();
+    }
 
-      if (mode === "scrub") {
-        // Map record_t → anim_t starting "now". Records earlier than
-        // window start fall outside the playback timeline.
-        const start = opts.windowStart != null
-          ? opts.windowStart : (recs.length ? recs[0].t : now);
-        self.windowStart = start;
-        self.windowSeconds = opts.windowSeconds || 60;
-        self.speed = opts.speed || 1.0;
-        self._baseRecordT = start;
-        self._baseAnimT = now;
-        // Reset particle list — scrub jumps replace the field.
-        self.particles = [];
-        self.seen.clear();
-        for (const r of recs) {
-          self.particles.push(_makeParticle(r,
-            now + (r.t - start) / self.speed,
-            (r.dur_ms / 1000) / self.speed));
-        }
-      } else {
-        // Live mode — append only records we haven't seen yet, spawning
-        // them at "now". This makes the polling loop additive: a 2 s
-        // poll + a request that took 5 s spawns once and lives across
-        // multiple polls without re-creation.
-        const seen = self.seen;
-        const cutoff = now - 60.0;       // forget tracking for very old
-        for (const [k, t] of seen) {
-          if (t < cutoff) seen.delete(k);
-        }
-        for (const r of recs) {
-          const key = r.t.toFixed(3) + "|" + r.ip;
-          if (seen.has(key)) continue;
-          seen.set(key, now);
-          self.particles.push(_makeParticle(r, now, r.dur_ms / 1000));
-        }
-        self.windowStart = null;
+    function setIPs(ips) {
+      self.ips = ips || {};
+      _rebuildSpreadAngles();
+    }
+
+    function _rebuildSpreadAngles() {
+      if (self.layout !== "spread") return;
+      const ranked = Object.entries(self.ips)
+        .sort((a, b) => b[1].count - a[1].count);
+      const n = ranked.length || 1;
+      self.spreadAngles = {};
+      for (let i = 0; i < ranked.length; i++) {
+        self.spreadAngles[ranked[i][0]] = (i * 360) / n;
+      }
+    }
+
+    function _angleRad(ip) {
+      const meta = self.ips[ip];
+      if (self.layout === "spread") {
+        const a = self.spreadAngles[ip];
+        return a == null ? 0 : (a * Math.PI) / 180;
+      }
+      if (!meta) return 0;
+      return (meta.angle * Math.PI) / 180;
+    }
+
+    function effectivePlayhead() {
+      if (self.mode === "paused") return self.playhead_t;
+      const dt = performance.now() / 1000 - self.playhead_anim_t;
+      return self.playhead_t + dt * self.speed;
+    }
+
+    function setLive(now_t) {
+      self.mode = "live";
+      self.speed = 1;
+      // In live mode the playhead just sits at the newest data;
+      // particle spawning is driven by addRecords append, not by
+      // the playhead's forward motion. Keeping playhead pegged at
+      // (typically) wallclock now means the timeline cursor sits
+      // on the right edge.
+      self.playhead_t = now_t || (Date.now() / 1000);
+      self.playhead_anim_t = performance.now() / 1000;
+      _requestDraw();
+    }
+
+    function startScrub(start_t, speed) {
+      self.mode = "scrub";
+      self.speed = Math.max(1, speed || 1);
+      self.playhead_t = start_t;
+      self.playhead_anim_t = performance.now() / 1000;
+      _requestDraw();
+    }
+
+    function setSpeed(speed) {
+      const ph = effectivePlayhead();
+      self.speed = Math.max(1, +speed || 1);
+      self.playhead_t = ph;
+      self.playhead_anim_t = performance.now() / 1000;
+      if (self.mode === "paused") return;
+      _requestDraw();
+    }
+
+    function pause() {
+      if (self.mode === "paused") return;
+      self.playhead_t = effectivePlayhead();
+      self.playhead_anim_t = performance.now() / 1000;
+      self.mode = "paused";
+      if (self._raf != null) {
+        cancelAnimationFrame(self._raf);
+        self._raf = null;
       }
       _requestDraw();
     }
 
-    function _makeParticle(rec, spawnAnimT, life) {
-      const ipMeta = self.ips[rec.ip] || { angle: 0 };
-      return {
-        ip: rec.ip,
-        angle: (ipMeta.angle * Math.PI) / 180,
-        spawn: spawnAnimT,
-        life: Math.max(0.05, life),     // sub-50 ms requests animate visibly
-        bytes: rec.bytes,
-        status: rec.status,
-        radius: _radiusForBytes(rec.bytes),
-        color: _statusColor(rec.status),
-      };
+    function resume() {
+      if (self.mode !== "paused") return;
+      self.mode = "scrub";
+      self.playhead_anim_t = performance.now() / 1000;
+      _requestDraw();
+    }
+
+    // Append records (sorted ascending by t) to the pending queue.
+    // Dedup by (t.toFixed(3), ip). In live mode, addRecords spawns
+    // the records immediately at "now"; in scrub mode they sit in
+    // pending until the playhead crosses them.
+    function addRecords(records, mode) {
+      if (mode === "live") {
+        const now = performance.now() / 1000;
+        for (const r of records || []) {
+          const k = r.t.toFixed(3) + "|" + r.ip;
+          if (self.seen.has(k)) continue;
+          self.seen.add(k);
+          _spawnParticle(r, now);
+        }
+      } else {
+        for (const r of records || []) {
+          const k = r.t.toFixed(3) + "|" + r.ip;
+          if (self.seen.has(k)) continue;
+          self.seen.add(k);
+          self.pending.push(r);
+        }
+        self.pending.sort((a, b) => a.t - b.t);
+      }
+      _requestDraw();
+    }
+
+    function clearReplay() {
+      // Drop any in-flight scrub state so a new scrub starts fresh
+      // (the seen-set is also cleared so the fetch can re-deliver
+      // records from the new range without triggering dedup).
+      self.particles = [];
+      self.pending = [];
+      self.seen.clear();
+    }
+
+    function _spawnParticle(rec, spawnAnimT) {
+      const angleRad = _angleRad(rec.ip);
+      const lifeRecord = (rec.dur_ms || 1) / 1000;
+      const lifeAnim = Math.max(MIN_LIFE_ANIM,
+                                lifeRecord / Math.max(1, self.speed));
+      self.particles.push({
+        spawnAt: spawnAnimT,
+        life: lifeAnim,
+        angleRad,
+        radius: _radiusForBytes(rec.bytes || 0),
+        color: _statusColor(rec.status || 0),
+      });
+      // Drop oldest if we've exceeded the cap.
+      if (self.particles.length > MAX_PARTICLES) {
+        self.particles.splice(0, self.particles.length - MAX_PARTICLES);
+      }
+    }
+
+    function _purgeSeen(now) {
+      // The seen-set grows unboundedly otherwise; trim every minute
+      // by simply rebuilding from pending + a small recent window
+      // around the playhead. The cost is acceptable up to a few
+      // 100k entries; for longer playbacks we'd add expiry-by-time.
+      if (now - self._lastSpawnPurge < 60) return;
+      self._lastSpawnPurge = now;
+      if (self.seen.size <= 200000) return;
+      const fresh = new Set();
+      for (const r of self.pending) {
+        fresh.add(r.t.toFixed(3) + "|" + r.ip);
+      }
+      self.seen = fresh;
     }
 
     function _draw() {
@@ -269,49 +395,64 @@
       const cx = w / 2, cy = h / 2;
       const R = Math.max(40, Math.min(w, h) / 2 - 24);
 
-      // Rim.
-      ctx.strokeStyle = "rgba(155, 175, 198, 0.18)";
+      // Rim circle.
+      ctx.strokeStyle = "rgba(155, 175, 198, 0.20)";
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.arc(cx, cy, R, 0, Math.PI * 2);
       ctx.stroke();
 
-      // IP slots — tick + label for hot IPs (top by count).
+      // Hot-IP labels (no cold-IP tick clutter — particles still
+      // spawn at the right angles even without a tick).
       const ipList = Object.entries(self.ips)
         .sort((a, b) => b[1].count - a[1].count);
-      const hot = new Set(ipList.slice(0, 12).map(([ip]) => ip));
+      const HOT_N = 16;
+      const hot = ipList.slice(0, HOT_N);
       ctx.font = "10px ui-monospace, monospace";
       ctx.textBaseline = "middle";
-      for (const [ip, meta] of ipList) {
-        const a = (meta.angle * Math.PI) / 180;
+      for (const [ip, meta] of hot) {
+        const a = (self.layout === "spread"
+                    ? (self.spreadAngles[ip] || 0)
+                    : meta.angle) * Math.PI / 180;
         const x = cx + Math.cos(a) * R;
         const y = cy + Math.sin(a) * R;
-        ctx.fillStyle = "rgba(155, 175, 198, 0.55)";
+        ctx.fillStyle = "#5dade2";
         ctx.beginPath();
-        ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+        ctx.arc(x, y, 2, 0, Math.PI * 2);
         ctx.fill();
-        if (hot.has(ip)) {
-          ctx.fillStyle = "#cbd5e0";
-          const lx = cx + Math.cos(a) * (R + 8);
-          const ly = cy + Math.sin(a) * (R + 8);
-          ctx.textAlign = (Math.cos(a) >= 0) ? "left" : "right";
-          const label = meta.cc ? `${ip} ${meta.cc}` : ip;
-          ctx.fillText(label, lx, ly);
+        const lx = cx + Math.cos(a) * (R + 8);
+        const ly = cy + Math.sin(a) * (R + 8);
+        ctx.fillStyle = "#cbd5e0";
+        ctx.textAlign = (Math.cos(a) >= 0) ? "left" : "right";
+        const label = meta.cc ? `${ip} ${meta.cc}` : ip;
+        ctx.fillText(label, lx, ly);
+      }
+
+      // Spawn pending records the playhead has crossed.
+      const now = performance.now() / 1000;
+      const ph = effectivePlayhead();
+      if (self.mode !== "paused") {
+        let spawnedThisFrame = 0;
+        while (self.pending.length && self.pending[0].t <= ph) {
+          const r = self.pending.shift();
+          _spawnParticle(r, now);
+          spawnedThisFrame++;
+          // Cap per-frame spawns so a giant pending queue with low
+          // dur_ms doesn't blow the frame budget.
+          if (spawnedThisFrame >= 500) break;
         }
       }
 
       // Particles.
-      const now = performance.now() / 1000;
       const live = [];
       for (const p of self.particles) {
-        const elapsed = now - p.spawn;
-        if (elapsed < 0) { live.push(p); continue; }
+        const elapsed = now - p.spawnAt;
         const progress = elapsed / p.life;
-        if (progress > 1.05) continue;        // expired
+        if (progress > 1.05) continue;
         live.push(p);
         const r = R * (1 - Math.min(1, progress));
-        const x = cx + Math.cos(p.angle) * r;
-        const y = cy + Math.sin(p.angle) * r;
+        const x = cx + Math.cos(p.angleRad) * r;
+        const y = cy + Math.sin(p.angleRad) * r;
         ctx.fillStyle = p.color;
         ctx.globalAlpha = progress > 1 ? Math.max(0, 1 - (progress - 1) * 20) : 1;
         ctx.beginPath();
@@ -321,30 +462,48 @@
       ctx.globalAlpha = 1;
       self.particles = live;
 
-      // Centre disc.
+      // Centre.
       ctx.fillStyle = "#3a4f70";
       ctx.beginPath();
       ctx.arc(cx, cy, 6, 0, Math.PI * 2);
       ctx.fill();
 
-      // Stats overlay (top-left).
+      // Stats overlay.
       ctx.fillStyle = PALETTE.axis;
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
       ctx.font = "11px ui-monospace, monospace";
       const ipCount = ipList.length;
       const partCount = self.particles.length;
-      const modeLabel = self.paused ? "paused"
-                       : (self.mode === "scrub" ? "scrub" : "live");
-      ctx.fillText(`${modeLabel}  ips:${ipCount}  particles:${partCount}`,
-                   8, 8);
+      const phStr = new Date(ph * 1000).toTimeString().slice(0, 8);
+      const speedStr = self.speed === 1 ? "1×" : `${self.speed}×`;
+      const tag = self.mode === "paused"
+                ? "paused"
+                : (self.mode === "scrub"
+                    ? `scrub ${phStr} ${speedStr}`
+                    : "live");
+      ctx.fillText(
+        `${tag}  ips:${ipCount}  particles:${partCount}  pending:${self.pending.length}`,
+        8, 8);
 
-      // Keep ticking while we have particles or while live (so the
-      // next poll's records have a frame to land into).
-      if (!self.paused
-          && (self.particles.length > 0 || self.mode === "live")) {
-        _requestDraw();
+      _purgeSeen(now);
+
+      // Notify the panel of the current playhead so it can move
+      // the cursor div over each timeline chart.
+      if (typeof options.onPlayhead === "function") {
+        options.onPlayhead(ph);
       }
+
+      // In live mode we always have the cursor walking visibly
+      // (even when no new records arrive). In scrub mode we tick
+      // until pending drains AND every particle expires. In paused
+      // mode we don't tick at all.
+      const wantFrame = (self.mode !== "paused")
+        && (self.particles.length > 0
+            || self.pending.length > 0
+            || self.mode === "live"
+            || self.mode === "scrub");
+      if (wantFrame) _requestDraw();
     }
 
     function _requestDraw() {
@@ -352,32 +511,63 @@
       self._raf = requestAnimationFrame(_draw);
     }
 
-    function pause() {
-      self.paused = true;
-      if (self._raf != null) {
-        cancelAnimationFrame(self._raf);
-        self._raf = null;
-      }
-      _requestDraw();          // one final render to refresh the label
-    }
-    function resume() { self.paused = false; _requestDraw(); }
     function destroy() {
       if (self._raf != null) cancelAnimationFrame(self._raf);
       self._raf = null;
       self.particles = [];
+      self.pending = [];
     }
 
+    setLive();        // start in live mode at wallclock now
     _requestDraw();
 
-    return { setWindow, pause, resume, destroy,
-             get particles() { return self.particles; },
-             get paused() { return self.paused; },
-             get mode() { return self.mode; } };
+    return {
+      addRecords, setIPs, setLayout, setLive, startScrub,
+      setSpeed, pause, resume, clearReplay, destroy,
+      get mode() { return self.mode; },
+      get speed() { return self.speed; },
+      get playhead() { return effectivePlayhead(); },
+      get pendingCount() { return self.pending.length; },
+      get particleCount() { return self.particles.length; },
+    };
+  }
+
+  // ---- legend ----------------------------------------------------
+
+  function buildLegend(parent) {
+    parent.innerHTML = "";
+    const make = (cls, text) => {
+      const s = document.createElement("span");
+      s.className = cls;
+      s.textContent = text;
+      return s;
+    };
+    parent.appendChild(make("lg-key", "colour:"));
+    for (const [cls, label] of [
+      ["lg-2xx", "2xx"], ["lg-3xx", "3xx"],
+      ["lg-4xx", "4xx"], ["lg-5xx", "5xx"],
+    ]) {
+      const dot = document.createElement("span");
+      dot.className = "lg-dot " + cls;
+      const w = document.createElement("span");
+      w.className = "lg-swatch";
+      w.appendChild(dot);
+      w.appendChild(document.createTextNode(label));
+      parent.appendChild(w);
+    }
+    parent.appendChild(make("lg-sep", "·"));
+    parent.appendChild(make("lg-key", "speed ∝ 1 / latency"));
+    parent.appendChild(make("lg-sep", "·"));
+    parent.appendChild(make("lg-key", "radius ∝ log₁₀(bytes)"));
+    parent.appendChild(make("lg-sep", "·"));
+    parent.appendChild(make("lg-key", "angle: by IP"));
   }
 
   global.smIPFlow = {
     drawTimeline,
     attachTimelineClick: _attachTimelineClick,
+    positionCursor,
     IPFlowAnimator,
+    buildLegend,
   };
 })(window);

@@ -169,6 +169,36 @@ modprobe kheaders >/dev/null 2>&1 || :
   found; the IP Flow panel keeps working unchanged.
 - Co-bumped with smartmet-monitor 26.5.5-2 (the geo module +
   CountriesSnapshot live in the shared monitor package).
+- IP Flow panel: animator rewritten around a record-time playhead
+  that walks forward at ``speed × wallclock`` and spawns each
+  request as a particle when it crosses the request's timestamp.
+  Replaces the previous "spawn on poll arrival" model, which only
+  produced visible motion when fresh log lines were arriving in
+  real time and effectively froze on a ``--replay``-fed dev box
+  after the initial burst. Two new buttons (Replay 1h / Replay
+  24h) jump the playhead back and play history forward; clicking
+  any point on either timeline chart starts scrubbing from that
+  minute. Speed selector (1× / 10× / 60× / 300× / 1800×) lives in
+  the header.
+- Timeline cursor walks rightward at the selected speed via a
+  CSS-positioned cursor div on each chart, redrawn at RAF cadence
+  without redrawing the chart canvas underneath.
+- Particle visual lifetime floored at 200 ms wallclock so even
+  100 ms requests stay perceptible at 1800× replay speed.
+- Cold-IP rim ticks dropped (only the top 16 hot IPs get a tick
+  + label); the rim no longer crowds with hundreds of unreadable
+  dots on a busy backend. Particles still spawn at every IP's
+  correct angle, with or without a static tick.
+- Layout selector: ``numeric`` (default — ``angle = ip_int * 360
+  / 2**32``, /24 neighbours cluster) vs ``spread`` (rank-based
+  even distribution, better readability when a few IPs dominate).
+- New encoding legend strip below the topology canvas: colour =
+  HTTP status, speed ∝ 1/latency, radius ∝ log10(bytes), angle
+  by IP layout.
+- ``/api/ipflow/window`` ``seconds`` cap raised from 300 to 86400
+  so a Replay-24h fetch can pull the full retained history in one
+  shot. The snapshot's max_records=200k cap still bounds the
+  response size.
 
 * Tue May 05 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.5-1.fmi
 - New IP Flow panel: animated topological view of access-log

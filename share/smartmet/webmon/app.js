@@ -2202,43 +2202,82 @@
 
   PANELS.ipflow = (function () {
     const ps = state.panels.ipflow = {
-      cursor: null,            // null = live; otherwise epoch seconds
-      windowSeconds: 60,
-      topN: 50,
-      speed: 1,
-      paused: false,
-      historyMinutes: 60,      // how much history the timeline shows
+      mode: "live",            // "live" | "scrub" | "paused"
+      historyMinutes: 60,      // timeline X-axis span
+      topN: 50,                // server-side IP filter
+      layout: "numeric",       // "numeric" | "spread"
+      speed: 60,               // playback speed multiplier (scrub)
+      scrubStart: null,        // epoch seconds (only valid in scrub mode)
     };
-    let reqsCanvas, bytesCanvas, topoCanvas, statusEl, animator;
+    let reqsCanvas, bytesCanvas, reqsCursor, bytesCursor, topoCanvas;
+    let animator, statusEl, legendEl;
 
-    function _onCursorEvent(e) {
-      ps.cursor = e.detail.t;
-      ps.paused = false;
+    function _setLive() {
+      ps.mode = "live";
+      ps.scrubStart = null;
+      if (animator) {
+        animator.clearReplay();
+        animator.setLive();
+      }
       _refresh().catch(showError);
     }
 
-    function _setLive() {
-      ps.cursor = null;
-      ps.paused = false;
+    function _replay(secondsBack) {
+      const start = (Date.now() / 1000) - secondsBack;
+      _startScrub(start);
+    }
+
+    function _startScrub(t) {
+      ps.mode = "scrub";
+      ps.scrubStart = t;
+      if (animator) {
+        animator.clearReplay();
+        animator.startScrub(t, ps.speed);
+      }
       _refresh().catch(showError);
     }
 
     function _togglePause() {
-      ps.paused = !ps.paused;
-      if (animator) {
-        if (ps.paused) animator.pause(); else animator.resume();
+      if (!animator) return;
+      if (ps.mode === "paused") {
+        ps.mode = "scrub";
+        animator.resume();
+      } else {
+        ps.mode = "paused";
+        animator.pause();
       }
       _updateStatus();
     }
 
+    function _onCursorEvent(e) {
+      _startScrub(e.detail.t);
+    }
+
     function _updateStatus() {
       if (!statusEl) return;
-      if (ps.paused) { statusEl.textContent = "paused"; return; }
-      if (ps.cursor != null) {
-        const d = new Date(ps.cursor * 1000).toTimeString().slice(0, 8);
-        statusEl.textContent = `scrub @ ${d}`;
+      if (!animator) { statusEl.textContent = ""; return; }
+      if (ps.mode === "paused") { statusEl.textContent = "paused"; return; }
+      if (ps.mode === "scrub") {
+        const ph = animator.playhead;
+        const t = new Date(ph * 1000).toTimeString().slice(0, 8);
+        statusEl.textContent = `scrub @ ${t}  ${ps.speed}×`;
       } else {
         statusEl.textContent = "live";
+      }
+    }
+
+    function _onPlayhead(ph) {
+      if (reqsCursor && reqsCanvas) {
+        smIPFlow.positionCursor(reqsCursor, reqsCanvas, ph);
+      }
+      if (bytesCursor && bytesCanvas) {
+        smIPFlow.positionCursor(bytesCursor, bytesCanvas, ph);
+      }
+      _updateStatus();
+      // Auto-transition out of scrub when playhead reaches "now".
+      if (ps.mode === "scrub") {
+        const now = Date.now() / 1000;
+        if (ph >= now) _setLive();
       }
     }
 
@@ -2255,11 +2294,23 @@
               [["15","15m"],["60","1h"],["360","6h"],["1440","24h"]].map(
                 ([v,l]) => ({value: v, label: l})),
               v => { ps.historyMinutes = +v; _refresh().catch(showError); })),
-          el("label", null, "window",
-            selectInput("ipflow-win", String(ps.windowSeconds),
-              [["10","10s"],["30","30s"],["60","60s"],["120","2m"],["300","5m"]].map(
+          el("label", null, "speed",
+            selectInput("ipflow-speed", String(ps.speed),
+              [["1","1×"],["10","10×"],["60","60×"],["300","300×"],["1800","1800×"]]
+                .map(([v,l]) => ({value: v, label: l})),
+              v => {
+                ps.speed = +v;
+                if (animator) animator.setSpeed(ps.speed);
+                _updateStatus();
+              })),
+          el("label", null, "layout",
+            selectInput("ipflow-layout", ps.layout,
+              [["numeric","numeric"],["spread","spread"]].map(
                 ([v,l]) => ({value: v, label: l})),
-              v => { ps.windowSeconds = +v; _refresh().catch(showError); })),
+              v => {
+                ps.layout = v;
+                if (animator) animator.setLayout(v);
+              })),
           el("label", null, "top",
             selectInput("ipflow-top", String(ps.topN),
               [["10","10"],["25","25"],["50","50"],["100","100"],["0","all"]].map(
@@ -2267,6 +2318,10 @@
               v => { ps.topN = +v; _refresh().catch(showError); })),
           el("button", { class: "btn",
                           events: { click: _setLive } }, "Live"),
+          el("button", { class: "btn",
+                          events: { click: () => _replay(3600) } }, "Replay 1h"),
+          el("button", { class: "btn",
+                          events: { click: () => _replay(86400) } }, "Replay 24h"),
           el("button", { class: "btn",
                           events: { click: _togglePause } }, "Pause"),
           (statusEl = el("span", { class: "muted ipflow-status" })),
@@ -2276,16 +2331,23 @@
         const chartRow = el("div", { class: "ipflow-charts" });
         reqsCanvas = el("canvas", { class: "ipflow-chart" });
         bytesCanvas = el("canvas", { class: "ipflow-chart" });
+        reqsCursor = el("div", { class: "ipflow-cursor" });
+        bytesCursor = el("div", { class: "ipflow-cursor" });
         chartRow.appendChild(el("div", { class: "ipflow-chart-wrap" },
           el("div", { class: "muted ipflow-chart-title" }, "requests / minute"),
-          reqsCanvas));
+          reqsCanvas, reqsCursor));
         chartRow.appendChild(el("div", { class: "ipflow-chart-wrap" },
           el("div", { class: "muted ipflow-chart-title" }, "bytes / minute"),
-          bytesCanvas));
+          bytesCanvas, bytesCursor));
         panel.appendChild(chartRow);
+
+        legendEl = el("div", { class: "ipflow-legend" });
+        smIPFlow.buildLegend(legendEl);
+        panel.appendChild(legendEl);
 
         topoCanvas = el("canvas", { class: "ipflow-topo" });
         panel.appendChild(topoCanvas);
+
         host.appendChild(panel);
 
         smIPFlow.attachTimelineClick(reqsCanvas);
@@ -2293,39 +2355,53 @@
         reqsCanvas.addEventListener("ipflow-cursor", _onCursorEvent);
         bytesCanvas.addEventListener("ipflow-cursor", _onCursorEvent);
 
-        animator = smIPFlow.IPFlowAnimator(topoCanvas);
+        animator = smIPFlow.IPFlowAnimator(topoCanvas, {
+          onPlayhead: _onPlayhead,
+        });
+        animator.setLayout(ps.layout);
         _updateStatus();
       },
       async refresh() { await _refresh(); },
     };
 
     async function _refresh() {
-      if (ps.paused) { _updateStatus(); return; }
       const tl = await getJSON("/api/ipflow/timeline",
         { minutes: ps.historyMinutes });
       const buckets = tl.buckets || [];
-      const cursorTs = ps.cursor;
       smIPFlow.drawTimeline(reqsCanvas, buckets, {
-        key: "reqs", fmtY: fmtCount, cursor: cursorTs,
+        key: "reqs", fmtY: fmtCount,
       });
       smIPFlow.drawTimeline(bytesCanvas, buckets, {
-        key: "bytes", fmtY: fmtBytes, cursor: cursorTs,
+        key: "bytes", fmtY: fmtBytes,
         lineColor: "#f5b041",
         fillColor: "rgba(245, 176, 65, 0.18)",
       });
 
-      // Window fetch — live mode follows the right edge; scrub mode
-      // pins to the operator's clicked timestamp.
-      const params = { seconds: ps.windowSeconds, top_n: ps.topN };
-      if (cursorTs != null) params.start = cursorTs;
-      const win = await getJSON("/api/ipflow/window", params);
-      if (animator) {
-        animator.setWindow(win, {
-          mode: cursorTs != null ? "scrub" : "live",
-          windowStart: cursorTs != null ? cursorTs : null,
-          windowSeconds: ps.windowSeconds,
-          speed: ps.speed,
-        });
+      if (ps.mode === "paused") { _updateStatus(); return; }
+
+      let win;
+      if (ps.mode === "scrub" && ps.scrubStart != null) {
+        // Scrub: fetch from playhead all the way to now, in one
+        // shot. The snapshot caps the result at 200k records, so
+        // even a 24-hour window stays under ~20 MB.
+        const ph = animator ? animator.playhead : ps.scrubStart;
+        const seconds = Math.max(60,
+          Math.ceil((Date.now() / 1000) - ph));
+        win = await getJSON("/api/ipflow/window",
+          { start: ph, seconds, top_n: ps.topN });
+        if (animator) {
+          animator.setIPs(win.ips || {});
+          animator.addRecords(win.requests || [], "scrub");
+        }
+      } else {
+        // Live: fetch the trailing 60 seconds, spawn new arrivals
+        // immediately.
+        win = await getJSON("/api/ipflow/window",
+          { seconds: 60, top_n: ps.topN });
+        if (animator) {
+          animator.setIPs(win.ips || {});
+          animator.addRecords(win.requests || [], "live");
+        }
       }
       _updateStatus();
     }

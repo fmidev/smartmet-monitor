@@ -934,10 +934,12 @@ def ipflow_window(store, qs):
         seconds = float(qs.get("seconds", "60") or 60.0)
     except ValueError:
         return 400, {"error": "invalid 'seconds'"}
-    # Cap window length so a 10-minute fetch on a busy host doesn't
-    # ship megabytes of JSON. The frontend's normal scrub fetches
-    # 60s windows.
-    seconds = max(0.0, min(seconds, 300.0))
+    # Cap window length. A full-history replay can legitimately ask
+    # for a day's worth of records; the snapshot's max_records=200k
+    # cap already bounds the response shape to a manageable size
+    # (~20 MB JSON in the worst case). Anything beyond a day is
+    # almost certainly a bug.
+    seconds = max(0.0, min(seconds, 86400.0))
     if start_ts <= 0.0:
         # Default: the most recent `seconds` of retained traffic.
         start_ts = time.time() - seconds
