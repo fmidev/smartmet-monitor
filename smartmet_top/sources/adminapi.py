@@ -139,7 +139,22 @@ _POLLED_ENDPOINTS = [
     ("cachestats",     "?what=cachestats&format=json"),
     ("servicestats",   "?what=servicestats&format=json"),
     ("activerequests", "?what=activerequests&format=json"),
-    ("lastrequests",   "?what=lastrequests&format=json&minutes=1"),
+    # ``fields=all`` and ``timeformat=epoch`` were added to spine's
+    # lastrequests handler in the log-flush-no-lock branch:
+    #   * ``fields=all`` asks for every log field (IP, Status,
+    #     ContentLength, Apikey, Plugin, …) instead of the legacy
+    #     three-column shape.
+    #   * ``timeformat=epoch`` returns the Time / End / Start fields
+    #     as Unix epoch seconds, sidestepping the legacy
+    #     HH:MM:SS.fff time-of-day format that smwebmon's parse_iso
+    #     can't decode (it would silently fall back to wall-clock
+    #     ``now``, clustering all replayed records at startup time).
+    # Older spine builds ignore both query parameters and return
+    # their historical response; ``_ingest_lastrequests`` parses by
+    # field name and tolerates either time format, so the same
+    # smwebmon binary works against both old and new spine.
+    ("lastrequests",   "?what=lastrequests&format=json&minutes=1"
+                       "&fields=all&timeformat=epoch"),
 ]
 
 _LIST_REFRESH_SECONDS = 300.0  # re-check endpoint availability every 5 min
@@ -382,19 +397,35 @@ def _update_service_history(history, rows, ts: float) -> None:
 
 
 def _ingest_lastrequests(store, rows, seen: set, keep_last: int = 20_000) -> None:
-    """Feed admin /lastrequests rows into the URL stats store.
+    """Feed admin /lastrequests rows into the URL + IP Flow stores.
 
-    Each row has at minimum: Time, Duration, RequestString (plus Status in
-    recent versions). We dedupe by (Time, RequestString).
+    Old spine returns Time, Duration, RequestString. The
+    log-flush-no-lock spine adds (when ``fields=all`` is passed):
+    Time, End, Start, Duration, DurationMs, CpuMs, IP, Status,
+    ContentLength, Method, Version, ETag, Apikey, Plugin,
+    RequestString. We parse by field name so the same code handles
+    both shapes — extras simply enable the IP Flow side.
+
+    Dedupe key combines (Time, RequestString, IP) so two requests
+    that arrived in the same wall-clock second from different
+    clients aren't collapsed.
     """
+    if not rows:
+        return
     for r in rows:
         t_str = r.get("Time") or r.get("time") or ""
+        # ``Duration`` arrives as a millisecond value formatted by
+        # spine's ``average_and_format`` (e.g. "12.34"); ``float()``
+        # parses it cleanly.
         dur_str = r.get("Duration") or r.get("duration") or "0"
         req_str = r.get("RequestString") or r.get("requeststring") or ""
         status = r.get("Status") or r.get("status") or 0
-        bytes_ = r.get("ContentLength") or r.get("contentlength") or 0
+        bytes_ = (r.get("ContentLength") or r.get("contentlength")
+                  or r.get("Bytes") or r.get("bytes") or 0)
         apikey = r.get("Apikey") or r.get("apikey") or "-"
-        key = (t_str, req_str)
+        ip = r.get("IP") or r.get("ip") or ""
+        plugin = r.get("Plugin") or r.get("plugin") or ""
+        key = (t_str, req_str, ip)
         if key in seen:
             continue
         seen.add(key)
@@ -403,7 +434,20 @@ def _ingest_lastrequests(store, rows, seen: set, keep_last: int = 20_000) -> Non
             for _ in range(keep_last // 4):
                 seen.pop()
         try:
-            ts = parse_iso(t_str) if t_str else time.time()
+            # New-spine path: Time arrives as Unix epoch seconds via
+            # ``timeformat=epoch``. Old-spine path: Time is
+            # "HH:MM:SS.fff" time-of-day, which the fast parse_iso
+            # can't decode and falls back to ``now`` — keeps records
+            # visible but clusters them at the wall-clock instant of
+            # ingestion (an old behavior we don't fix on the
+            # smwebmon side).
+            if t_str:
+                try:
+                    ts = float(t_str)
+                except ValueError:
+                    ts = parse_iso(t_str)
+            else:
+                ts = time.time()
             dur = float(dur_str)
             st = int(status) if status else 0
             nb = int(bytes_) if bytes_ else 0
@@ -412,6 +456,8 @@ def _ingest_lastrequests(store, rows, seen: set, keep_last: int = 20_000) -> Non
         url = strip_query(req_str.split(" ", 1)[-1] if " " in req_str else req_str)
         if not url:
             continue
+        # URL / API-key stats path (always populated for backward
+        # compatibility with the legacy 3-column response).
         store.record_request(
             ts=ts,
             url=url,
@@ -419,4 +465,6 @@ def _ingest_lastrequests(store, rows, seen: set, keep_last: int = 20_000) -> Non
             nbytes=nb,
             status=st,
             apikey=apikey,
+            source_label=plugin or None,
+            ip=ip,
         )
