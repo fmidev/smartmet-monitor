@@ -14,8 +14,8 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        26.5.4
-Release:        11%{?dist}.fmi
+Version:        26.5.19
+Release:        1%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -327,6 +327,26 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Tue May 19 2026 Andris Pavēnis <andris.pavenis@fmi.fi> - 26.5.19-1.fmi
+- smartmet-webmon.spec merged into smartmet-monitor.spec as a
+  %%package -n subpackage. One `rpmbuild -bb smartmet-monitor.spec`
+  now produces both noarch RPMs (smartmet-monitor and
+  smartmet-webmon); the subpackage keeps its
+  `Requires: smartmet-monitor = %%{version}-%%{release}` exact-version
+  pin, so the two stay in lockstep through upgrades. Verified
+  on RockyLinux 9 and 10; RockyLinux 8 build hits a separate
+  unrelated RPM conflict that will be investigated separately.
+- Makefile: dropped the `webmon-rpm` target since `make rpm` now
+  emits both packages from the single spec. `make rpms` is kept
+  as an alias for backward compatibility with operator workflows.
+- BuildRequires: systemd-rpm-macros added (the smartmet-webmon
+  subpackage's %%post / %%preun / %%postun scriptlets use
+  %%systemd_post / %%systemd_preun / %%systemd_postun_with_restart).
+- smartmet_top.__version__ and smartmet_webmon.__version__ both
+  bumped to 26.5.19; the webmon module had been lagging at 26.5.2
+  since the cluster-view bumps, and the merge is the natural point
+  to re-align them.
+
 * Mon May 04 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.5.4-11.fmi
 - CachesSnapshot.trends() and ServicesSnapshot.trends() now emit
   step_seconds + last_ts at the response top level. The 26.5.4-10
