@@ -18,9 +18,9 @@ libraries. No third-party runtime dependencies are required.
 ```sh
 make install                  # installs smartmet-monitor under /usr/{bin,share,lib/pythonX}/
 make install-webmon           # installs the optional smartmet-webmon files (binary, package, unit, assets)
-make rpm                      # builds smartmet-monitor RPM under ./rpmbuild/RPMS/noarch/
-make webmon-rpm               # builds smartmet-webmon RPM (depends on smartmet-monitor at the exact version)
-make rpms                     # builds both
+make rpm                      # builds BOTH RPMs (smartmet-monitor + smartmet-webmon subpackage)
+                              # under ./rpmbuild/RPMS/noarch/ — one spec emits both
+make rpms                     # historic alias for `make rpm`
 ```
 
 The base RPM is `smartmet-monitor`. It requires Python 3.9 (the
@@ -1450,16 +1450,18 @@ trade-offs are in [`doc/perf-event-paranoid.md`](doc/perf-event-paranoid.md)
 ## Building the RPM
 
 ```sh
-make rpm                # smartmet-monitor only
-make webmon-rpm         # smartmet-webmon (requires smartmet-monitor.spec to build first time)
-make rpms               # both, in one go
+make rpm                # builds both RPMs from smartmet-monitor.spec
+make rpms               # historic alias for `make rpm`
 ```
 
-`make rpm` builds a source tarball from `HEAD` and runs `rpmbuild -tb`,
-which uses `%_topdir` from `~/.rpmmacros` — the same convention as the
-other `smartmet-*` packages in this workspace. `make webmon-rpm`
-re-uses the same tarball (the two RPMs share `Source0:`) and runs
-`rpmbuild -bb smartmet-webmon.spec` against it.
+`make rpm` builds a source tarball from `HEAD`, stages it under
+`%_sourcedir` (from `~/.rpmmacros` — the same convention as the
+other `smartmet-*` packages in this workspace), and runs
+`rpmbuild -bb smartmet-monitor.spec`. The single spec produces two
+RPMs: the main `smartmet-monitor` package and the optional
+`smartmet-webmon` subpackage; the subpackage pins
+`Requires: smartmet-monitor = %{version}-%{release}` so the pair
+stays in lockstep.
 
 The resulting `smartmet-monitor-<version>-<release>.noarch.rpm` installs
 everything under `/usr/bin`, `/usr/share/smartmet`, and the distribution

@@ -29,7 +29,7 @@ SYSCTLDIR ?= /usr/lib/sysctl.d
 MODLOADDIR ?= /usr/lib/modules-load.d
 
 .PHONY: all install uninstall clean check rpm install-webmon \
-        uninstall-webmon webmon-rpm rpms _stage-tarball
+        uninstall-webmon rpms _stage-tarball
 
 all:
 	@echo "smartmet-monitor is a no-build package. Use 'make install' or 'make rpm'."
@@ -561,22 +561,22 @@ check:
 clean:
 	find . -name __pycache__ -prune -exec rm -rf {} +
 
-# Build RPM(s) from HEAD. Uses ~/.rpmmacros for %_topdir, matching
+# Build the RPMs from HEAD. Uses ~/.rpmmacros for %_topdir, matching
 # other smartmet-* repos in this hub (e.g. macgyver, spine).
 #
-# Both spec files share the same Source0: tarball, so `rpmbuild -tb`
-# refuses (it requires exactly one spec inside the tarball). Instead
-# we stage the tarball in rpm's %_sourcedir once per `make` invocation
-# and then call `rpmbuild -bb <spec>` per spec — the same flow common
-# in multi-subpackage builds elsewhere in the SmartMet ecosystem.
+# smartmet-monitor.spec produces two packages: the main smartmet-monitor
+# RPM (smtop, bstat-family, shared library, docs) and the optional
+# smartmet-webmon subpackage RPM (smwebmon daemon, browser assets,
+# systemd unit). They were two separate specs in earlier releases;
+# merging them into one spec means `rpmbuild -bb smartmet-monitor.spec`
+# emits both RPMs from a single build, the standard subpackage flow.
 NAME = smartmet-monitor
 VERSION = $(shell sed -n 's/^__version__ = "\(.*\)"/\1/p' smartmet_top/__init__.py)
 TARBALL = $(NAME)-$(VERSION).tar.gz
 
 # Internal: build the source tarball and copy it into %_sourcedir.
 # Phony so it always runs, but make still deduplicates the call when
-# multiple downstream targets list it (so `make rpms` archives HEAD
-# exactly once, not three times).
+# multiple downstream targets list it.
 _stage-tarball:
 	rm -f $(TARBALL)
 	git archive --format=tar.gz --prefix=$(NAME)-$(VERSION)/ HEAD \
@@ -589,13 +589,8 @@ rpm: clean $(NAME).spec _stage-tarball
 	rpmbuild -bb $(NAME).spec
 	rm -f $(TARBALL)
 
-webmon-rpm: clean smartmet-webmon.spec _stage-tarball
-	rpmbuild -bb smartmet-webmon.spec
-	rm -f $(TARBALL)
-
-# Build both RPMs in a single make invocation. Shared dependencies
-# (clean, _stage-tarball) run once thanks to make's DAG; the local
-# TARBALL may be removed by the first sub-target before the second
-# runs, but the %_sourcedir copy (placed by _stage-tarball) persists,
-# so rpmbuild -bb still finds it.
-rpms: rpm webmon-rpm
+# Historic alias kept so existing operator workflows / CI scripts
+# that say `make rpms` continue to work. The single spec now produces
+# both RPMs from one rpmbuild invocation, so `rpms` simply forwards
+# to `rpm`.
+rpms: rpm
