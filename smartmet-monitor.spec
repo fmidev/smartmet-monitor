@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        26.5.19
+Version:        26.5.20
 Release:        1%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -95,28 +95,47 @@ Two companion tools for operating a SmartMet Server:
 
 The browser-based companion `smwebmon` is built from the same source
 tree and shipped as a separate optional subpackage
-(`smartmet-webmon`) so this RPM stays free of extra dependencies
-for sites that only want the CLI tools.
+(`smartmet-monitor-web`) so this RPM stays free of extra dependencies
+for sites that only want the CLI tools. (The subpackage was named
+`smartmet-webmon` through 26.5.19-1.fmi; it carries Obsoletes/Provides
+on the old name so upgrades from any earlier release work without
+operator intervention.)
 
 Both parts are implemented with the Python 3 standard library; no pip
 packages are required at runtime.
 
 
-# smartmet-webmon — browser-dashboard companion to smartmet-monitor.
+# smartmet-monitor-web — browser-dashboard companion to smartmet-monitor.
+# (Previously distributed as the standalone `smartmet-webmon` package,
+# then briefly as a same-named subpackage through 26.5.19-1.fmi.)
 #
 # Ships a single daemon (`smwebmon`) plus the static HTML/CSS/JS it
 # serves over HTTP. The shared data-collection layer (sources,
 # state.Store, snapshots) lives in smartmet-monitor and is depended
 # on at the exact-version level.
 #
-# The unit is shipped DISABLED by default. See the cost-analysis
-# discussion in the project's planning notes; operators run
-# `sudo systemctl start smartmet-webmon` only when they want the
-# dashboard, then SSH-tunnel to localhost.
-%package -n smartmet-webmon
+# The unit is shipped DISABLED by default. The systemd unit name
+# stays `smartmet-webmon.service` (and the sysconfig file at
+# /etc/sysconfig/smartmet-webmon, and the config dir
+# /etc/smartmet-webmon/) so operator muscle memory is preserved
+# across the package rename; only the RPM identifier changes.
+# Operators run `sudo systemctl start smartmet-webmon` only when
+# they want the dashboard, then SSH-tunnel to localhost.
+%package -n smartmet-monitor-web
 Summary:        Browser dashboard for SmartMet Server (smwebmon)
 
-# Exact-version dep — webmon imports smartmet_top.snapshots,
+# Upgrade path from the historical `smartmet-webmon` standalone
+# package (and from the brief lifetime of the `smartmet-webmon`
+# subpackage name, 26.5.5 → 26.5.19-1.fmi). Obsoletes pulls the
+# old package out on upgrade; Provides keeps `Requires:
+# smartmet-webmon` clauses elsewhere in the ecosystem satisfiable
+# without forcing a coordinated rename. The systemd unit, sysconfig
+# file, /etc/smartmet-webmon/ config dir, and the `smwebmon` binary
+# itself keep their existing names — only the RPM identifier changes.
+Obsoletes:      smartmet-webmon < %{version}-%{release}
+Provides:       smartmet-webmon = %{version}-%{release}
+
+# Exact-version dep — the dashboard imports smartmet_top.snapshots,
 # smartmet_top.runtime, smartmet_top.state.store at runtime, all of
 # which live in smartmet-monitor.
 Requires:       smartmet-monitor = %{version}-%{release}
@@ -142,7 +161,7 @@ Recommends:     kernel-devel-uname-r
 # sites build smartmet-server from source under a different name).
 Recommends:     smartmet-server
 
-%description -n smartmet-webmon
+%description -n smartmet-monitor-web
 Browser-based companion to smartmet-monitor. Adds the `smwebmon`
 daemon that serves the same per-panel data smtop renders, plus an
 interactive Canvas flame graph, over HTTP+JSON on loopback. Reuses
@@ -250,7 +269,7 @@ flame) work without this. See
 EOF
 fi
 
-%post -n smartmet-webmon
+%post -n smartmet-monitor-web
 %systemd_post smartmet-webmon.service
 # Load kheaders without requiring a reboot. Persistent across reboots
 # via /usr/lib/modules-load.d/smartmet-perf.conf. The || : guard
@@ -261,10 +280,10 @@ fi
 # here — that knob belongs to the host's hardening baseline owner.
 modprobe kheaders >/dev/null 2>&1 || :
 
-%preun -n smartmet-webmon
+%preun -n smartmet-monitor-web
 %systemd_preun smartmet-webmon.service
 
-%postun -n smartmet-webmon
+%postun -n smartmet-monitor-web
 %systemd_postun_with_restart smartmet-webmon.service
 
 %files
@@ -315,7 +334,7 @@ modprobe kheaders >/dev/null 2>&1 || :
 # present whether only the CLI or the dashboard is installed.
 %config(noreplace) %{_prefix}/lib/sysctl.d/99-smartmet-perf.conf
 
-%files -n smartmet-webmon
+%files -n smartmet-monitor-web
 %{_bindir}/smwebmon
 %{_datadir}/smartmet/webmon/
 # RIR delegated-stats snapshot for the Countries panel and IP Flow
@@ -331,6 +350,27 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Wed May 20 2026 Andris Pavēnis <andris.pavenis@fmi.fi> - 26.5.20-1.fmi
+- Subpackage renamed: `smartmet-webmon` → `smartmet-monitor-web`.
+  The new name follows the `<basepkg>-<feature>` convention used
+  elsewhere in the smartmet-* ecosystem and removes the ad-hoc
+  "webmon" coinage. `Obsoletes: smartmet-webmon < %%{version}-%%{release}`
+  and `Provides: smartmet-webmon = %%{version}-%%{release}` on the
+  subpackage so:
+    * `dnf upgrade` cleanly replaces an installed `smartmet-webmon`
+      (whether the historical standalone RPM or the brief
+      26.5.5-x..26.5.19-1.fmi subpackage form) with
+      `smartmet-monitor-web` in one transaction.
+    * Anything in the wider ecosystem that still says
+      `Requires: smartmet-webmon` keeps resolving without a
+      coordinated rename.
+- Unchanged on purpose (operator muscle memory): the binary name
+  `smwebmon`, the systemd unit `smartmet-webmon.service`, the
+  sysconfig file `/etc/sysconfig/smartmet-webmon`, the config dir
+  `/etc/smartmet-webmon/`, and the Python module `smartmet_webmon/`.
+  Only the RPM identifier changes; `systemctl start smartmet-webmon`
+  still does what it did before.
+
 * Tue May 19 2026 Andris Pavēnis <andris.pavenis@fmi.fi> - 26.5.19-1.fmi
 - smartmet-webmon.spec merged into smartmet-monitor.spec as a
   %%package -n subpackage. One `rpmbuild -bb smartmet-monitor.spec`

@@ -8,7 +8,7 @@ dashboard as a separate companion package:
 |----------------------------------|----------------------------------------------------------------------|
 | `bstat`, `bchart`, `burls`, `bstatus`, `bkeys` | Offline analysis of access-log files (Bash + gawk). |
 | `smtop`                          | Interactive curses dashboard that tails logs and polls `/admin`.     |
-| `smwebmon` *(separate RPM `smartmet-webmon`)* | Browser dashboard serving the same data over HTTP+JSON.   |
+| `smwebmon` *(separate RPM `smartmet-monitor-web`)* | Browser dashboard serving the same data over HTTP+JSON.   |
 
 All parts are implemented against the Python 3 and GNU Awk 5 standard
 libraries. No third-party runtime dependencies are required.
@@ -17,8 +17,8 @@ libraries. No third-party runtime dependencies are required.
 
 ```sh
 make install                  # installs smartmet-monitor under /usr/{bin,share,lib/pythonX}/
-make install-webmon           # installs the optional smartmet-webmon files (binary, package, unit, assets)
-make rpm                      # builds BOTH RPMs (smartmet-monitor + smartmet-webmon subpackage)
+make install-webmon           # installs the optional smartmet-monitor-web files (binary, package, unit, assets)
+make rpm                      # builds BOTH RPMs (smartmet-monitor + smartmet-monitor-web subpackage)
                               # under ./rpmbuild/RPMS/noarch/ — one spec emits both
 make rpms                     # historic alias for `make rpm`
 ```
@@ -26,9 +26,13 @@ make rpms                     # historic alias for `make rpm`
 The base RPM is `smartmet-monitor`. It requires Python 3.9 (the
 `python3` package on RHEL 10 / Fedora, or the `python39` AppStream
 module on RHEL 8) plus `gawk`. The optional companion RPM
-`smartmet-webmon` adds the `smwebmon` daemon and depends on
+`smartmet-monitor-web` adds the `smwebmon` daemon and depends on
 `smartmet-monitor` at the same exact version, so a coordinated
-upgrade keeps the two in lockstep.
+upgrade keeps the two in lockstep. `smartmet-monitor-web` carries
+`Obsoletes: smartmet-webmon`, so hosts that already have the old
+`smartmet-webmon` RPM installed are upgraded cleanly in one
+`dnf` transaction; the systemd unit (`smartmet-webmon.service`)
+and config paths keep their existing names.
 
 On a fresh builder, install the build dependencies straight from the
 spec before running `make rpm`:
@@ -1024,11 +1028,14 @@ order — combined with `--history-minutes 10080` this gives a full
 week of context. Compressed `.gz` files are read transparently via
 the stdlib `gzip` module; no pip dependency.
 
-## `smartmet-webmon` — browser dashboard
+## `smartmet-monitor-web` — browser dashboard
 
 The optional companion `smwebmon` exposes the same data over HTTP for
 a browser-based UI. It imports the same `Store`, source loops and
-snapshot classes as `smtop`; nothing is duplicated.
+snapshot classes as `smtop`; nothing is duplicated. (The RPM was
+previously distributed as `smartmet-webmon`; the binary, systemd
+unit, and config paths keep their original names — only the package
+identifier was renamed in 26.5.20-1.fmi.)
 
 ![smwebmon Overview tab: totals table plus five full-width charts (req/min, mean ms, p95 ms, bytes/min, err %)](doc/images/webmon_overview.png)
 
@@ -1038,10 +1045,12 @@ The data-collection layer (`smartmet_top.runtime`,
 `smartmet_top.snapshots`, `smartmet_top.state.store`) lives in
 `smartmet-monitor` and is reused by both binaries. The web-only
 parts — the HTTP server, the static assets, the systemd unit — are
-packaged separately as `smartmet-webmon` so sites that only want the
-CLI tools don't pay for them. `smartmet-webmon` requires
-`smartmet-monitor = %{version}-%{release}`, so the two stay
-version-locked across upgrades.
+packaged separately as `smartmet-monitor-web` so sites that only
+want the CLI tools don't pay for them. `smartmet-monitor-web`
+requires `smartmet-monitor = %{version}-%{release}`, so the two
+stay version-locked across upgrades; it also carries
+`Obsoletes: smartmet-webmon` so installs of the previous package
+name are replaced cleanly on `dnf upgrade`.
 
 ### How to run
 
@@ -1318,8 +1327,8 @@ parallel at refresh time.
 
 Setup:
 
-1. Install `smartmet-webmon` on every backend (the same RPM the
-   frontend already has). Each backend's `smwebmon` reports its
+1. Install `smartmet-monitor-web` on every backend (the same RPM
+   the frontend already has). Each backend's `smwebmon` reports its
    local kernel's view, no admin plugin extension needed.
 2. Bind the backend's `smwebmon` to a routable address. The
    default is loopback-only, which the frontend cannot reach.
@@ -1459,14 +1468,15 @@ make rpms               # historic alias for `make rpm`
 other `smartmet-*` packages in this workspace), and runs
 `rpmbuild -bb smartmet-monitor.spec`. The single spec produces two
 RPMs: the main `smartmet-monitor` package and the optional
-`smartmet-webmon` subpackage; the subpackage pins
+`smartmet-monitor-web` subpackage; the subpackage pins
 `Requires: smartmet-monitor = %{version}-%{release}` so the pair
-stays in lockstep.
+stays in lockstep, and carries `Obsoletes: smartmet-webmon` so any
+host already running the previous package name is upgraded cleanly.
 
 The resulting `smartmet-monitor-<version>-<release>.noarch.rpm` installs
 everything under `/usr/bin`, `/usr/share/smartmet`, and the distribution
 site-packages directory (e.g. `/usr/lib/python3.9/site-packages/smartmet_top`).
-The companion `smartmet-webmon-<version>-<release>.noarch.rpm` adds
+The companion `smartmet-monitor-web-<version>-<release>.noarch.rpm` adds
 `/usr/bin/smwebmon`, `/usr/share/smartmet/webmon/`,
 `/usr/lib/systemd/system/smartmet-webmon.service`,
 `/etc/sysconfig/smartmet-webmon`, and the `smartmet_webmon` Python
