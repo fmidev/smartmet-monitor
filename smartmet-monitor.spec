@@ -14,7 +14,7 @@
 %global _python3_sitelib %{python3_sitelib}
 
 Name:           smartmet-monitor
-Version:        26.5.20
+Version:        26.6.15
 Release:        1%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
@@ -350,6 +350,16 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Mon Jun 15 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.6.15-1.fmi
+- bstat/bchart/burls/bkeys and smtop now ignore the size_t(-1) byte
+  count (18446744073709551615 ≈ 2^64) that spine logs for chunked /
+  streamed responses with no declared content length. On a busy
+  server serving such responses the sentinel swamped every byte sum,
+  producing nonsensical avg_KB / MB_out columns (~2^54) and useless
+  size / bandwidth bars. Byte values >= 2^53 (or negative) are now
+  treated as 0 bytes; request counts, latency and status are
+  unaffected. The underlying spine logging issue is separate.
+
 * Wed May 20 2026 Andris Pavēnis <andris.pavenis@fmi.fi> - 26.5.20-1.fmi
 - Subpackage renamed: `smartmet-webmon` → `smartmet-monitor-web`.
   The new name follows the `<basepkg>-<feature>` convention used

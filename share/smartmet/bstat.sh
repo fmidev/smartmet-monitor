@@ -146,6 +146,12 @@ EOF
         }
         dur = $10 + 0
         bytes = $11 + 0
+        # Spine logs size_t(-1) (18446744073709551615 ≈ 2^64) as the byte
+        # count for chunked/streamed responses with no declared length.
+        # Such values are not representable as exact doubles and would
+        # swamp the byte sums, so treat anything implausibly large (or
+        # negative) as 0 bytes. 2^53 (~9 PB) is far above any real response.
+        if (bytes < 0 || bytes >= 2^53) bytes = 0
         status = $8 + 0
 
         count[t]++
@@ -495,6 +501,9 @@ EOF
         }
         dur = $10 + 0
         bytes = $11 + 0
+        # See bstat: ignore the size_t(-1) sentinel spine logs for
+        # chunked/streamed responses (would otherwise swamp byte sums).
+        if (bytes < 0 || bytes >= 2^53) bytes = 0
         status = $8 + 0
         count[t]++
         sumdur[t] += dur
@@ -794,6 +803,9 @@ EOF
         }
         dur = $10 + 0
         bytes = $11 + 0
+        # See bstat: ignore the size_t(-1) sentinel spine logs for
+        # chunked/streamed responses (would otherwise swamp byte sums).
+        if (bytes < 0 || bytes >= 2^53) bytes = 0
 
         count[url]++
         sumdur[url]  += dur
@@ -1110,6 +1122,9 @@ EOF
         k = $NF
         dur = $10 + 0
         bytes = $11 + 0
+        # See bstat: ignore the size_t(-1) sentinel spine logs for
+        # chunked/streamed responses (would otherwise swamp byte sums).
+        if (bytes < 0 || bytes >= 2^53) bytes = 0
         count[k]++
         sumdur[k]  += dur
         sumbytes[k] += bytes

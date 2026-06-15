@@ -135,6 +135,13 @@ def parse(line: str) -> Optional[dict]:
         nbytes = int(parts[10])
     except ValueError:
         return None
+    # Spine logs size_t(-1) (18446744073709551615) as the byte count for
+    # chunked/streamed responses with no declared length. Such a value
+    # would swamp every per-URL byte sum, so treat anything implausibly
+    # large (or negative) as 0 bytes. 2**53 (~9 PB) is far above any real
+    # response yet well below the sentinel. Mirrors the guard in bstat.sh.
+    if nbytes < 0 or nbytes >= 2 ** 53:
+        nbytes = 0
     url = parts[5]
     return {
         "ip": parts[0],

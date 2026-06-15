@@ -80,6 +80,16 @@ as a time series. `-h` tunes the sparkline height: `-h 1` collapses
 to a single dot-ramp row that fits short terminals, while higher
 values give 4 dot rows of vertical resolution per char-row.
 
+> **Note on `avg_KB` / `MB_out`:** chunked or streamed responses that
+> carry no declared content length are logged by spine with a byte
+> count of `size_t(-1)` (`18446744073709551615`). `bstat` and the rest
+> of the `b*` family (and `smtop`) treat any byte value ≥ 2⁵³ — far
+> above any real response — as 0, so a single sentinel request can no
+> longer swamp a bucket's size/bandwidth totals. Request counts,
+> latency and status are unaffected. A bucket whose responses are
+> *all* chunked will therefore read 0 KB / 0 MB rather than a
+> nonsensical petabyte figure.
+
 Compact form (`-h 1`):
 
 ![bstat -i 1h -h 1: compact single-row sparkline mode on a 24-hour WMS log](doc/images/bstat_1h_H1.png)
