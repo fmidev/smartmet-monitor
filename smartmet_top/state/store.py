@@ -421,6 +421,21 @@ class Store:
         self.total_errors: int = 0
         # per-minute global metrics (for overview sparklines)
         self._global_minutes: Dict[int, MinuteBucket] = {}
+        # IP-flow retention: per minute, raw request tuples keyed by
+        # client IP. Used by the IPFlow panel to animate requests as
+        # particles flying from each IP toward the centre. Stored as
+        # tuples (not dataclasses) so a busy backend with 100k requests
+        # per day costs ~16 MB at most: ~160 B per tuple including
+        # CPython overhead. Tuple shape:
+        # ``(ts, ip, dur_ms, nbytes, status, source_label)`` —
+        # source_label is the access-log source name (e.g. "wms",
+        # "timeseries"), interned by CPython so the per-record cost
+        # of the extra string is just a pointer. "" when the caller
+        # didn't supply one. Pruned by the same HISTORY_MINUTES
+        # window as everything else.
+        self._ipflow_minutes: Dict[
+            int, List[Tuple[float, str, int, int, int, str]]
+        ] = {}
         # admin snapshots keyed by host label (so the UI can show all hosts).
         # The "default" / single-host case still works — it just lives at
         # host=<the one label>.
@@ -466,6 +481,11 @@ class Store:
         # status: data source health
         self.logtail_status: str = "(starting)"
         self.admin_status: Dict[str, str] = {}
+        # Replay progress — populated by runtime.replay_logs while a
+        # bulk_load is in flight so the dashboard can render a
+        # "processing logs…" banner instead of empty panels. Always a
+        # dict so handlers can read it without isinstance checks.
+        self.replay_status: Dict[str, object] = {"in_progress": False}
         # Cross-panel "drill into another panel" request. A panel sets
         # this to (target_hotkey, params_dict) when the operator drills
         # in (e.g. Plugins → URLs filtered by plugin label); the App
@@ -631,6 +651,107 @@ class Store:
 
     # -- log updates --------------------------------------------------------
 
+    def record_requests_bulk(
+        self,
+        records,
+        source_label: Optional[str] = None,
+    ) -> None:
+        """Streamlined replay-mode ingest. Each record is a 5-tuple
+        ``(ts, dur_ms, nbytes, status, ip)``. Maintains only the
+        aggregates the IP Flow + Overview + Plugins-timeline panels
+        need: total counters, ``_global_minutes`` (count, bytes,
+        errors), per-source minute_buckets (count, bytes, errors),
+        and ``_ipflow_minutes`` per-record retention.
+
+        Skipped vs ``record_request``:
+          * URL stats (per-URL latency histogram, percentiles)
+          * API-key stats and apikey_counts
+          * per-source per-second buckets (the "last 60 s" view)
+          * per-record latency histograms anywhere
+          * status-code histograms in MinuteBucket
+        These all refill from live tailing within seconds of replay
+        completing, so the panels that read them recover quickly.
+
+        Amortises the RLock over the entire batch — bulk_load passes
+        a few thousand records at a time, cutting lock-cycle cost
+        from once-per-record (~0.6 µs) to once-per-batch.
+        """
+        if not records:
+            return
+        history_minutes = HISTORY_MINUTES
+        with self._lock:
+            src = None
+            if source_label:
+                src = self.source_stats.get(source_label)
+                if src is None:
+                    src = SourceStats(label=source_label)
+                    self.source_stats[source_label] = src
+            global_minutes = self._global_minutes
+            ipflow_minutes = self._ipflow_minutes
+            src_minutes = src.minute_buckets if src is not None else None
+            last_ts = 0.0
+            count_added = 0
+            byte_added = 0
+            err_added = 0
+            for ts, dur_ms, nbytes, status, ip in records:
+                count_added += 1
+                byte_added += nbytes
+                is_err = status >= 400
+                if is_err:
+                    err_added += 1
+                m = int(ts // 60)
+
+                # Global minute aggregates (no histogram, no status_counts).
+                g = global_minutes.get(m)
+                if g is None:
+                    g = MinuteBucket()
+                    global_minutes[m] = g
+                    cutoff = m - history_minutes
+                    for k in list(global_minutes.keys()):
+                        if k < cutoff:
+                            del global_minutes[k]
+                g.count += 1
+                g.bytes += nbytes
+                if is_err:
+                    g.errors += 1
+
+                # Per-source minute aggregates (no second-buckets,
+                # no histogram, no status_counts).
+                if src_minutes is not None:
+                    mb = src_minutes.get(m)
+                    if mb is None:
+                        mb = MinuteBucket()
+                        src_minutes[m] = mb
+                        cutoff_m = m - history_minutes
+                        for k in list(src_minutes.keys()):
+                            if k < cutoff_m:
+                                del src_minutes[k]
+                    mb.count += 1
+                    mb.bytes += nbytes
+                    if is_err:
+                        mb.errors += 1
+                    if ts > last_ts:
+                        last_ts = ts
+
+                # IP-flow per-record retention.
+                if ip:
+                    bucket = ipflow_minutes.get(m)
+                    if bucket is None:
+                        bucket = []
+                        ipflow_minutes[m] = bucket
+                        cutoff = m - history_minutes
+                        for k in list(ipflow_minutes.keys()):
+                            if k < cutoff:
+                                del ipflow_minutes[k]
+                    bucket.append((ts, ip, int(dur_ms), int(nbytes),
+                                    int(status), source_label or ""))
+
+            self.total_requests += count_added
+            self.total_bytes += byte_added
+            self.total_errors += err_added
+            if src is not None and last_ts > src.last_seen:
+                src.last_seen = last_ts
+
     def record_request(
         self,
         ts: float,
@@ -640,6 +761,7 @@ class Store:
         status: int,
         apikey: str,
         source_label: Optional[str] = None,
+        ip: str = "",
     ) -> None:
         with self._lock:
             if source_label is not None:
@@ -687,6 +809,118 @@ class Store:
             if status >= 400:
                 g.errors += 1
             g.status_counts[status] = g.status_counts.get(status, 0) + 1
+
+            # IP-flow retention. Skip when no IP — keeps existing test
+            # paths and snapshot replay (which doesn't carry an IP)
+            # from paying the per-request tuple cost.
+            if ip:
+                bucket = self._ipflow_minutes.get(m)
+                if bucket is None:
+                    bucket = []
+                    self._ipflow_minutes[m] = bucket
+                    cutoff = m - HISTORY_MINUTES
+                    for k in list(self._ipflow_minutes.keys()):
+                        if k < cutoff:
+                            del self._ipflow_minutes[k]
+                bucket.append((ts, ip, int(dur_ms), int(nbytes),
+                                int(status), source_label or ""))
+
+    def ipflow_timeline(
+        self,
+        minutes: int = HISTORY_MINUTES,
+        source: Optional[str] = None,
+    ) -> List[Tuple[int, int, int]]:
+        """Per-minute aggregate (count, bytes) over the last `minutes`
+        of retained history. Returned newest-last so the chart's X
+        axis runs left-to-right in time order.
+
+        With ``source=None`` reads from ``_global_minutes`` (always
+        populated, every request whether IP-tagged or not). With a
+        named source it reads from ``source_stats[source].minute_buckets``,
+        which the access-log tail populates directly via
+        ``SourceStats.record``."""
+        with self._lock:
+            if source:
+                src = self.source_stats.get(source)
+                if src is None or not src.minute_buckets:
+                    return []
+                buckets = src.minute_buckets
+            else:
+                if not self._global_minutes:
+                    return []
+                buckets = self._global_minutes
+            latest = max(buckets)
+            cutoff = latest - max(1, int(minutes)) + 1
+            out: List[Tuple[int, int, int]] = []
+            for m in sorted(buckets):
+                if m < cutoff:
+                    continue
+                b = buckets[m]
+                out.append((m * 60, int(b.count), int(b.bytes)))
+            return out
+
+    def ipflow_sources(self) -> List[str]:
+        """List of access-log source labels with at least one
+        recorded request, used to populate the IP Flow panel's
+        source-filter dropdown. Filters by ``last_seen`` so a
+        source that was registered (via ``tail_many``) but has not
+        yet seen traffic stays out of the list — the dropdown only
+        offers options that would actually return data."""
+        with self._lock:
+            return sorted(
+                lbl for lbl, s in self.source_stats.items()
+                if s.last_seen > 0)
+
+    def ipflow_window(
+        self,
+        start_ts: float,
+        seconds: float,
+        top_n: int = 0,
+        source: Optional[str] = None,
+    ) -> Tuple[List[Tuple[float, str, int, int, int, str]], Dict[str, Tuple[int, int]]]:
+        """Return raw IP-flow records intersecting [start_ts, start_ts+seconds]
+        plus a per-IP `(count, bytes)` summary for the same window.
+
+        When `top_n > 0`, requests for IPs outside the top-N busiest
+        (by request count) are dropped from the records list — the
+        summary still includes every IP so the panel can show the
+        long-tail count without rendering it as particles.
+
+        With ``source`` set, only records whose source_label matches
+        the filter are returned (and contribute to the summary). The
+        empty string and ``None`` both mean "all sources"."""
+        with self._lock:
+            end_ts = start_ts + max(0.0, seconds)
+            m_start = int(start_ts // 60)
+            m_end = int(end_ts // 60)
+            want_source = source or None
+            recs: List[Tuple[float, str, int, int, int, str]] = []
+            ip_summary: Dict[str, List[int]] = {}
+            for m in range(m_start, m_end + 1):
+                bucket = self._ipflow_minutes.get(m)
+                if bucket is None:
+                    continue
+                for rec in bucket:
+                    ts, ip, dur, nb, st, src = rec
+                    if ts < start_ts or ts > end_ts:
+                        continue
+                    if want_source is not None and src != want_source:
+                        continue
+                    recs.append(rec)
+                    s = ip_summary.get(ip)
+                    if s is None:
+                        ip_summary[ip] = [1, nb]
+                    else:
+                        s[0] += 1
+                        s[1] += nb
+            recs.sort(key=lambda r: r[0])
+            if top_n and len(ip_summary) > top_n:
+                top = set(ip for ip, _ in sorted(
+                    ip_summary.items(),
+                    key=lambda kv: kv[1][0], reverse=True)[:top_n])
+                recs = [r for r in recs if r[1] in top]
+            summary = {ip: (c, b) for ip, (c, b) in ip_summary.items()}
+            return recs, summary
 
     def record_raw_line(self, line: str, source: str = "") -> None:
         """Append a raw access-log line to the recent rings.

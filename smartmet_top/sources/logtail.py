@@ -22,7 +22,7 @@ import asyncio
 import gzip
 import os
 import re
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Tuple
 
 from .logparse import parse
 
@@ -183,6 +183,7 @@ async def tail_many(paths: Iterable[str], store, poll_interval: float = 0.25) ->
                     status=rec["status"],
                     apikey=rec["apikey"],
                     source_label=f.label,
+                    ip=rec["ip"],
                 )
         if any_data:
             store.logtail_status = f"tailing {len(files)} file(s)"
@@ -210,24 +211,69 @@ def _bulk_load_one_file(path: str, store, max_bytes_per_file: int) -> None:
             # gzip files don't support cheap arbitrary-position
             # seeks, so we read them fully and let the store's
             # minute-bucket pruning bound memory.
-            if not path.endswith(".gz") and size > max_bytes_per_file:
+            is_gz = path.endswith(".gz")
+            # Tell the kernel we'll read sequentially and don't need
+            # the pages cached afterwards. Without this hint a
+            # multi-GB replay evicts spine's hot pages from page
+            # cache, making the cleaner-thread flush slower (longer
+            # WriteLock hold time), which cascades into stalled
+            # request handlers. Best-effort; gzip files / non-POSIX
+            # systems silently no-op.
+            try:
+                os.posix_fadvise(fh.fileno(), 0, 0,
+                                  os.POSIX_FADV_SEQUENTIAL)
+                os.posix_fadvise(fh.fileno(), 0, 0,
+                                  os.POSIX_FADV_NOREUSE)
+            except (OSError, AttributeError):
+                pass
+            if not is_gz and size > max_bytes_per_file:
                 fh.seek(size - max_bytes_per_file)
                 fh.readline()  # skip partial line
-            for line in fh:
-                line = line.rstrip("\n")
-                store.record_raw_line(line, source=label)
+            # Stop at the size we observed when we opened the file.
+            # Without this guard, a live access log that smartmetd
+            # is currently writing to keeps growing past our seek
+            # position, ``for line in fh`` never reaches EOF, and
+            # the replay banner stays stuck on that file forever
+            # while we tail behind the daemon. ``.gz`` files don't
+            # have a meaningful uncompressed size from stat, so we
+            # let them read to natural EOF (a static rotated
+            # archive isn't growing under us).
+            if is_gz:
+                lines_iter = fh
+            else:
+                end = size
+                def _bounded():
+                    while fh.tell() < end:
+                        line = fh.readline()
+                        if not line:
+                            break
+                        yield line
+                lines_iter = _bounded()
+
+            # Batch records and ingest under a single store lock per
+            # batch. Replay's per-record cost is dominated by the
+            # store's RLock acquire/release; amortising across a
+                # 5000-record batch drops it from ~0.6 µs/record to
+            # ~negligible. The streamlined ``record_requests_bulk``
+            # also skips per-record histograms and per-URL / per-key
+            # stats, so a multi-GB replay completes in seconds rather
+            # than minutes. URL / Key panels refill from the live
+            # tail in the seconds after replay.
+            BATCH = 5000
+            batch = []
+            batch_append = batch.append
+            for line in lines_iter:
                 rec = parse(line)
                 if rec is None:
                     continue
-                store.record_request(
-                    ts=rec["start_ts"],
-                    url=rec["path"],
-                    dur_ms=rec["dur_ms"],
-                    nbytes=rec["bytes"],
-                    status=rec["status"],
-                    apikey=rec["apikey"],
-                    source_label=label,
-                )
+                batch_append((rec["start_ts"], rec["dur_ms"],
+                              rec["bytes"], rec["status"], rec["ip"]))
+                if len(batch) >= BATCH:
+                    store.record_requests_bulk(batch, source_label=label)
+                    batch = []
+                    batch_append = batch.append
+            if batch:
+                store.record_requests_bulk(batch, source_label=label)
     except FileNotFoundError:
         return
     except OSError as e:
@@ -238,7 +284,8 @@ def _bulk_load_one_file(path: str, store, max_bytes_per_file: int) -> None:
 
 async def bulk_load(paths: Iterable[str], store,
                     max_bytes_per_file: int = 256 * 1024 * 1024,
-                    include_rotated: bool = False) -> None:
+                    include_rotated: bool = False,
+                    max_live_bytes: Optional[int] = 0) -> None:
     """One-shot load: read each file (bounded by `max_bytes_per_file`)
     and feed into the store. Used by `--replay`.
 
@@ -253,13 +300,88 @@ async def bulk_load(paths: Iterable[str], store,
     that day's traffic, not the entire day. Raise `--replay-bytes`
     when a full day matters.
 
+    `max_live_bytes` controls how the LIVE (currently-being-written)
+    access log is handled — distinct from rotated siblings:
+
+      * ``None`` — read live files with the same cap as rotated.
+      * ``0`` (default) — skip live files entirely. Their content
+        is picked up by ``tail_many`` going forward, no replay
+        contention with smartmetd's concurrent appends. Recommended
+        on hosts running spine versions where the access-logger
+        cleaner thread holds its WriteLock for the duration of
+        every disk flush (filesystem-level inode-mutex contention
+        between our reader and the cleaner's writer can stall
+        smartmetd's request handlers for the duration of the
+        replay).
+      * positive int — cap live-file reads at this many bytes
+        from the tail. A small value (e.g. 25 * 1024 * 1024) gives
+        the IP Flow timeline a populated last-few-minutes view at
+        startup with only ~0.1–0.3 s of contention per file.
+
     Each file is read in a thread-pool executor so the asyncio event
     loop stays responsive — concurrent sampler tasks (perf_loop,
     proc_loop, etc.) scheduled before replay get CPU during replay,
     and the HTTP server keeps answering /api/* without lag.
     """
     loop = asyncio.get_event_loop()
+    # Expand the rotation set up front so the dashboard's replay
+    # banner can show real per-file progress (`5 / 22`) instead of
+    # the user-supplied path count, which on `--include-rotated`
+    # underestimates by an order of magnitude. Each entry is
+    # ``(actual_path, is_live)``; the LIVE file is the original
+    # input path (always last after expand_rotated_paths), rotated
+    # siblings are not.
+    live_paths = set(paths)
+    actual_files: List[Tuple[str, bool]] = []
     for p in paths:
-        for actual in (expand_rotated_paths(p) if include_rotated else [p]):
+        if include_rotated:
+            for rot in expand_rotated_paths(p):
+                actual_files.append((rot, rot in live_paths))
+        else:
+            actual_files.append((p, True))
+
+    rs = getattr(store, "replay_status", None)
+    if isinstance(rs, dict) and rs.get("in_progress"):
+        rs["files_total"] = len(actual_files)
+        rs["files_done"] = 0
+    for actual, is_live in actual_files:
+        if isinstance(rs, dict) and rs.get("in_progress"):
+            rs["current_file"] = actual
+
+        # Per-file cap. Live files use ``max_live_bytes`` — None
+        # means "treat as rotated", 0 means "skip", positive means
+        # "tail-cap at this size".
+        if is_live and max_live_bytes is not None:
+            if max_live_bytes <= 0:
+                cap = 0
+            else:
+                cap = min(max_bytes_per_file, max_live_bytes)
+        else:
+            cap = max_bytes_per_file
+
+        # Pre-flight: skip when the file is missing, isn't a
+        # regular file, or is zero bytes; also skip live files
+        # when ``cap == 0`` (operator opted out of live-file
+        # replay for spine-contention reasons).
+        skip = (cap == 0)
+        if not skip:
+            try:
+                st = os.stat(actual)
+                import stat as _stat
+                if not _stat.S_ISREG(st.st_mode):
+                    skip = True
+                elif not actual.endswith(".gz") and st.st_size == 0:
+                    skip = True
+            except FileNotFoundError:
+                skip = True
+            except OSError:
+                # Permission / filesystem error — _bulk_load_one_file
+                # surfaces it via logtail_status, but don't stall
+                # the queue.
+                skip = True
+
+        if not skip:
             await loop.run_in_executor(
-                None, _bulk_load_one_file, actual, store, max_bytes_per_file)
+                None, _bulk_load_one_file, actual, store, cap)
+        if isinstance(rs, dict) and rs.get("in_progress"):
+            rs["files_done"] = int(rs.get("files_done", 0)) + 1

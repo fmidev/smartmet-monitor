@@ -34,15 +34,38 @@ from .state.store import Store
 
 async def replay_logs(store: Store, log_paths: List[str], *,
                       replay_bytes: int = 1024 * 1024 * 1024,
-                      include_rotated: bool = False) -> None:
+                      include_rotated: bool = False,
+                      max_live_bytes: Optional[int] = 0) -> None:
     """Synchronous bulk-load of log tails. Run before ``start_sources``
     so panels come up populated rather than empty.
+
+    Maintains ``store.replay_status`` as a small dict the dashboard
+    polls via ``/api/health`` so it can show a "processing logs…"
+    banner instead of leaving the operator staring at empty panels
+    while a multi-GB replay parses.
     """
     if not log_paths:
         return
-    await bulk_load(log_paths, store,
-                    max_bytes_per_file=replay_bytes,
-                    include_rotated=include_rotated)
+    import time as _time
+    started = _time.time()
+    store.replay_status = {
+        "in_progress": True,
+        "files_total": len(log_paths),
+        "include_rotated": bool(include_rotated),
+        "started_at": started,
+    }
+    try:
+        await bulk_load(log_paths, store,
+                        max_bytes_per_file=replay_bytes,
+                        include_rotated=include_rotated,
+                        max_live_bytes=max_live_bytes)
+    finally:
+        store.replay_status = {
+            "in_progress": False,
+            "files_total": len(log_paths),
+            "started_at": started,
+            "duration_seconds": _time.time() - started,
+        }
 
 
 def start_sources(store: Store, *,

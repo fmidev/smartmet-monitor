@@ -80,6 +80,22 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         help="With --replay, also read rotated log siblings.",
     )
     p.add_argument(
+        "--replay-live-bytes", type=int, default=0, metavar="N",
+        help="Replay-time handling for the LIVE access log (the file "
+             "smartmetd is currently appending to). Three modes:  "
+             " 0 (default) — skip live files entirely. Avoids the "
+             "filesystem inode-mutex contention with smartmetd's "
+             "writes that, on spine versions where the access-logger "
+             "cleaner thread holds its WriteLock during disk flush, "
+             "stalls the daemon's request handlers for seconds. The "
+             "live tail picks up new writes as they arrive.  "
+             " >0 — read the trailing N bytes of each live file for a "
+             "partial replay (e.g. 25000000 ~= 25 MB).  "
+             " -1 — treat live files like rotated ones (no special "
+             "handling). Safe on spine builds carrying the "
+             "HandlerView three-phase cleanLog fix.",
+    )
+    p.add_argument(
         "--perf", action=argparse.BooleanOptionalAction, default=True,
         help="Enable the perf samplers behind the Flame panel: on-CPU "
              "(perf record), off-CPU (offcputime-bpfcc), page-fault, "
@@ -131,6 +147,15 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         help="Override the static-asset directory. Default: search "
              "$SMARTMET_WEBMON_ASSETS, then sibling share/smartmet/"
              "webmon/, then /usr/share/smartmet/webmon/.",
+    )
+    p.add_argument(
+        "--country-db", default=None, metavar="PATH",
+        help="Path to a directory of RIR delegated-stats files (or a "
+             "single concatenated file) for IP→country lookup, used by "
+             "the IP Flow panel's hot-IP labels and the Countries "
+             "panel. When unset, smwebmon searches "
+             "/var/lib/smartmet-monitor/ then /tmp/smartmet-rir/. The "
+             "country-aware UI hides itself if no files are found.",
     )
     return p.parse_args(argv)
 
@@ -220,6 +245,23 @@ async def _run(args: argparse.Namespace) -> int:
     _check_recent_oom()
     set_history_minutes(args.history_minutes)
     store = Store()
+
+    # Country DB load — best-effort. Missing files just disable the
+    # country-aware UI (the IP Flow rim labels lose the cc suffix and
+    # the Countries panel renders an empty-state message).
+    from smartmet_top.sources.geo import CountryDB, discover_db_files
+    db_paths = discover_db_files(args.country_db)
+    if db_paths:
+        cdb = CountryDB()
+        cdb.load(db_paths)
+        if cdb:
+            store.country_db = cdb
+            sys.stderr.write(
+                f"smwebmon: country DB loaded from {len(db_paths)} "
+                f"file(s), {len(cdb.v4_starts) + len(cdb.v6_starts)} "
+                f"netblocks\n"
+            )
+
     log_paths = _expand_logs(args)
     admin_urls = _parse_admin_urls(args.admin_url)
     if not admin_urls and not args.no_admin:
@@ -274,10 +316,15 @@ async def _run(args: argparse.Namespace) -> int:
         )
         import time as _time
         _replay_t0 = _time.monotonic()
+        # CLI maps:  -1 -> None  (treat live like rotated),
+        #             0 -> 0     (skip live, default),
+        #            >0 -> tail-cap
+        _live_arg = args.replay_live_bytes
         await replay_logs(
             store, log_paths,
             replay_bytes=args.replay_bytes,
             include_rotated=args.include_rotated,
+            max_live_bytes=None if _live_arg < 0 else _live_arg,
         )
         sys.stderr.write(
             f"smwebmon: replay done in "

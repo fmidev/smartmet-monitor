@@ -11,4 +11,4 @@ optional ``detail`` / ``chart`` methods on the corresponding
 ``smartmet_top.snapshots`` module.
 """
 
-__version__ = "26.5.2"
+__version__ = "26.5.20"

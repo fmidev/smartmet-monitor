@@ -29,7 +29,7 @@ SYSCTLDIR ?= /usr/lib/sysctl.d
 MODLOADDIR ?= /usr/lib/modules-load.d
 
 .PHONY: all install uninstall clean check rpm install-webmon \
-        uninstall-webmon webmon-rpm rpms _stage-tarball
+        uninstall-webmon rpms _stage-tarball
 
 all:
 	@echo "smartmet-monitor is a no-build package. Use 'make install' or 'make rpm'."
@@ -125,10 +125,24 @@ install-webmon:
 	install -m 0644 share/modules-load.d/smartmet-perf.conf \
 	    $(DESTDIR)$(MODLOADDIR)/smartmet-perf.conf
 	install -m 0644 doc/man/smwebmon.1 $(MANDIR)/smwebmon.1
+	# RIR delegated-stats files — IP→country lookup for the
+	# Countries panel and the IP Flow rim labels. Bundled with
+	# the RPM during the test phase; long-term replaced by an
+	# explicit refresh mechanism (a daily timer + curl, or
+	# operator-driven). Skip the install if the dir is absent so
+	# a contributor without the snapshot can still build the RPM.
+	if [ -d share/smartmet/country-db ]; then \
+	    install -d $(SHAREDIR)/country-db; \
+	    for f in share/smartmet/country-db/delegated-*-extended-latest; do \
+	        [ -f "$$f" ] || continue; \
+	        install -m 0644 "$$f" $(SHAREDIR)/country-db/; \
+	    done; \
+	fi
 
 uninstall-webmon:
 	rm -f $(BINDIR)/smwebmon
 	rm -rf $(SITEDIR_WEBMON) $(WEBMON_ASSET_DIR)
+	rm -rf $(SHAREDIR)/country-db
 	rm -f $(DESTDIR)$(UNITDIR)/smartmet-webmon.service
 	rm -f $(DESTDIR)$(SYSCONFDIR)/sysconfig/smartmet-webmon
 	rm -rf $(DESTDIR)$(SYSCONFDIR)/smartmet-webmon
@@ -427,7 +441,107 @@ check:
 	        "malloc_recent_stacks":   lambda self, pid: [], \
 	    }); \
 	    _af = analyze(_AStore(), 1); \
-	    assert any(f.detector_id == "request-regex-compile" and f.severity == SEV_HIGH for f in _af), _af'
+	    assert any(f.detector_id == "request-regex-compile" and f.severity == SEV_HIGH for f in _af), _af; \
+	    from smartmet_top.snapshots.ipflow import IPFlowSnapshot, angle_for_ip, _ip_to_int; \
+	    assert _ip_to_int("0.0.0.0") == 0 and _ip_to_int("255.255.255.255") == 0xFFFFFFFF; \
+	    assert _ip_to_int("1.2.3.4") == ((1<<24)|(2<<16)|(3<<8)|4); \
+	    assert _ip_to_int("-") == 0 and _ip_to_int("nonsense") == 0; \
+	    assert angle_for_ip("0.0.0.0") == 0.0; \
+	    _a1 = angle_for_ip("10.0.0.1"); _a2 = angle_for_ip("10.0.0.2"); \
+	    assert 0.0 < _a2 - _a1 < 1.0, "/24 neighbours must sit at adjacent angles"; \
+	    _stf = Store(); \
+	    _t0 = 1700000000.0; \
+	    _stf.record_request(ts=_t0+1, url="/a", dur_ms=10, nbytes=100, status=200, apikey="-", ip="1.2.3.4"); \
+	    _stf.record_request(ts=_t0+2, url="/b", dur_ms=20, nbytes=200, status=200, apikey="-", ip="1.2.3.4"); \
+	    _stf.record_request(ts=_t0+3, url="/c", dur_ms=30, nbytes=300, status=500, apikey="-", ip="5.6.7.8"); \
+	    _stf.record_request(ts=_t0+4, url="/d", dur_ms=40, nbytes=400, status=200, apikey="-"); \
+	    _tl = IPFlowSnapshot.timeline(_stf, minutes=60); \
+	    assert _tl["minute_step"] == 60 and len(_tl["buckets"]) == 1 and _tl["buckets"][0]["reqs"] == 4 and _tl["buckets"][0]["bytes"] == 1000, _tl; \
+	    _w = IPFlowSnapshot.window(_stf, start_ts=_t0, seconds=60, top_n=0); \
+	    assert len(_w["requests"]) == 3, _w; \
+	    assert sorted(_w["ips"].keys()) == ["1.2.3.4", "5.6.7.8"], _w["ips"]; \
+	    assert _w["ips"]["1.2.3.4"]["count"] == 2 and _w["ips"]["1.2.3.4"]["bytes"] == 300; \
+	    assert abs(_w["ips"]["1.2.3.4"]["angle"] - angle_for_ip("1.2.3.4")) < 1e-9; \
+	    _w2 = IPFlowSnapshot.window(_stf, start_ts=_t0, seconds=60, top_n=1); \
+	    assert sorted(set(r["ip"] for r in _w2["requests"])) == ["1.2.3.4"], "top_n=1 keeps only the busiest IP"; \
+	    assert sorted(_w2["ips"].keys()) == ["1.2.3.4", "5.6.7.8"], "summary still complete"; \
+	    from smartmet_webmon.handlers import ipflow_timeline as _itl, ipflow_window as _iwd; \
+	    _st_t, _b_t = _itl(_stf, {"minutes": "60"}); \
+	    assert _st_t == 200 and _b_t["minute_step"] == 60 and _b_t["buckets"][0]["reqs"] == 4; \
+	    _st_w, _b_w = _iwd(_stf, {"start": str(_t0), "seconds": "60"}); \
+	    assert _st_w == 200 and len(_b_w["requests"]) == 3, (_st_w, _b_w); \
+	    _st_w2, _b_w2 = _iwd(_stf, {"start": "abc"}); \
+	    assert _st_w2 == 400, (_st_w2, _b_w2); \
+	    _stf2 = Store(); \
+	    _stf2.record_request(ts=_t0+1, url="/a", dur_ms=10, nbytes=100, status=200, apikey="-", source_label="wms", ip="1.2.3.4"); \
+	    _stf2.record_request(ts=_t0+2, url="/b", dur_ms=20, nbytes=200, status=200, apikey="-", source_label="wms", ip="1.2.3.5"); \
+	    _stf2.record_request(ts=_t0+3, url="/c", dur_ms=30, nbytes=300, status=200, apikey="-", source_label="timeseries", ip="1.2.3.6"); \
+	    assert sorted(_stf2.ipflow_sources()) == ["timeseries", "wms"], _stf2.ipflow_sources(); \
+	    _all = IPFlowSnapshot.window(_stf2, start_ts=_t0, seconds=60); \
+	    assert len(_all["requests"]) == 3 and all(r["src"] in ("wms","timeseries") for r in _all["requests"]); \
+	    _wms = IPFlowSnapshot.window(_stf2, start_ts=_t0, seconds=60, source="wms"); \
+	    assert len(_wms["requests"]) == 2 and all(r["src"] == "wms" for r in _wms["requests"]); \
+	    _ts = IPFlowSnapshot.window(_stf2, start_ts=_t0, seconds=60, source="timeseries"); \
+	    assert len(_ts["requests"]) == 1 and _ts["requests"][0]["src"] == "timeseries"; \
+	    _tlall = IPFlowSnapshot.timeline(_stf2, minutes=60); \
+	    assert _tlall["sources"] == ["timeseries", "wms"] and _tlall["buckets"][0]["reqs"] == 3; \
+	    _tlwms = IPFlowSnapshot.timeline(_stf2, minutes=60, source="wms"); \
+	    assert _tlwms["buckets"][0]["reqs"] == 2; \
+	    _tlnone = IPFlowSnapshot.timeline(_stf2, minutes=60, source="missing"); \
+	    assert _tlnone["buckets"] == []; \
+	    _stsh, _btsh = _itl(_stf2, {"source": "wms"}); \
+	    assert _stsh == 200 and _btsh["source"] == "wms"; \
+	    _swh, _bwh = _iwd(_stf2, {"start": str(_t0), "source": "wms"}); \
+	    assert _swh == 200 and len(_bwh["requests"]) == 2; \
+	    from smartmet_webmon.handlers import panels as _panels_h; \
+	    _ps_st, _ps_b = _panels_h(_stf, {}); \
+	    assert any(p["id"] == "ipflow" for p in _ps_b["panels"]), _ps_b; \
+	    _idx = open("share/smartmet/webmon/index.html").read(); \
+	    assert "ipflow.js" in _idx, "ipflow.js must be loaded by index.html"; \
+	    _ifjs = open("share/smartmet/webmon/ipflow.js").read(); \
+	    assert "smIPFlow" in _ifjs and "IPFlowAnimator" in _ifjs, "ipflow.js must export smIPFlow"; \
+	    from smartmet_top.sources.geo import CountryDB, parse_delegated, _ipv4_to_int, _ipv6_to_int; \
+	    assert _ipv4_to_int("0.0.0.0") == 0 and _ipv4_to_int("255.255.255.255") == 0xFFFFFFFF; \
+	    assert _ipv4_to_int("256.0.0.0") is None and _ipv4_to_int("a.b.c.d") is None; \
+	    assert _ipv6_to_int("::1") == 1 and _ipv6_to_int("::") == 0; \
+	    assert _ipv6_to_int("2001:db8::") == ((0x2001 << 112) | (0xdb8 << 96)); \
+	    assert _ipv6_to_int("garbage::xx") is None; \
+	    _sample = chr(10).join(["2|x|0|0|0|0|+0000", "x|*|ipv4|*|0|summary", "x|FI|ipv4|193.166.0.0|65536|19920510|allocated", "x|US|ipv4|3.0.0.0|256|19920521|allocated", "x|FI|ipv4|10.10.10.10|10|20200101|reserved", "x|JP|ipv6|2001:db8::|32|20200101|allocated", ""]); \
+	    _recs = list(parse_delegated(_sample)); \
+	    _expected = sorted([(4, 0xC1A60000, 0xC1A6FFFF, "FI"), (4, 0x03000000, 0x030000FF, "US"), (6, 0x20010DB8 << 96, ((0x20010DB8 + 1) << 96) - 1, "JP")]); \
+	    assert sorted(_recs) == _expected, _recs; \
+	    import tempfile as _tf, os as _os; \
+	    _tmp = _tf.NamedTemporaryFile("w", prefix="delegated-", suffix="-extended-latest", delete=False); \
+	    _tmp.write(_sample); _tmp.close(); \
+	    _cdb = CountryDB(); _cdb.load([_tmp.name]); \
+	    assert _cdb.lookup("193.166.1.1") == "FI", _cdb.lookup("193.166.1.1"); \
+	    assert _cdb.lookup("3.0.0.5") == "US"; \
+	    assert _cdb.lookup("10.10.10.10") == "??", "reserved entries are skipped"; \
+	    assert _cdb.lookup("127.0.0.1") == "??"; \
+	    assert _cdb.lookup("2001:db8::1") == "JP"; \
+	    assert bool(_cdb); \
+	    _os.unlink(_tmp.name); \
+	    from smartmet_top.snapshots.countries import CountriesSnapshot; \
+	    _stc = Store(); \
+	    assert CountriesSnapshot.status(_stc)["enabled"] is False; \
+	    assert CountriesSnapshot.timeline(_stc)["series"] == []; \
+	    _stc.country_db = _cdb; \
+	    _t1 = 1700000060.0; \
+	    _stc.record_request(ts=_t1, url="/", dur_ms=1, nbytes=100, status=200, apikey="-", ip="193.166.1.1"); \
+	    _stc.record_request(ts=_t1, url="/", dur_ms=2, nbytes=200, status=500, apikey="-", ip="3.0.0.5"); \
+	    _stc.record_request(ts=_t1, url="/", dur_ms=3, nbytes=300, status=200, apikey="-", ip="3.0.0.6"); \
+	    _ct = CountriesSnapshot.table(_stc, minutes=60); \
+	    assert _ct["rows"][0]["cc"] in ("US", "FI") and _ct["rows"][0]["reqs"] >= 1, _ct["rows"]; \
+	    assert any(r["cc"] == "US" and r["reqs"] == 2 for r in _ct["rows"]); \
+	    _ctl = CountriesSnapshot.timeline(_stc, minutes=60, top_n=8); \
+	    _labels = sorted(s["label"] for s in _ctl["series"]); \
+	    assert "US" in _labels and "FI" in _labels, _labels; \
+	    from smartmet_webmon.handlers import countries_status as _cs, countries_table as _ctab, countries_timeline as _ctlh; \
+	    assert _cs(_stc, {})[1]["enabled"]; \
+	    assert _ctab(_stc, {})[0] == 200; \
+	    assert _ctlh(_stc, {})[0] == 200; \
+	    _ipw = IPFlowSnapshot.window(_stc, start_ts=_t1 - 30, seconds=60); \
+	    assert _ipw["ips"]["193.166.1.1"]["cc"] == "FI" and _ipw["ips"]["3.0.0.5"]["cc"] == "US", _ipw["ips"]'
 	$(PYTHON) -m py_compile smartmet_top/*.py smartmet_top/*/*.py
 	$(PYTHON) -m py_compile smartmet_webmon/*.py
 	$(PYTHON) -m py_compile share/smartmet/bperf.py
@@ -447,22 +561,22 @@ check:
 clean:
 	find . -name __pycache__ -prune -exec rm -rf {} +
 
-# Build RPM(s) from HEAD. Uses ~/.rpmmacros for %_topdir, matching
+# Build the RPMs from HEAD. Uses ~/.rpmmacros for %_topdir, matching
 # other smartmet-* repos in this hub (e.g. macgyver, spine).
 #
-# Both spec files share the same Source0: tarball, so `rpmbuild -tb`
-# refuses (it requires exactly one spec inside the tarball). Instead
-# we stage the tarball in rpm's %_sourcedir once per `make` invocation
-# and then call `rpmbuild -bb <spec>` per spec — the same flow common
-# in multi-subpackage builds elsewhere in the SmartMet ecosystem.
+# smartmet-monitor.spec produces two packages: the main smartmet-monitor
+# RPM (smtop, bstat-family, shared library, docs) and the optional
+# smartmet-webmon subpackage RPM (smwebmon daemon, browser assets,
+# systemd unit). They were two separate specs in earlier releases;
+# merging them into one spec means `rpmbuild -bb smartmet-monitor.spec`
+# emits both RPMs from a single build, the standard subpackage flow.
 NAME = smartmet-monitor
 VERSION = $(shell sed -n 's/^__version__ = "\(.*\)"/\1/p' smartmet_top/__init__.py)
 TARBALL = $(NAME)-$(VERSION).tar.gz
 
 # Internal: build the source tarball and copy it into %_sourcedir.
 # Phony so it always runs, but make still deduplicates the call when
-# multiple downstream targets list it (so `make rpms` archives HEAD
-# exactly once, not three times).
+# multiple downstream targets list it.
 _stage-tarball:
 	rm -f $(TARBALL)
 	git archive --format=tar.gz --prefix=$(NAME)-$(VERSION)/ HEAD \
@@ -475,13 +589,8 @@ rpm: clean $(NAME).spec _stage-tarball
 	rpmbuild -bb $(NAME).spec
 	rm -f $(TARBALL)
 
-webmon-rpm: clean smartmet-webmon.spec _stage-tarball
-	rpmbuild -bb smartmet-webmon.spec
-	rm -f $(TARBALL)
-
-# Build both RPMs in a single make invocation. Shared dependencies
-# (clean, _stage-tarball) run once thanks to make's DAG; the local
-# TARBALL may be removed by the first sub-target before the second
-# runs, but the %_sourcedir copy (placed by _stage-tarball) persists,
-# so rpmbuild -bb still finds it.
-rpms: rpm webmon-rpm
+# Historic alias kept so existing operator workflows / CI scripts
+# that say `make rpms` continue to work. The single spec now produces
+# both RPMs from one rpmbuild invocation, so `rpms` simply forwards
+# to `rpm`.
+rpms: rpm

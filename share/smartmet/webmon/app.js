@@ -2198,6 +2198,400 @@
     }
   })();
 
+  // -- IPFlow -------------------------------------------------------
+
+  PANELS.ipflow = (function () {
+    const ps = state.panels.ipflow = {
+      mode: "live",            // "live" | "scrub" | "paused"
+      historyMinutes: 60,      // timeline X-axis span
+      topN: 50,                // server-side IP filter
+      layout: "numeric",       // "numeric" | "spread"
+      speed: 60,               // playback speed multiplier (scrub)
+      scrubStart: null,        // epoch seconds (only valid in scrub mode)
+      source: "",              // "" = all sources
+      activeBtn: "live",       // which preset is "lit"
+    };
+    let reqsCanvas, bytesCanvas, reqsCursor, bytesCursor, topoCanvas;
+    let animator, statusEl, legendEl, sourceSel;
+    let _knownSources = [];
+
+    function _setLive() {
+      ps.mode = "live";
+      ps.activeBtn = "live";
+      ps.scrubStart = null;
+      if (animator) {
+        animator.clearReplay();
+        animator.setLive();
+      }
+      _updateButtonStates();
+      _refresh().catch(showError);
+    }
+
+    function _replay(secondsBack) {
+      const start = (Date.now() / 1000) - secondsBack;
+      ps.activeBtn = secondsBack === 86400 ? "24h" : "1h";
+      _startScrub(start);
+    }
+
+    function _startScrub(t) {
+      ps.mode = "scrub";
+      ps.scrubStart = t;
+      if (animator) {
+        animator.clearReplay();
+        animator.startScrub(t, ps.speed);
+      }
+      _updateButtonStates();
+      _refresh().catch(showError);
+    }
+
+    function _togglePause() {
+      if (!animator) return;
+      if (ps.mode === "paused") {
+        ps.mode = "scrub";
+        ps.activeBtn = ps.scrubStart != null ? null : "live";
+        animator.resume();
+      } else {
+        ps.mode = "paused";
+        ps.activeBtn = "pause";
+        animator.pause();
+      }
+      _updateButtonStates();
+      _updateStatus();
+    }
+
+    function _onCursorEvent(e) {
+      ps.activeBtn = null;     // clicked-on-timeline scrub: no preset lit
+      _startScrub(e.detail.t);
+    }
+
+    function _updateButtonStates() {
+      const map = {
+        "live":  state.panels.ipflow.btnLive,
+        "1h":    state.panels.ipflow.btn1h,
+        "24h":   state.panels.ipflow.btn24h,
+        "pause": state.panels.ipflow.btnPause,
+      };
+      for (const k in map) {
+        if (map[k]) map[k].classList.toggle("active", ps.activeBtn === k);
+      }
+    }
+
+    function _populateSources(list) {
+      // Re-render the dropdown only if the list of sources actually
+      // changed; otherwise it'd reset the user's mid-selection focus
+      // on every poll. Always include "" / all as the first option.
+      const incoming = JSON.stringify(list || []);
+      if (incoming === JSON.stringify(_knownSources)) return;
+      _knownSources = list ? list.slice() : [];
+      if (!sourceSel) return;
+      const cur = ps.source;
+      sourceSel.innerHTML = "";
+      const optAll = document.createElement("option");
+      optAll.value = ""; optAll.textContent = "all";
+      sourceSel.appendChild(optAll);
+      for (const s of _knownSources) {
+        const o = document.createElement("option");
+        o.value = s; o.textContent = s;
+        sourceSel.appendChild(o);
+      }
+      // Preserve the user's selection if still present, otherwise
+      // fall back to "all".
+      sourceSel.value =
+        (_knownSources.includes(cur) ? cur : "");
+      if (sourceSel.value !== cur) ps.source = sourceSel.value;
+    }
+
+    function _updateStatus() {
+      if (!statusEl) return;
+      if (!animator) { statusEl.textContent = ""; return; }
+      if (ps.mode === "paused") { statusEl.textContent = "paused"; return; }
+      if (ps.mode === "scrub") {
+        const ph = animator.playhead;
+        const t = new Date(ph * 1000).toTimeString().slice(0, 8);
+        statusEl.textContent = `scrub @ ${t}  ${ps.speed}×`;
+      } else {
+        statusEl.textContent = "live";
+      }
+    }
+
+    function _onPlayhead(ph) {
+      if (reqsCursor && reqsCanvas) {
+        smIPFlow.positionCursor(reqsCursor, reqsCanvas, ph);
+      }
+      if (bytesCursor && bytesCanvas) {
+        smIPFlow.positionCursor(bytesCursor, bytesCanvas, ph);
+      }
+      _updateStatus();
+      // Transition out of scrub when the playhead catches up to
+      // the live position (wallclock minus the live lag), so the
+      // cursor doesn't jump backwards by LAG seconds when modes
+      // switch. Threshold matches LIVE_LAG in ipflow.js.
+      if (ps.mode === "scrub") {
+        const liveEdge = (Date.now() / 1000) - 10;
+        if (ph >= liveEdge) _setLive();
+      }
+    }
+
+    return {
+      title: "IP Flow",
+      init(host) {
+        host.replaceChildren();
+        const panel = el("section", { class: "panel" });
+
+        const ctrls = el("div", { class: "panel-controls" },
+          el("span", { class: "panel-title" }, "IP Flow"),
+          el("label", null, "service",
+            (sourceSel = (function () {
+              const s = el("select", { class: "control",
+                                          id: "ipflow-source" });
+              s.addEventListener("change", () => {
+                ps.source = s.value;
+                _refresh().catch(showError);
+              });
+              // Single "all" option until the first /api/ipflow/timeline
+              // response replaces it with the live source list.
+              s.appendChild(el("option", { value: "" }, "all"));
+              return s;
+            })())),
+          el("label", null, "history",
+            selectInput("ipflow-hist", String(ps.historyMinutes),
+              [["15","15m"],["60","1h"],["360","6h"],["1440","24h"]].map(
+                ([v,l]) => ({value: v, label: l})),
+              v => { ps.historyMinutes = +v; _refresh().catch(showError); })),
+          el("label", null, "speed",
+            selectInput("ipflow-speed", String(ps.speed),
+              [["1","1×"],["10","10×"],["60","60×"],["300","300×"],["1800","1800×"]]
+                .map(([v,l]) => ({value: v, label: l})),
+              v => {
+                ps.speed = +v;
+                if (animator) animator.setSpeed(ps.speed);
+                _updateStatus();
+              })),
+          el("label", null, "layout",
+            selectInput("ipflow-layout", ps.layout,
+              [["numeric","numeric"],["spread","spread"]].map(
+                ([v,l]) => ({value: v, label: l})),
+              v => {
+                ps.layout = v;
+                if (animator) animator.setLayout(v);
+              })),
+          el("label", null, "top",
+            selectInput("ipflow-top", String(ps.topN),
+              [["10","10"],["25","25"],["50","50"],["100","100"],["0","all"]].map(
+                ([v,l]) => ({value: v, label: l})),
+              v => { ps.topN = +v; _refresh().catch(showError); })),
+          (state.panels.ipflow.btnLive = el("button",
+            { class: "btn", "data-mode-btn": "live",
+              events: { click: _setLive } }, "Live")),
+          (state.panels.ipflow.btn1h = el("button",
+            { class: "btn", "data-mode-btn": "replay-3600",
+              events: { click: () => _replay(3600) } }, "Replay 1h")),
+          (state.panels.ipflow.btn24h = el("button",
+            { class: "btn", "data-mode-btn": "replay-86400",
+              events: { click: () => _replay(86400) } }, "Replay 24h")),
+          (state.panels.ipflow.btnPause = el("button",
+            { class: "btn", "data-mode-btn": "paused",
+              events: { click: _togglePause } }, "Pause")),
+          (statusEl = el("span", { class: "muted ipflow-status" })),
+        );
+        panel.appendChild(ctrls);
+
+        const chartRow = el("div", { class: "ipflow-charts" });
+        reqsCanvas = el("canvas", { class: "ipflow-chart" });
+        bytesCanvas = el("canvas", { class: "ipflow-chart" });
+        reqsCursor = el("div", { class: "ipflow-cursor" });
+        bytesCursor = el("div", { class: "ipflow-cursor" });
+        chartRow.appendChild(el("div", { class: "ipflow-chart-wrap" },
+          el("div", { class: "muted ipflow-chart-title" }, "requests / minute"),
+          reqsCanvas, reqsCursor));
+        chartRow.appendChild(el("div", { class: "ipflow-chart-wrap" },
+          el("div", { class: "muted ipflow-chart-title" }, "bytes / minute"),
+          bytesCanvas, bytesCursor));
+        panel.appendChild(chartRow);
+
+        legendEl = el("div", { class: "ipflow-legend" });
+        smIPFlow.buildLegend(legendEl);
+        panel.appendChild(legendEl);
+
+        topoCanvas = el("canvas", { class: "ipflow-topo" });
+        panel.appendChild(topoCanvas);
+
+        host.appendChild(panel);
+
+        smIPFlow.attachTimelineClick(reqsCanvas);
+        smIPFlow.attachTimelineClick(bytesCanvas);
+        reqsCanvas.addEventListener("ipflow-cursor", _onCursorEvent);
+        bytesCanvas.addEventListener("ipflow-cursor", _onCursorEvent);
+
+        animator = smIPFlow.IPFlowAnimator(topoCanvas, {
+          onPlayhead: _onPlayhead,
+        });
+        animator.setLayout(ps.layout);
+        ps.activeBtn = "live";
+        // The sourceSel was just rebuilt fresh with only "all";
+        // clear the closure-scoped dedup cache so the next
+        // /api/ipflow/timeline response actually rebuilds the
+        // dropdown options. Without this, navigating away from IP
+        // Flow and back would leave the dropdown stuck at "all"
+        // because the cached list still matched the server's reply.
+        _knownSources = [];
+        _updateButtonStates();
+        _updateStatus();
+      },
+      async refresh() { await _refresh(); },
+    };
+
+    async function _refresh() {
+      const tl = await getJSON("/api/ipflow/timeline",
+        { minutes: ps.historyMinutes, source: ps.source });
+      _populateSources(tl.sources || []);
+      const buckets = tl.buckets || [];
+      smIPFlow.drawTimeline(reqsCanvas, buckets, {
+        key: "reqs", fmtY: fmtCount,
+      });
+      smIPFlow.drawTimeline(bytesCanvas, buckets, {
+        key: "bytes", fmtY: fmtBytes,
+        lineColor: "#f5b041",
+        fillColor: "rgba(245, 176, 65, 0.18)",
+      });
+
+      if (ps.mode === "paused") { _updateStatus(); return; }
+
+      let win;
+      const baseParams = { top_n: ps.topN, source: ps.source };
+      if (ps.mode === "scrub" && ps.scrubStart != null) {
+        const ph = animator ? animator.playhead : ps.scrubStart;
+        const seconds = Math.max(60,
+          Math.ceil((Date.now() / 1000) - ph));
+        win = await getJSON("/api/ipflow/window",
+          Object.assign({ start: ph, seconds }, baseParams));
+        if (animator) {
+          animator.setIPs(win.ips || {});
+          animator.addRecords(win.requests || [], "scrub");
+        }
+      } else {
+        win = await getJSON("/api/ipflow/window",
+          Object.assign({ seconds: 60 }, baseParams));
+        if (animator) {
+          animator.setIPs(win.ips || {});
+          animator.addRecords(win.requests || [], "live");
+        }
+      }
+      _updateStatus();
+    }
+  })();
+
+  // -- Countries ----------------------------------------------------
+
+  PANELS.countries = (function () {
+    const ps = state.panels.countries = {
+      minutes: 60, topN: 12,
+    };
+    let chartCanvas, tbody, hostEl, statusEl, emptyEl;
+    return {
+      title: "Countries",
+      init(host) {
+        hostEl = host;
+        host.replaceChildren();
+        const panel = el("section", { class: "panel" });
+
+        const ctrls = el("div", { class: "panel-controls" },
+          el("span", { class: "panel-title" }, "Countries"),
+          el("label", null, "history",
+            selectInput("countries-mins", String(ps.minutes),
+              [["15","15m"],["60","1h"],["360","6h"],["1440","24h"]].map(
+                ([v,l]) => ({value: v, label: l})),
+              v => { ps.minutes = +v; refresh(); })),
+          el("label", null, "top",
+            selectInput("countries-top", String(ps.topN),
+              [["6","6"],["8","8"],["12","12"],["20","20"],["50","50"]].map(
+                ([v,l]) => ({value: v, label: l})),
+              v => { ps.topN = +v; refresh(); })),
+          (statusEl = el("span", { class: "muted ipflow-status" })),
+        );
+        panel.appendChild(ctrls);
+
+        chartCanvas = el("canvas", { class: "countries-chart" });
+        panel.appendChild(chartCanvas);
+
+        const table = el("table", { class: "data-table" },
+          el("thead", null, el("tr", null,
+            ...["country","reqs","bytes","err %","ips","top IPs"]
+              .map((h, i) => el("th",
+                { class: i === 0 ? "" : "num" }, h)))),
+          el("tbody"));
+        tbody = table.querySelector("tbody");
+        panel.appendChild(table);
+
+        emptyEl = el("div", { class: "panel-empty hidden" },
+          el("p", null, "No country database loaded."),
+          el("p", { class: "muted" },
+            "Pass --country-db PATH (or place RIR delegated-stats files "
+            + "under /var/lib/smartmet-monitor/) and restart smwebmon. "
+            + "Files are downloaded from each RIR's ftp.* server "
+            + "(apnic, ripe, arin, lacnic, afrinic)."));
+        panel.appendChild(emptyEl);
+
+        host.appendChild(panel);
+      },
+      async refresh() { await refresh(); },
+    };
+
+    async function refresh() {
+      const status = await getJSON("/api/countries/status");
+      if (!status.enabled) {
+        emptyEl.classList.remove("hidden");
+        chartCanvas.classList.add("hidden");
+        statusEl.textContent = "(no country DB)";
+        tbody.replaceChildren();
+        return;
+      }
+      emptyEl.classList.add("hidden");
+      chartCanvas.classList.remove("hidden");
+      statusEl.textContent =
+        `${status.netblocks_v4 + status.netblocks_v6} netblocks`;
+
+      const tl = await getJSON("/api/countries/timeline",
+        { minutes: ps.minutes, top_n: ps.topN });
+      const series = (tl.series || []).map(s => ({
+        label: s.label,
+        color: s.label === "other"
+                ? "rgba(155,175,198,0.55)"
+                : smChart.colorFor(s.label),
+        values: s.values,
+      }));
+      smChart.drawLineMulti(chartCanvas, series, {
+        fmtY: smChart.formatCount,
+        last_ts: tl.ts && tl.ts.length ? tl.ts[tl.ts.length - 1] : null,
+        step_seconds: 60,
+      });
+
+      const tab = await getJSON("/api/countries",
+        { minutes: ps.minutes, top_n: ps.topN });
+      const rows = tab.rows || [];
+      tbody.replaceChildren();
+      for (const r of rows) {
+        const topIpsHtml = (r.top_ips || []).map(t =>
+          `<span class="cc-ip">${escHtml(t.ip)} (${t.count})</span>`
+        ).join(" ");
+        const tr = el("tr", null,
+          el("td", null,
+            el("span", { class: "cc-dot",
+                          style: `background:${smChart.colorFor(r.cc)}` }),
+            r.cc),
+          el("td", { class: "num" }, fmtCount(r.reqs)),
+          el("td", { class: "num" }, fmtBytes(r.bytes)),
+          el("td", { class: "num " + errColor(r.err_pct) },
+            r.err_pct.toFixed(2)),
+          el("td", { class: "num" }, String(r.ips)),
+          el("td", { class: "muted",
+                      html: topIpsHtml }),
+        );
+        tbody.appendChild(tr);
+      }
+    }
+  })();
+
   // =================================================================
   // boot, tab strip, polling
   // =================================================================
@@ -2260,12 +2654,54 @@
   }
 
   function tickActive() {
+    _refreshReplayBanner().catch(() => {});
     if (!state.active) return;
     const host = document.getElementById("panel-host");
     PANELS[state.active].refresh()
       .then(() => { setupCardCollapse(host); setIndicator("live", "live"); })
       .catch(e => showError(e));
     if (state.modalRefresh) state.modalRefresh().catch(showError);
+  }
+
+  // ---- Replay-progress banner ------------------------------------
+  //
+  // Polls /api/health every refresh tick; while replay.in_progress
+  // is true, surfaces a top-of-page strip with elapsed time and the
+  // file count. The dashboard's panels are still empty during this
+  // window because replay_logs is a single bulk_load that doesn't
+  // populate the store incrementally — operators were confused by
+  // panels showing "(no data)" for several seconds when an RPM
+  // upgrade restarted smwebmon mid-day.
+
+  async function _refreshReplayBanner() {
+    const el = document.getElementById("replay-banner");
+    if (!el) return;
+    let h;
+    try {
+      h = await getJSON("/api/health");
+    } catch (e) {
+      el.classList.add("hidden");
+      return;
+    }
+    const r = (h && h.replay) || {};
+    const txt = el.querySelector(".replay-text");
+    if (r.in_progress) {
+      el.classList.remove("hidden");
+      const elapsed = r.started_at
+        ? Math.max(0, Math.round(Date.now() / 1000 - r.started_at))
+        : 0;
+      const rotated = r.include_rotated ? " (incl. rotated)" : "";
+      const total = r.files_total || 0;
+      const done = r.files_done || 0;
+      const cur = r.current_file ? r.current_file.split("/").pop() : "";
+      let parts = [`Replaying logs${rotated}`];
+      if (total) parts.push(`${done} / ${total} files`);
+      if (cur) parts.push(`current: ${cur}`);
+      parts.push(`${elapsed}s elapsed`);
+      txt.textContent = parts.join(" — ");
+    } else {
+      el.classList.add("hidden");
+    }
   }
 
   function showError(e) {
@@ -2429,6 +2865,7 @@
       panels.some(p => p.id === parsed.panel) ? parsed.panel : "urls";
     activatePanel(initialPanel);
     _refreshTopology().catch(() => {});
+    _refreshReplayBanner().catch(() => {});
 
     // Periodically refresh the cluster list (alive counts in the
     // dropdown drift as backends come/go) without thrashing.

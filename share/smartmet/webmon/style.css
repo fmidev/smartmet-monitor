@@ -250,6 +250,12 @@ select, input[type="text"], input[type="search"] {
 }
 .btn:hover { background: var(--bg-row-hover); }
 .btn.toggle.on { color: var(--accent); border-color: var(--accent); }
+.btn.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--bg-row-hover);
+  font-weight: 600;
+}
 
 /* ---- tables ------------------------------------------------------------- */
 
@@ -673,4 +679,107 @@ canvas.chart {
   font-variant-numeric: tabular-nums;
 }
 .kv > .k { color: var(--fg-muted); }
+
+/* IP Flow panel — two timeline charts on top, topology canvas below. */
+.ipflow-charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 6px 0;
+}
+.ipflow-chart-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: relative;        /* anchor for the absolutely-positioned cursor */
+}
+.ipflow-chart-title { font-size: 0.85em; padding-left: 4px; }
+.ipflow-chart {
+  width: 100%;
+  height: 160px;
+  cursor: crosshair;
+  background: #11161d;
+  border-radius: 3px;
+}
+.ipflow-cursor {
+  position: absolute;
+  width: 1.5px;
+  background: #f5b041;
+  pointer-events: none;
+  display: none;
+  box-shadow: 0 0 4px rgba(245, 176, 65, 0.6);
+}
+.ipflow-topo {
+  width: 100%;
+  height: min(640px, 70vh);
+  background: #11161d;
+  border-radius: 3px;
+}
+.ipflow-status { margin-left: auto; font-variant-numeric: tabular-nums; }
+.ipflow-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6em;
+  margin: 6px 0 4px;
+  font-size: 0.85em;
+  color: var(--fg-muted, #cbd5e0);
+  font-variant-numeric: tabular-nums;
+}
+.ipflow-legend .lg-key { color: var(--fg-muted, #9aa6b2); }
+.ipflow-legend .lg-sep { color: var(--fg-dim, #5d6b7a); }
+.ipflow-legend .lg-swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+}
+.ipflow-legend .lg-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.ipflow-legend .lg-2xx { background: #58d68d; }
+.ipflow-legend .lg-3xx { background: #5dade2; }
+.ipflow-legend .lg-4xx { background: #f5b041; }
+.ipflow-legend .lg-5xx { background: #e74c3c; }
+
+/* Replay-in-progress banner. */
+.replay-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 6px 12px;
+  background: rgba(245, 176, 65, 0.12);
+  border-bottom: 1px solid rgba(245, 176, 65, 0.4);
+  color: #f5b041;
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
+.replay-spinner {
+  display: inline-block;
+  width: 12px; height: 12px;
+  border: 2px solid rgba(245, 176, 65, 0.25);
+  border-top-color: #f5b041;
+  border-radius: 50%;
+  animation: replay-spin 0.9s linear infinite;
+}
+@keyframes replay-spin { to { transform: rotate(360deg); } }
+
+/* Countries panel */
+.countries-chart {
+  width: 100%;
+  height: 200px;
+  background: #11161d;
+  border-radius: 3px;
+  margin: 6px 0 10px;
+}
+.cc-dot {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.cc-ip { font-size: 0.85em; margin-right: 0.5em; white-space: nowrap; }
 .kv > .v { text-align: right; }
