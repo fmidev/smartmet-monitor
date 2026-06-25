@@ -13,14 +13,29 @@
 
 %global _python3_sitelib %{python3_sitelib}
 
+# This package is built arch-specific (no `BuildArch: noarch`, see
+# below) purely to route it into the per-distro repos, but it contains
+# no compiled code. Suppress the empty debuginfo/debugsource
+# subpackages rpm would otherwise try to generate for an arch build —
+# without this the build fails with "Empty %%files file ...debugsourcefiles.list".
+%global debug_package %{nil}
+
 Name:           smartmet-monitor
-Version:        26.6.15
+Version:        26.6.25
 Release:        1%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
 Source0:        %{name}-%{version}.tar.gz
-BuildArch:      noarch
+# NOT noarch — deliberately. The payload is arch-independent
+# (pure-stdlib Python + Bash), but a noarch build lands in the single
+# shared `smartmet-open-noarch` repo that every distro reads from, so an
+# el8 build (which Requires python39 / python(abi) = 3.9) becomes a
+# candidate on RHEL 10 and fails to install there. Building arch-
+# specific routes each build into the existing per-distro x86_64 repos
+# that operators already consume, so el8 and el10 builds never collide.
+# Do not add `BuildArch: noarch` back without first splitting the noarch
+# repo per distro.
 
 BuildRequires:  python%{python3_pkgversion}
 BuildRequires:  python%{python3_pkgversion}-rpm-macros
@@ -61,7 +76,7 @@ Recommends:     bpftrace
 # their BPF C source at runtime via libclang against the in-tree
 # kernel headers at /lib/modules/$(uname -r)/build. They need
 # kernel-devel matching the *running* kernel — not just any
-# kernel-devel. A noarch RPM has no way to express that constraint:
+# kernel-devel. An RPM has no way to express that constraint:
 # `Requires: kernel-devel` resolves at install time on the latest
 # version dnf can find, which is routinely newer than what's running
 # (especially on hosts that haven't rebooted since their last kernel
@@ -350,6 +365,21 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Thu Jun 25 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.6.25-1.fmi
+- Build arch-specific instead of noarch (dropped `BuildArch: noarch`).
+  The payload is arch-independent, but a noarch build lands in the
+  single shared `smartmet-open-noarch` repo that every distro reads
+  from, so the el8 build — which Requires python39 / python(abi) = 3.9
+  — became a candidate on RHEL 10 and failed dependency resolution
+  there (no python39 / python3.9 on el10). Building per arch routes
+  each build into the existing per-distro x86_64 repos operators
+  already consume, so el8 and el10 builds never collide. The
+  per-distro `%%if 0%%{?rhel} == 8` python dependency logic is
+  unchanged; this just stops the el8 RPM from leaking cross-distro.
+- smartmet_top.__version__ / smartmet_webmon.__version__ bumped to
+  26.6.25 to track the spec Version (the Makefile names the tarball
+  from smartmet_top.__version__).
+
 * Mon Jun 15 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.6.15-1.fmi
 - bstat/bchart/burls/bkeys and smtop now ignore the size_t(-1) byte
   count (18446744073709551615 ≈ 2^64) that spine logs for chunked /
