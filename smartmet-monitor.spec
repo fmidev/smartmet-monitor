@@ -21,8 +21,8 @@
 %global debug_package %{nil}
 
 Name:           smartmet-monitor
-Version:        26.6.25
-Release:        1%{?dist}.fmi
+Version:        26.6.29
+Release:        2%{?dist}.fmi
 Summary:        Log analysis and live monitoring tools for SmartMet Server
 License:        MIT
 URL:            https://github.com/fmidev/smartmet-monitor
@@ -309,6 +309,8 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_bindir}/burls
 %{_bindir}/bstatus
 %{_bindir}/bkeys
+%{_bindir}/bwho
+%{_bindir}/bip
 %{_bindir}/bperf
 # Legacy compatibility aliases. These all call `bstat -i <X>` and
 # remain supported so existing operator workflows and documentation
@@ -327,6 +329,8 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/burls.1*
 %{_mandir}/man1/bstatus.1*
 %{_mandir}/man1/bkeys.1*
+%{_mandir}/man1/bwho.1*
+%{_mandir}/man1/bip.1*
 %{_mandir}/man1/bperf.1*
 %{_mandir}/man1/bstat1s.1*
 %{_mandir}/man1/bstat10s.1*
@@ -365,6 +369,26 @@ modprobe kheaders >/dev/null 2>&1 || :
 %{_mandir}/man1/smwebmon.1*
 
 %changelog
+* Mon Jun 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.6.29-2.fmi
+- New `bwho` and `bip` commands, siblings of `bkeys`: ranked top-N
+  tables grouping access-log traffic by the injected `who=<production>`
+  query parameter and by client IP respectively. `bwho` buckets
+  untagged requests as `(none)`; `bip --subnet` rolls IPs up to /24
+  (IPv4) or /64 (IPv6). All three now share one group-by engine
+  (`_bgroup`) and gained `4xx%` / `5xx%` error columns plus an `err`
+  sort key (4xx+5xx count), so `bkeys` output now carries those columns
+  too. These are entity views (no time axis) and complement
+  `grep … | bstat` for per-entity drill-down.
+
+* Mon Jun 29 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.6.29-1.fmi
+- bstat now breaks HTTP response codes out per time bucket: the single
+  `err%` column is replaced by `2xx% 3xx% 4xx% 5xx%` (each bucket's
+  response-code mix), and a `by class:` summary line under the `TOTAL`
+  row sums the whole log and lists any other class seen (e.g. a stray
+  1xx). Splitting 4xx from 5xx lets client errors (usually benign) be
+  read separately from server errors (worth investigating); the former
+  `err%` is recoverable as `4xx% + 5xx%`.
+
 * Thu Jun 25 2026 Mika Heiskanen <mika.heiskanen@fmi.fi> - 26.6.25-1.fmi
 - Build arch-specific instead of noarch (dropped `BuildArch: noarch`).
   The payload is arch-independent, but a noarch build lands in the

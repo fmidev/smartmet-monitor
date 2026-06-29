@@ -1,0 +1,56 @@
+.TH BIP 1 "2026-06-29" "smartmet-monitor" "SmartMet Server"
+.SH NAME
+bip \- top client IP addresses in a SmartMet access log
+.SH SYNOPSIS
+.B bip
+.RI [ \-n\  N ]
+.RI [ \-s\  reqs|ms|mb|err ]
+.RB [ \-\-subnet ]
+.RI [ LOG-FILE ]
+.SH DESCRIPTION
+.B bip
+groups access\-log entries by client IP (the first field of each log
+line) and prints the top
+.B N
+addresses sorted by the chosen metric. Each row shows request count,
+mean latency, the 4xx and 5xx error rates, total bandwidth in MB, and
+a horizontal bar scaled to the leading metric.
+.PP
+This is an entity view: rows are ranked by load and there is no time
+axis. To inspect one IP over time, grep it out and pipe to
+.BR bstat (1):
+.PP
+.RS
+.EX
+grep '^203.0.113.7 ' access.log | bstat \-i 10m
+.EE
+.RE
+.SH OPTIONS
+.TP
+.BI \-n \ N
+Number of IPs to show. Default
+.BR 20 .
+.TP
+.BI \-s \ SORT
+Sort column. One of
+.BR reqs ,\  ms ,\  mb ,\  err
+(err = 4xx+5xx error count). Default
+.BR ms .
+.TP
+.BR \-\-subnet ", " \-24
+Roll IPs up by network before grouping: IPv4 to
+.BR /24 ,
+IPv6 to
+.BR /64 .
+Use this to spot a misbehaving network rather than a single host.
+Compressed IPv6
+.B ::
+forms are approximated.
+.SH SEE ALSO
+.BR bstat (1),
+.BR bchart (1),
+.BR burls (1),
+.BR bstatus (1),
+.BR bkeys (1),
+.BR bwho (1),
+.BR smtop (1)

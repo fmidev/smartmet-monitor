@@ -34,9 +34,9 @@ MODLOADDIR ?= /usr/lib/modules-load.d
 all:
 	@echo "smartmet-monitor is a no-build package. Use 'make install' or 'make rpm'."
 
-BTOOLS = bstat bchart burls bstatus bkeys bperf
+BTOOLS = bstat bchart burls bstatus bkeys bwho bip bperf
 LEGACY = bstat1s bstat10s bstat1 bstat10 bstat60 bstat24
-MANPAGES = smtop.1 bstat.1 bchart.1 burls.1 bstatus.1 bkeys.1 bperf.1 \
+MANPAGES = smtop.1 bstat.1 bchart.1 burls.1 bstatus.1 bkeys.1 bwho.1 bip.1 bperf.1 \
            bstat1s.1 bstat10s.1 bstat1.1 bstat10.1 bstat60.1 bstat24.1
 
 install:

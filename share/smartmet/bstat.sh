@@ -8,6 +8,13 @@
 #   bstatus  - HTTP status code distribution; -i adds a per-class
 #              time-bucketed sparkline view
 #   bkeys    - top API keys
+#   bwho     - top productions by the injected who= query parameter
+#   bip      - top client IPs (-/--subnet rolls up by /24 or /64)
+#
+#   bkeys/bwho/bip share one group-by engine (_bgroup) and differ only
+#   in the field they group on. They are entity views (rows ranked by
+#   load, no time axis); to see one entity over time, grep it and pipe
+#   to bstat:  grep 'who=ecmwf_hres' access.log | bstat -i 10m
 #
 #   bmon     - live dashboard polling the admin plugin (cache + service stats)
 #
@@ -75,8 +82,11 @@ _bstat_parse() {
 # Usage: bstat [-i 1h] [-w 20] [log-file]
 #
 # Columns per time bucket:
-#   time | reqs | avg_ms | max_ms | avg_KB | MB_out | err% | 4 horizontal bars
-# Plus a total row and four horizontal sparklines beneath the table.
+#   time | reqs | avg_ms | max_ms | avg_KB | MB_out | 2xx% 3xx% 4xx% 5xx% | 4 bars
+# Plus a total row, an aggregate per-class status breakdown, and four
+# horizontal sparklines beneath the table. The four status-class columns
+# replace the old single err% column: 4xx% + 5xx% is the former err%,
+# split so client (4xx) and server (5xx) errors read separately.
 
 bstat() {
     _bstat_parse "$@"
@@ -153,17 +163,20 @@ EOF
         # negative) as 0 bytes. 2^53 (~9 PB) is far above any real response.
         if (bytes < 0 || bytes >= 2^53) bytes = 0
         status = $8 + 0
+        # Bucket the status into its HTTP class (200, 300, 400, 500, …)
+        # for the per-bucket class columns and the aggregate breakdown.
+        cls = int(status / 100) * 100
 
         count[t]++
         sumdur[t] += dur
         sumbytes[t] += bytes
         if (dur > maxdur[t]) maxdur[t] = dur
-        if (status >= 400) errors[t]++
+        clscount[t SUBSEP cls]++
 
         tot_count++
         tot_dur += dur
         tot_bytes += bytes
-        if (status >= 400) tot_err++
+        totcls[cls]++
     }
     END {
         # gather keys sorted by time (lexicographic == chronological for ISO-8601).
@@ -200,13 +213,14 @@ EOF
         # Sparkline width = bucket count in ASCII mode, ceil(n/2) in
         # Braille mode (2 buckets per cell).
         sw = ASCII ? n : int((n+1)/2)
-        printf "│ %-*s  %7s %8s %7s %8s %8s %5s  %-*s  %-*s  %-*s  %-*s\n",
-            DISPLEN, "time", "reqs", "avg_ms", "max_ms", "avg_KB", "MB_out", "err%",
+        printf "│ %-*s  %7s %8s %7s %8s %8s %5s %5s %5s %5s  %-*s  %-*s  %-*s  %-*s\n",
+            DISPLEN, "time", "reqs", "avg_ms", "max_ms", "avg_KB", "MB_out",
+            "2xx%", "3xx%", "4xx%", "5xx%",
             bwL, "requests", bwL, "latency", bwL, "size", bwL, "bandwidth"
         # separator
         printf "│ "
         for (i=0; i<DISPLEN; i++) printf "─"
-        printf "  %7s %8s %7s %8s %8s %5s  ", "───────", "────────", "───────", "────────", "────────", "─────"
+        printf "  %7s %8s %7s %8s %8s %5s %5s %5s %5s  ", "───────", "────────", "───────", "────────", "────────", "─────", "─────", "─────", "─────"
         for (i=0; i<bwL; i++) printf "─"
         printf "  "
         for (i=0; i<bwL; i++) printf "─"
@@ -221,39 +235,60 @@ EOF
             t = keys[i]
             avgd = sumdur[t] / count[t]
             avgb = sumbytes[t] / count[t]
-            err_pct = (errors[t] ? errors[t] : 0) / count[t] * 100
+            p2 = (clscount[t SUBSEP 200] + 0) / count[t] * 100
+            p3 = (clscount[t SUBSEP 300] + 0) / count[t] * 100
+            p4 = (clscount[t SUBSEP 400] + 0) / count[t] * 100
+            p5 = (clscount[t SUBSEP 500] + 0) / count[t] * 100
 
             b1 = vbar(count[t], gc, bwL)
             b2 = vbar(avgd, gd, bwL)
             b3 = vbar(avgb, gb, bwL)
             b4 = vbar(sumbytes[t], gB, bwL)
 
-            printf "│ %-*s  %7d %8.1f %7d %8.1f %8.2f %5.1f  %s  %s  %s  %s\n",
+            printf "│ %-*s  %7d %8.1f %7d %8.1f %8.2f %5.1f %5.1f %5.1f %5.1f  %s  %s  %s  %s\n",
                 DISPLEN, t TPAD,
                 count[t],
                 avgd,
                 maxdur[t],
                 avgb/1024,
                 sumbytes[t]/1048576,
-                err_pct,
+                p2, p3, p4, p5,
                 b1, b2, b3, b4
         }
 
         # separator
         printf "│ "
         for (i=0; i<DISPLEN; i++) printf "─"
-        printf "  %7s %8s %7s %8s %8s %5s\n",
-            "───────", "────────", "───────", "────────", "────────", "─────"
+        printf "  %7s %8s %7s %8s %8s %5s %5s %5s %5s\n",
+            "───────", "────────", "───────", "────────", "────────", "─────", "─────", "─────", "─────"
 
         if (tot_count > 0) {
-            printf "│ %-*s  %7d %8.1f %7s %8.1f %8.2f %5.1f\n",
+            printf "│ %-*s  %7d %8.1f %7s %8.1f %8.2f %5.1f %5.1f %5.1f %5.1f\n",
                 DISPLEN, "TOTAL",
                 tot_count,
                 tot_dur / tot_count,
                 "-",
                 (tot_bytes / tot_count) / 1024,
                 tot_bytes / 1048576,
-                tot_err / tot_count * 100
+                (totcls[200] + 0) / tot_count * 100,
+                (totcls[300] + 0) / tot_count * 100,
+                (totcls[400] + 0) / tot_count * 100,
+                (totcls[500] + 0) / tot_count * 100
+        }
+
+        # Aggregate per-class status breakdown across the whole log.
+        # Lists every class actually seen (so a stray 1xx still shows),
+        # unlike the fixed 2xx/3xx/4xx/5xx row columns above.
+        if (tot_count > 0) {
+            cc = 0
+            for (c in totcls) clsk[++cc] = c + 0
+            cn = asort(clsk, clsorted)
+            printf "│  by class:"
+            for (ci=1; ci<=cn; ci++) {
+                c = clsorted[ci]
+                printf "  %dxx %d (%.1f%%)", c/100, totcls[c], totcls[c]/tot_count*100
+            }
+            printf "\n"
         }
 
         # Sparklines.
@@ -1091,9 +1126,152 @@ EOF
 }
 
 # -----------------------------------------------------------------------------
-# bkeys: top API keys by request count and bandwidth
+# _bgroup: shared group-by engine behind bkeys / bwho / bip
 # -----------------------------------------------------------------------------
-# Usage: bkeys [-n 20] [-s reqs|ms|mb] [log-file]
+# Produces a ranked top-N table of one access-log entity. The three public
+# commands differ ONLY in which field they group on (the key extractor); all
+# aggregation, top-N selection, error columns and bar rendering live here.
+#
+# Args (positional):
+#   1 KEYMODE   apikey | ip | who   — which field becomes the grouping key
+#   2 TOP       show top N rows
+#   3 SORT      reqs | ms | mb | err — ranking metric (err = 4xx+5xx count)
+#   4 SUBNET    0|1 — ip mode only: roll IPs up to /24 (v4) or /64 (v6)
+#   5 LABEL     column header for the key (e.g. apikey, who, ip, subnet)
+#   6 TITLE     plural noun for the heading (e.g. "API keys", "who= values")
+#   7 CMD       command name, used in error messages
+#   8.. files   log files (none → stdin)
+#
+# This is an entity view: rows are ranked by load, there is no time axis.
+# To see one entity's behaviour over time, grep it out and pipe to bstat,
+# e.g.  grep 'who=ecmwf_hres' access.log | bstat -i 10m
+_bgroup() {
+    local keymode="$1" top="$2" sort_by="$3" subnet="$4" label="$5" title="$6" cmd="$7"
+    shift 7
+
+    gawk -v KEYMODE="$keymode" -v TOP="$top" -v SORT="$sort_by" \
+         -v SUBNET="$subnet" -v LABEL="$label" -v TITLE="$title" -v CMD="$cmd" '
+    BEGIN { FULL = "▄" }
+    {
+        k = groupkey()
+        dur = $10 + 0
+        bytes = $11 + 0
+        # See bstat: ignore the size_t(-1) sentinel spine logs for
+        # chunked/streamed responses (would otherwise swamp byte sums).
+        if (bytes < 0 || bytes >= 2^53) bytes = 0
+        status = $8 + 0
+        cls = int(status / 100) * 100
+        count[k]++
+        sumdur[k]  += dur
+        sumbytes[k] += bytes
+        if      (cls == 400) c4[k]++
+        else if (cls == 500) c5[k]++
+    }
+    END {
+        n = 0
+        for (k in count) {
+            keys[n] = k
+            if      (SORT == "reqs") val[n] = count[k]
+            else if (SORT == "ms")   val[n] = sumdur[k]
+            else if (SORT == "mb")   val[n] = sumbytes[k]
+            else if (SORT == "err")  val[n] = (c4[k] + 0) + (c5[k] + 0)
+            else { printf "%s: bad sort %s (use reqs|ms|mb|err)\n", CMD, SORT > "/dev/stderr"; exit 2 }
+            n++
+        }
+        if (n == 0) {
+            printf "%s: no matching log lines in input\n", CMD > "/dev/stderr"
+            exit 0
+        }
+        gmax = 0
+        for (i=0; i<n; i++) if (val[i] > gmax) gmax = val[i]
+
+        # O(N*TOP) repeated max-extraction (TOP is small).
+        for (r=0; r<TOP && r<n; r++) {
+            best = -1; bv = -1
+            for (i=0; i<n; i++) if (!taken[i] && val[i] > bv) { bv = val[i]; best = i }
+            if (best < 0) break
+            taken[best] = 1
+            k = keys[best]
+            avgd = sumdur[k] / count[k]
+            totm = sumbytes[k] / 1048576
+            p4 = (c4[k] + 0) / count[k] * 100
+            p5 = (c5[k] + 0) / count[k] * 100
+            if (r == 0) {
+                printf "┌─ Top %d %s by %s ─\n", TOP, TITLE, SORT
+                printf "│ %9s %8s %6s %6s %9s  %-20s  %s\n",
+                    "reqs","avg_ms","4xx%","5xx%","MB_out","bar",LABEL
+                printf "│ %9s %8s %6s %6s %9s  %-20s  %s\n",
+                    "─────────","────────","──────","──────","─────────","────────────────────","──────"
+            }
+            printf "│ %9d %8.1f %6.1f %6.1f %9.2f  %s  %s\n",
+                count[k], avgd, p4, p5, totm, vbar(val[best], gmax, 20), k
+        }
+        printf "└" ; for (i=0; i<72; i++) printf "─" ; printf "\n"
+    }
+
+    # Extract the grouping key from the current log line per KEYMODE.
+    function groupkey(   url, qpos, qs, np, parts, j, eq, name, wval, ip, no, o, hp, out, c) {
+        if (KEYMODE == "apikey") return $NF        # APIKEY is the last field ("-" if none)
+        if (KEYMODE == "ip") {
+            ip = $1
+            if (SUBNET + 0) {
+                if (index(ip, ":") > 0) {
+                    # IPv6 → first 4 hextets + ::/64. Compressed "::" forms
+                    # are approximated (we just keep the leading hextets).
+                    np = split(ip, hp, ":")
+                    out = ""; c = 0
+                    for (j=1; j<=np && c<4; j++) {
+                        if (hp[j] == "") continue
+                        out = (out == "") ? hp[j] : out ":" hp[j]
+                        c++
+                    }
+                    return (out == "") ? ip : out "::/64"
+                }
+                no = split(ip, o, ".")             # IPv4 → /24
+                if (no == 4) return o[1] "." o[2] "." o[3] ".0/24"
+                return ip
+            }
+            return ip
+        }
+        if (KEYMODE == "who") {
+            # who=<production> is injected into the query string to attribute
+            # load. Same split-on-& / index("=") idiom as burls. No who → the
+            # literal "(none)" bucket so unattributed load stays visible.
+            url = $6
+            qpos = index(url, "?")
+            if (qpos == 0) return "(none)"
+            qs = substr(url, qpos+1)
+            np = split(qs, parts, "&")
+            for (j=1; j<=np; j++) {
+                eq = index(parts[j], "=")
+                if (eq == 0) continue
+                name = substr(parts[j], 1, eq-1)
+                if (name == "who") {
+                    wval = substr(parts[j], eq+1)
+                    return (wval == "") ? "(none)" : wval
+                }
+            }
+            return "(none)"
+        }
+        return $NF
+    }
+    function vbar(val, maxval, width,   ratio, n, s, i) {
+        if (maxval <= 0) return sprintf("%*s", width, "")
+        ratio = val / maxval
+        if (ratio > 1) ratio = 1
+        n = int(ratio * width + 0.5)
+        s = ""
+        for (i=0; i<n; i++) s = s FULL
+        for (i=n; i<width; i++) s = s " "
+        return s
+    }
+    ' "$@"
+}
+
+# -----------------------------------------------------------------------------
+# bkeys: top API keys
+# -----------------------------------------------------------------------------
+# Usage: bkeys [-n 20] [-s reqs|ms|mb|err] [log-file]
 
 bkeys() {
     local top=20
@@ -1107,71 +1285,106 @@ bkeys() {
                 cat <<EOF
 Usage: bkeys [-n N] [-s SORT] [LOG-FILE]
 
-  -n N     show top N API keys       (default: 20)
-  -s SORT  reqs | ms | mb            (default: reqs)
+  -n N     show top N API keys           (default: 20)
+  -s SORT  reqs | ms | mb | err          (default: reqs)
+             reqs = request count
+             ms   = total time spent (ms)
+             mb   = total bandwidth (MB)
+             err  = 4xx+5xx error count
+
+Groups access-log entries by API key (the last field of each line).
+Each row shows request count, mean latency, 4xx%/5xx% error rates,
+total MB, and a bar scaled to the chosen metric.
 EOF
                 return 0 ;;
             *) args+=("$1"); shift ;;
         esac
     done
+    _bgroup apikey "$top" "$sort_by" 0 "apikey" "API keys" bkeys "${args[@]}"
+}
 
-    gawk -v TOP="$top" -v SORT="$sort_by" '
-    BEGIN { FULL = "▄" }
-    {
-        # APIKEY is the last field, but some requests have none ("-")
-        k = $NF
-        dur = $10 + 0
-        bytes = $11 + 0
-        # See bstat: ignore the size_t(-1) sentinel spine logs for
-        # chunked/streamed responses (would otherwise swamp byte sums).
-        if (bytes < 0 || bytes >= 2^53) bytes = 0
-        count[k]++
-        sumdur[k]  += dur
-        sumbytes[k] += bytes
-    }
-    END {
-        n = 0
-        for (k in count) {
-            keys[n] = k
-            if      (SORT == "reqs") val[n] = count[k]
-            else if (SORT == "ms")   val[n] = sumdur[k]
-            else if (SORT == "mb")   val[n] = sumbytes[k]
-            else { print "bkeys: bad sort" > "/dev/stderr"; exit 2 }
-            n++
-        }
-        gmax = 0
-        for (i=0; i<n; i++) if (val[i] > gmax) gmax = val[i]
+# -----------------------------------------------------------------------------
+# bwho: top productions by the injected who= query parameter
+# -----------------------------------------------------------------------------
+# Usage: bwho [-n 30] [-s reqs|ms|mb|err] [log-file]
 
-        for (r=0; r<TOP && r<n; r++) {
-            best = -1; bv = -1
-            for (i=0; i<n; i++) if (!taken[i] && val[i] > bv) { bv = val[i]; best = i }
-            if (best < 0) break
-            taken[best] = 1
-            k = keys[best]
-            avgd = sumdur[k] / count[k]
-            totm = sumbytes[k] / 1048576
-            if (r == 0) {
-                printf "┌─ Top %d API keys by %s ─\n", TOP, SORT
-                printf "│ %9s %8s %9s  %-20s  %s\n", "reqs","avg_ms","MB_out","bar","apikey"
-                printf "│ %9s %8s %9s  %-20s  %s\n",
-                    "─────────","────────","─────────","────────────────────","──────"
-            }
-            printf "│ %9d %8.1f %9.2f  %s  %s\n",
-                count[k], avgd, totm, vbar(val[best], gmax, 20), k
-        }
-        printf "└" ; for (i=0; i<72; i++) printf "─" ; printf "\n"
-    }
-    function vbar(val, maxval, width,   ratio, n, s, i) {
-        if (maxval <= 0) return sprintf("%*s", width, "")
-        ratio = val / maxval
-        if (ratio > 1) ratio = 1
-        n = int(ratio * width + 0.5)
-        s = ""
-        for (i=0; i<n; i++) s = s FULL
-        for (i=n; i<width; i++) s = s " "
-        return s
-    }
-    ' "${args[@]}"
+bwho() {
+    local top=30
+    local sort_by=ms
+    local args=()
+    while (( $# )); do
+        case "$1" in
+            -n) top="$2"; shift 2 ;;
+            -s) sort_by="$2"; shift 2 ;;
+            --help)
+                cat <<EOF
+Usage: bwho [-n N] [-s SORT] [LOG-FILE]
+
+  -n N     show top N who= values        (default: 30)
+  -s SORT  reqs | ms | mb | err          (default: ms)
+             reqs = request count
+             ms   = total time spent (ms)
+             mb   = total bandwidth (MB)
+             err  = 4xx+5xx error count
+
+Groups access-log entries by the who=<production> query-string value
+operators inject to attribute load. Requests without a who= parameter
+are bucketed as "(none)". Each row shows request count, mean latency,
+4xx%/5xx% error rates, total MB, and a bar scaled to the chosen metric.
+
+To inspect one production over time, grep it and pipe to bstat, e.g.
+  grep 'who=ecmwf_hres' access.log | bstat -i 10m
+EOF
+                return 0 ;;
+            *) args+=("$1"); shift ;;
+        esac
+    done
+    _bgroup who "$top" "$sort_by" 0 "who" "who= values" bwho "${args[@]}"
+}
+
+# -----------------------------------------------------------------------------
+# bip: top client IP addresses (optionally rolled up by subnet)
+# -----------------------------------------------------------------------------
+# Usage: bip [-n 20] [-s reqs|ms|mb|err] [--subnet] [log-file]
+
+bip() {
+    local top=20
+    local sort_by=ms
+    local subnet=0
+    local args=()
+    while (( $# )); do
+        case "$1" in
+            -n) top="$2"; shift 2 ;;
+            -s) sort_by="$2"; shift 2 ;;
+            --subnet|-24) subnet=1; shift ;;
+            --help)
+                cat <<EOF
+Usage: bip [-n N] [-s SORT] [--subnet] [LOG-FILE]
+
+  -n N         show top N IPs            (default: 20)
+  -s SORT      reqs | ms | mb | err      (default: ms)
+                 reqs = request count
+                 ms   = total time spent (ms)
+                 mb   = total bandwidth (MB)
+                 err  = 4xx+5xx error count
+  --subnet,-24 roll IPs up by network: IPv4 → /24, IPv6 → /64.
+               Use to spot a misbehaving network rather than one host.
+               (Compressed IPv6 "::" forms are approximated.)
+
+Groups access-log entries by client IP (the first field). Each row
+shows request count, mean latency, 4xx%/5xx% error rates, total MB,
+and a bar scaled to the chosen metric.
+
+To inspect one IP over time, grep it and pipe to bstat, e.g.
+  grep '^203.0.113.7 ' access.log | bstat -i 10m
+EOF
+                return 0 ;;
+            *) args+=("$1"); shift ;;
+        esac
+    done
+    local label="ip" title="client IPs"
+    if [ "$subnet" = 1 ]; then label="subnet"; title="client subnets"; fi
+    _bgroup ip "$top" "$sort_by" "$subnet" "$label" "$title" bip "${args[@]}"
 }
 
 # -----------------------------------------------------------------------------

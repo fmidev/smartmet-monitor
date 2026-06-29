@@ -6,7 +6,7 @@ dashboard as a separate companion package:
 
 | Command                          | What it does                                                         |
 |----------------------------------|----------------------------------------------------------------------|
-| `bstat`, `bchart`, `burls`, `bstatus`, `bkeys` | Offline analysis of access-log files (Bash + gawk). |
+| `bstat`, `bchart`, `burls`, `bstatus`, `bkeys`, `bwho`, `bip` | Offline analysis of access-log files (Bash + gawk). |
 | `smtop`                          | Interactive curses dashboard that tails logs and polls `/admin`.     |
 | `smwebmon` *(separate RPM `smartmet-monitor-web`)* | Browser dashboard serving the same data over HTTP+JSON.   |
 
@@ -54,7 +54,9 @@ to its section:
 | [`bchart`](#bchart--single-metric-vertical-chart)                  | `[-i INTERVAL] [-m reqs\|ms\|kb\|mb\|err] [-h HEIGHT] [-w CELLW] [--ascii] [LOG]` |
 | [`burls`](#burls--top-urls-with-query-string-filtering)            | `[-n N] [-s reqs\|ms\|kb\|mb] [-d\|-k LIST] [-L\|-i] [LOG]` |
 | [`bstatus`](#bstatus--http-status-code-distribution)               | `[-i INTERVAL] [-h HEIGHT] [--ascii] [LOG]` |
-| [`bkeys`](#bkeys--top-api-keys)                                    | `[-n N] [-s reqs\|ms\|mb] [LOG]` |
+| [`bkeys`](#bkeys--top-api-keys)                                    | `[-n N] [-s reqs\|ms\|mb\|err] [LOG]` |
+| [`bwho`](#bwho--top-productions-by-who-value)                      | `[-n N] [-s reqs\|ms\|mb\|err] [LOG]` |
+| [`bip`](#bip--top-client-ips)                                      | `[-n N] [-s reqs\|ms\|mb\|err] [--subnet] [LOG]` |
 
 `INTERVAL` is one of `1s | 10s | 1m | 2m | 5m | 10m | 1h | 1d`.
 Most intervals snap to a digit boundary, so they are extracted by
@@ -79,6 +81,23 @@ with multi-row Braille sparklines underneath that show each metric
 as a time series. `-h` tunes the sparkline height: `-h 1` collapses
 to a single dot-ramp row that fits short terminals, while higher
 values give 4 dot rows of vertical resolution per char-row.
+
+The `2xx% 3xx% 4xx% 5xx%` columns give each bucket's HTTP response-code
+mix as a percentage of that bucket's requests, and a `by class:` line
+under the `TOTAL` row sums the whole log (and lists any other class —
+e.g. a stray `1xx` — that the four fixed columns don't have room for).
+These four columns replace the older single `err%`: `4xx% + 5xx%` is
+the former error rate, split so client errors (404s, bad requests —
+usually benign) read separately from server errors (5xx — almost always
+worth investigating). **How to read it:** a healthy bucket is `2xx`
+near 100 % with `3xx` accounting for conditional-GET `304`s; a `4xx`
+that climbs alongside a single client or API key points at a
+misbehaving caller (cross-check with `burls` / `bkeys`); any sustained
+`5xx` is a server-side fault — line it up against the `latency`
+sparkline, since 5xx spikes that coincide with a latency spike usually
+mean the backend is overloaded or timing out rather than rejecting bad
+input. A `5xx` that appears in only one time bucket is a transient; one
+that persists across buckets is an incident.
 
 > **Note on `avg_KB` / `MB_out`:** chunked or streamed responses that
 > carry no declared content length are logged by spine with a byte
@@ -158,11 +177,75 @@ as bstat's footer):
 bkeys -n 20    wms-access-log              # top 20 by request count
 bkeys -n 20 -s ms  wms-access-log          # top 20 by total time spent
 bkeys -n 20 -s mb  wms-access-log          # top 20 by bandwidth
+bkeys -n 20 -s err wms-access-log          # top 20 by 4xx+5xx error count
 ```
 
-Per-API-key aggregate stats (request count, mean latency, total
-megabytes) with a horizontal half-height bar scaled to the top
-key. Sort key chosen with `-s`.
+Per-API-key aggregate stats (request count, mean latency, `4xx%` /
+`5xx%` error rates, total megabytes) with a horizontal half-height bar
+scaled to the top key. Sort key chosen with `-s`.
+
+`bkeys`, `bwho`, and `bip` are the **group-by** members of the family:
+they share one engine and differ only in which field they group on
+(API key, the `who=` value, client IP). They are *entity* views — rows
+ranked by load, no time axis — and so complement `grep … | bstat`. Use
+them to find *which* caller dominates or fails, since that comparison
+cannot be reconstructed after you have grepped the log down to one
+caller; then grep that one out and run `bstat` / `bstatus` for its time
+series.
+
+### `bwho` — top productions by `who=` value
+
+```sh
+bwho            wms-access-log             # top 30 productions by total time spent
+bwho -s err     wms-access-log             # rank by 4xx+5xx error count
+bwho -n 50 -s mb wms-access-log            # top 50 by bandwidth
+```
+
+Operators inject `who=<production_name>` into request query strings to
+attribute load to specific massive productions (typically ~20–30 such
+identifiers). `bwho` groups on that value and shows request count, mean
+latency, `4xx%` / `5xx%` error rates, total MB, and a bar. Requests
+without a `who=` parameter land in a single `(none)` bucket, so the
+long tail of unattributed traffic is always visible as one row.
+
+**How to read it:** sorted by `ms` (the default = total time spent),
+the top rows are the productions consuming the most server time —
+that is where capacity planning and query optimisation pay off most.
+A production with a high `5xx%` is failing server-side; one with a
+high `avg_ms` but modest request count is individually slow (heavy
+queries) rather than merely frequent; one with a high `4xx%` is
+sending malformed or unauthorised requests — usually a client-side
+misconfiguration in that production's job. A large `(none)` row means
+much traffic is not tagged with `who=`; that is expected for ordinary
+interactive use but worth a glance if you believe everything heavy
+should be tagged. Once a production stands out, `grep 'who=NAME'
+access.log | bstat -i 10m` shows whether the problem is constant or a
+spike.
+
+### `bip` — top client IPs
+
+```sh
+bip             wms-access-log             # top 20 client IPs by total time spent
+bip -s reqs     wms-access-log             # rank by request count
+bip --subnet    wms-access-log             # roll up to /24 (v4) / /64 (v6)
+```
+
+Groups on the client IP (the first log field) and shows the same
+columns as `bwho` / `bkeys`. `--subnet` (alias `-24`) aggregates by
+network — IPv4 to `/24`, IPv6 to `/64` — to surface a misbehaving
+*network* rather than a single host (compressed IPv6 `::` forms are
+approximated).
+
+**How to read it:** sorted by `ms`, the top rows are the IPs costing
+the most server time. A single IP with a request count far above the
+rest is a scraper or a stuck client retrying; switch to `--subnet` to
+see whether it is really one host or a whole network (a `/24` that
+dominates while no single IP does points at a distributed crawler or a
+NAT'd site). A high `5xx%` concentrated on one IP usually means that
+client is hitting a broken request pattern; a high `4xx%` means it is
+sending bad or unauthorised requests. To act on a culprit, `grep` it
+out (`grep '^IP ' access.log`) and run `bstat` / `burls` to see *when*
+and *what* it was requesting.
 
 ### Legacy compatibility aliases
 
